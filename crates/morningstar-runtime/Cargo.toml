@@ -1,0 +1,16 @@
+[package]
+name = "morningstar-runtime"
+description = "Morningstar's application runtime: lifecycle coordination and frame production."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+morningstar-core.workspace = true
+morningstar-gpu.workspace = true
+morningstar-text.workspace = true
+# PNG decoding for `add_image_png` (ADR 0014). Linked into apps. Has no
+# optional default features to turn off, and stays out of the public API.
+png = "0.18"
