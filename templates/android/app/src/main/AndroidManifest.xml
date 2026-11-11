@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="false"
+        android:label="${appName}"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+        <!-- The Rust application library loaded by MorningstarActivity. -->
+        <meta-data
+            android:name="dev.morningstar.lib_name"
+            android:value="${libName}" />
+
+        <!-- configChanges: rotation and resizing are delivered as surface
+             changes instead of destroying and recreating the activity.
+             windowSoftInputMode: adjustResize makes the soft keyboard's
+             height arrive as a window inset on every API level (the window
+             is edge to edge, so nothing is actually resized: Rust is told
+             the height and moves its own content); stateHidden keeps the
+             keyboard down until a field asks for it. -->
+        <activity
+            android:name="dev.morningstar.host.MorningstarActivity"
+            android:windowSoftInputMode="adjustResize|stateHidden"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboard|keyboardHidden|navigation|uiMode"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

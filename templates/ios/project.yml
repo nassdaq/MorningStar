@@ -1,0 +1,33 @@
+# XcodeGen spec for the Morningstar iOS host. Generate the Xcode project with
+#   xcodegen generate --spec templates/ios/project.yml
+# after tools/build-ios.sh has produced build/Morningstar.xcframework.
+name: MorningstarHost
+options:
+  bundleIdPrefix: dev.morningstar
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  MorningstarHost:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    dependencies:
+      # The Rust application, built as a static library for device + simulator.
+      - framework: build/Morningstar.xcframework
+        embed: false
+      - sdk: Metal.framework
+      - sdk: QuartzCore.framework
+      - sdk: UIKit.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.morningstar.hello
+        PRODUCT_NAME: Morningstar
+        SWIFT_VERSION: "5.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridging-Header.h
+        HEADER_SEARCH_PATHS: $(SRCROOT)/../../crates/morningstar-ios/include
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
