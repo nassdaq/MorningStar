@@ -1,0 +1,55 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/morningstar",
+    "crates/morningstar-core",
+    "crates/morningstar-gpu",
+    "crates/morningstar-runtime",
+    "crates/morningstar-text",
+    "crates/morningstar-layout",
+    "crates/morningstar-ui",
+    "crates/morningstar-android",
+    "crates/morningstar-ios",
+    "examples/hello-gpu",
+    "examples/showcase",
+    "examples/fundidesk",
+    "tools/morningstar-devtools",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.87"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+morningstar = { path = "crates/morningstar" }
+morningstar-core = { path = "crates/morningstar-core" }
+morningstar-gpu = { path = "crates/morningstar-gpu" }
+morningstar-runtime = { path = "crates/morningstar-runtime" }
+morningstar-text = { path = "crates/morningstar-text" }
+morningstar-layout = { path = "crates/morningstar-layout" }
+morningstar-ui = { path = "crates/morningstar-ui" }
+morningstar-android = { path = "crates/morningstar-android" }
+morningstar-ios = { path = "crates/morningstar-ios" }
+morningstar-devtools = { path = "tools/morningstar-devtools" }
+
+# Only the backends the two mobile targets (and the macOS dev host, for tests)
+# need: Vulkan + GLES on Android, Metal on Apple platforms.
+wgpu = { version = "30", default-features = false, features = [
+    "std",
+    "parking_lot",
+    "metal",
+    "vulkan",
+    "gles",
+    "wgsl",
+] }
+pollster = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"

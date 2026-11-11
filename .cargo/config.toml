@@ -1,0 +1,5 @@
+# Temporary: this machine is nearly out of disk space, and incremental
+# compilation caches cost about 0.5 GB for this workspace. Delete this file
+# once there is room; it only makes rebuilds slower.
+[build]
+incremental = false
