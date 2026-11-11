@@ -1,0 +1,17 @@
+[package]
+name = "morningstar-ui"
+description = "Morningstar's declarative UI layer: widgets, state and events on top of layout, text and the display list."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+morningstar-core.workspace = true
+morningstar-layout.workspace = true
+morningstar-runtime.workspace = true
+# Grapheme clusters, so that backspace deletes what a reader sees as one
+# character. Already in every app's dependency tree through cosmic-text
+# (same version in Cargo.lock), so it adds no code.
+unicode-segmentation = "1.13"
