@@ -1,0 +1,13 @@
+[package]
+name = "morningstar-gpu"
+description = "Morningstar's GPU backend: device, surface and frame submission on top of wgpu."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+morningstar-core.workspace = true
+wgpu.workspace = true
+pollster.workspace = true
