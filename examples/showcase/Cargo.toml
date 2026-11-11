@@ -1,0 +1,18 @@
+[package]
+name = "showcase"
+description = "Realistic screens built with Morningstar's declarative UI layer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# cdylib for Android; tools/build-ios.sh requests the static library itself.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+morningstar.workspace = true
+
+[dev-dependencies]
+morningstar-devtools.workspace = true
