@@ -1,0 +1,11 @@
+[package]
+name = "morningstar-layout"
+description = "Morningstar's layout engine: turns a tree of boxes with constraints into rectangles."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+morningstar-core.workspace = true
