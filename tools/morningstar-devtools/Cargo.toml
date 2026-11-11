@@ -1,0 +1,16 @@
+[package]
+name = "morningstar-devtools"
+description = "Development tooling for Morningstar apps: render an app to an image without a device, and compare it with a design."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+morningstar-runtime.workspace = true
+morningstar-gpu.workspace = true
+# PNG decoding (any design export) and compressed encoding. Has no optional
+# default features to turn off. Never linked into an app: this crate is a
+# development tool (ADR 0007).
+png = "0.18"
