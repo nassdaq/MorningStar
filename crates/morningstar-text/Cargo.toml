@@ -1,0 +1,19 @@
+[package]
+name = "morningstar-text"
+description = "Morningstar's text subsystem: font loading, shaping, layout and glyph rasterisation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+morningstar-core.workspace = true
+# Shaping, bidirectional text, line breaking, font fallback and glyph
+# rasterisation. No fontconfig: fonts are supplied by the app or read from
+# the platform's font directories.
+cosmic-text = { version = "0.17", default-features = false, features = ["std", "swash"] }
+# Path rasterisation for vector icons: SVG path parsing, fills and strokes
+# into a coverage mask. Already in the tree through cosmic-text's glyph
+# rasteriser (swash), with the same features, so it adds no code to an app.
+zeno = { version = "0.3.3", default-features = false, features = ["std", "eval"] }
