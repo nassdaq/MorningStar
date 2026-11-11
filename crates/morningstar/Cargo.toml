@@ -1,0 +1,18 @@
+[package]
+name = "morningstar"
+description = "Morningstar: a Rust-native, GPU-first mobile application framework. Public developer API."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+morningstar-runtime.workspace = true
+morningstar-ui.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+morningstar-android.workspace = true
+
+[target.'cfg(target_os = "ios")'.dependencies]
+morningstar-ios.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "morningstar-android"
+description = "Android host integration for Morningstar: JNI entry points and the render thread."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# No dependency on a JNI or NDK binding crate: the host needs four C functions,
+# declared in `src/sys.rs`.
+[dependencies]
+morningstar-runtime.workspace = true

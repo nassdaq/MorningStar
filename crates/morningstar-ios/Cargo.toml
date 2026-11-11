@@ -1,0 +1,11 @@
+[package]
+name = "morningstar-ios"
+description = "iOS host integration for Morningstar: the C ABI driven by the UIKit host."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+morningstar-runtime.workspace = true
