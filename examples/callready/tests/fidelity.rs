@@ -27,15 +27,16 @@ const SCALE: f32 = 2.0;
 /// Largest share of differing pixels, in percent, for a designed screen.
 fn limit(screen: Screen) -> f32 {
     match screen {
-        // Measured 0.0274.
+        // Measured 0.0095 (0.0274 before turned text was rasterised
+        // turned, ADR 0029).
         Screen::Welcome => 0.05,
-        // Measured 0.0209.
+        // Measured 0.0135 (0.0209).
         Screen::Home => 0.05,
-        // Measured 0.0064.
+        // Measured 0.0060 (0.0064).
         Screen::LiveCall => 0.05,
-        // Measured 0.0591.
-        Screen::CallReport => 0.10,
-        // Measured 0.0147.
+        // Measured 0.0374 (0.0591, when the limit was 0.10).
+        Screen::CallReport => 0.05,
+        // Measured 0.0076 (0.0147).
         Screen::Premium => 0.05,
         _ => unreachable!("{} is not in the design", screen.name()),
     }

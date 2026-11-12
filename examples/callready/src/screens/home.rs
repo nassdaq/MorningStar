@@ -17,9 +17,7 @@ use crate::components::{MARGIN, TOP, avatar, tab_screen};
 use crate::icons::{BELL, CHEVRON, GEAR, HANDSET};
 use crate::model::Model;
 use crate::script::Scenario;
-use crate::theme::{
-    BLACK, BLUE, CREAM, GREEN, GREY, MUTED, PURPLE, TEAL, WHITE, YELLOW, anton, outfit,
-};
+use crate::theme::{BLACK, BLUE, GREY, MUTED, PURPLE, TEAL, WHITE, YELLOW, anton, outfit};
 use crate::{Screen, Tab};
 
 /// What the screen can ask for.
@@ -41,89 +39,20 @@ pub enum Message {
 
 // ---------------------------------------------------------- illustrations
 
-/// `stroke="#F6C445" stroke-opacity="0.55" stroke-width="1"`: a groove.
-const GROOVE: Color = with_alpha(YELLOW, 0.55);
-
-/// A groove of the disc at radius `r`.
-const fn groove(r: f32) -> Layer {
-    Layer::circle(140.0, 140.0, r).stroke(GROOVE, 1.0)
-}
-
-/// `<g fill="none" stroke="#0E0E0E" stroke-width="1.2"
-/// clip-path="url(#discClip)">`: a black ring that cuts the band.
-const fn cut(r: f32) -> Layer {
-    Layer::circle(140.0, 140.0, r)
-        .stroke(BLACK, 1.2)
-        .clip_circle(140.0, 140.0, 122.0)
-}
-
-/// `<g fill="none" stroke="#0E0E0E" stroke-width="3" stroke-linecap="round"
-/// stroke-linejoin="round" transform="translate(122 122)">`: a part of the
-/// headset.
-const fn headset(layer: Layer) -> Layer {
-    layer.stroke(BLACK, 3.0).round().translate(122.0, 122.0)
-}
-
-/// The vinyl disc: `<svg width="250" height="250" viewBox="0 0 280 280">`.
-/// An outer ring, the disc, a band turned by -18 degrees and clipped to the
-/// disc (`<clipPath id="discClip"><circle cx="140" cy="140" r="122"/>`),
-/// ten grooves, five black rings, the cream label and the headset.
+/// The vinyl disc: `<svg width="250" height="250" viewBox="0 0 280 280">`,
+/// the design's own SVG, loaded (ADR 0027). An outer ring, the disc, a band
+/// turned by -18 degrees and clipped to the disc, ten grooves, five black
+/// rings, the cream label and the headset.
 ///
 /// Public because it is also the app's launcher icon (`examples/icon.rs`).
-pub const DISC: VectorPicture = VectorPicture::new(
-    280.0,
-    280.0,
-    &[
-        // `stroke-opacity="0.25"`.
-        Layer::circle(140.0, 140.0, 138.0).stroke(with_alpha(YELLOW, 0.25), 2.0),
-        Layer::circle(140.0, 140.0, 122.0)
-            .fill(BLACK)
-            .stroke(YELLOW, 1.5),
-        Layer::rect(-40.0, 114.0, 360.0, 52.0)
-            .fill(YELLOW)
-            .rotate(-18.0, 140.0, 140.0)
-            .clip_circle(140.0, 140.0, 122.0),
-        groove(114.0),
-        groove(108.0),
-        groove(102.0),
-        groove(96.0),
-        groove(90.0),
-        groove(84.0),
-        groove(78.0),
-        groove(72.0),
-        groove(66.0),
-        groove(60.0),
-        cut(111.0),
-        cut(99.0),
-        cut(87.0),
-        cut(75.0),
-        cut(63.0),
-        Layer::circle(140.0, 140.0, 48.0)
-            .fill(CREAM)
-            .stroke(BLACK, 3.0),
-        headset(Layer::path("M4 22v-4a14 14 0 0 1 28 0v4")),
-        headset(Layer::rounded_rect(2.0, 20.0, 7.0, 11.0, 2.0)),
-        headset(Layer::rounded_rect(27.0, 20.0, 7.0, 11.0, 2.0)),
-        headset(Layer::path("M30 31c0 4-4 6-10 6")),
-    ],
-);
+pub static DISC: SvgAsset = SvgAsset::new(include_str!("../../assets/svg/disc.svg"));
 
-/// The four rings of one side: `<svg width="64" height="220" viewBox="0 0
-/// 64 220" fill="none" stroke=..>` around a centre outside the view box,
-/// which cuts them where the screen's edge does.
-const fn rings(cx: f32, color: Color) -> [Layer; 4] {
-    [
-        Layer::circle(cx, 110.0, 104.0).stroke(color, 1.2),
-        Layer::circle(cx, 110.0, 96.0).stroke(color, 1.2),
-        Layer::circle(cx, 110.0, 78.0).stroke(color, 16.0),
-        Layer::circle(cx, 110.0, 62.0).stroke(color, 1.2),
-    ]
-}
-
-/// The blue rings at the left edge: `cx="-48"`, `stroke="#5AA9E6"`.
-const RINGS_LEFT: VectorPicture = VectorPicture::new(64.0, 220.0, &rings(-48.0, BLUE));
-/// The green rings at the right edge: `cx="112"`, `stroke="#4CAF50"`.
-const RINGS_RIGHT: VectorPicture = VectorPicture::new(64.0, 220.0, &rings(112.0, GREEN));
+/// `<svg width="64" height="220" viewBox="0 0 64 220" fill="none"
+/// stroke="#5AA9E6">`: four rings about a centre outside the view box, so
+/// that the box cuts them to arcs.
+static RINGS_LEFT: SvgAsset = SvgAsset::new(include_str!("../../assets/svg/rings-left.svg"));
+/// The same about a centre beyond the right edge, `stroke="#4CAF50"`.
+static RINGS_RIGHT: SvgAsset = SvgAsset::new(include_str!("../../assets/svg/rings-right.svg"));
 
 /// `width: 46px; height: 46px; background: repeating-linear-gradient(45deg,
 /// #F6C445 0 4px, #0E0E0E 4px 7px)`: black, with ten yellow lines 4 wide
@@ -257,16 +186,16 @@ fn notifications(unread: bool) -> Container<Message> {
 /// `right: 0; top: 6px`), across the whole width of the screen.
 fn illustration() -> Container<Message> {
     stack![
-        Picture::vector(RINGS_LEFT)
+        Picture::svg(RINGS_LEFT.get())
             .size(64.0, 220.0)
             .place(Alignment::TOP_LEFT)
             .offset(0.0, 6.0),
-        Picture::vector(RINGS_RIGHT)
+        Picture::svg(RINGS_RIGHT.get())
             .size(64.0, 220.0)
             .place(Alignment::TOP_RIGHT)
             .offset(0.0, 6.0),
         // `left: 70px` of the design's 390: the middle, at any width.
-        Picture::vector(DISC)
+        Picture::svg(DISC.get())
             .size(250.0, 250.0)
             .place(Alignment::TOP_CENTER),
     ]
@@ -486,14 +415,15 @@ mod tests {
 
     #[test]
     fn every_picture_is_drawable() {
-        for (name, picture) in [
-            ("disc", DISC),
-            ("left rings", RINGS_LEFT),
-            ("right rings", RINGS_RIGHT),
-            ("stripes", STRIPES),
+        for (name, asset) in [
+            ("disc", &DISC),
+            ("left rings", &RINGS_LEFT),
+            ("right rings", &RINGS_RIGHT),
         ] {
-            assert!(picture.check().is_ok(), "{name}: {:?}", picture.check());
+            assert!(asset.check().is_ok(), "{name}: {:?}", asset.check());
         }
-        assert_eq!(DISC.layers().len(), 23);
+        assert!(STRIPES.check().is_ok(), "{:?}", STRIPES.check());
+        assert_eq!((DISC.get().width(), DISC.get().height()), (250.0, 250.0));
+        assert_eq!(DISC.get().view_box(), [0.0, 0.0, 280.0, 280.0]);
     }
 }

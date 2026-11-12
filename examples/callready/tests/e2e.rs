@@ -1036,6 +1036,7 @@ fn the_profile_name_is_edited_by_typing() {
         device.key(TextInputEvent::Edited(TextEditState {
             text: "Grace Mushi".to_owned(),
             caret: 11,
+            anchor: None,
             composing: None,
         }));
         for _ in 0..5 {
@@ -1051,6 +1052,7 @@ fn the_profile_name_is_edited_by_typing() {
         device.key(TextInputEvent::Edited(TextEditState {
             text: "Neema".to_owned(),
             caret: 5,
+            anchor: None,
             composing: None,
         }));
         assert_eq!(device.model().name, "Neema");

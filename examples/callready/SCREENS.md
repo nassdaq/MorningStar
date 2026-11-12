@@ -96,11 +96,11 @@ Welcome (first launch only)
 
 | Screen | File | From | Pixels differing | What it is |
 | --- | --- | --- | --- | --- |
-| 01 welcome | `screens/welcome.rs` | design | 0.0274% | turned cut-out letters, handwriting, doodles, synthetic italic, a ringed word |
-| 02 home | `screens/home.rs` | design | 0.0209% | the disc (23 layers), edge-cut rings, tilted double frames, striped block, shadowed and outlined numerals, tab bar |
-| 03 live call | `screens/live_call.rs` | design | 0.0064% | progress bars, rich text, chips, a four-colour avatar, a turned icon; a call that runs |
-| 04 call report | `screens/call_report.rs` | design | 0.0591% | score plates, five bars with tabular numbers, tilted cards; scores derived from the call |
-| 05 premium | `screens/premium.rs` | design | 0.0147% | cut-out letters, a list, plan cards whose selection moves |
+| 01 welcome | `screens/welcome.rs` | design | 0.0095% | turned cut-out letters, handwriting, doodles, synthetic italic, a ringed word |
+| 02 home | `screens/home.rs` | design | 0.0135% | the disc (the design's SVG, loaded), edge-cut rings, tilted double frames, striped block, shadowed and outlined numerals, tab bar |
+| 03 live call | `screens/live_call.rs` | design | 0.0060% | progress bars, rich text, chips, a four-colour avatar, a turned icon; a call that runs |
+| 04 call report | `screens/call_report.rs` | design | 0.0374% | score plates, five bars with tabular numbers, tilted cards; scores derived from the call |
+| 05 premium | `screens/premium.rs` | design | 0.0076% | cut-out letters, a list, plan cards whose selection moves |
 | 06 profile | `screens/profile.rs` | own | | avatar, the name in a `TextInput`, three numbers on tilted cards, the set-up, the plan |
 | 07 notifications | `screens/notifications.rs` | own | | three notes on tilted cards, each leading somewhere |
 | 08 history | `screens/history.rs` | own | | past calls: score, scenario, day, length |
@@ -266,8 +266,12 @@ after each, on a Galaxy A27 (1080 x 2340 px at 2.8125, insets 102 and
 
 ## What the remaining difference is
 
-- **Turned text is a resampled upright bitmap**, a little softer than the
-  browser's (ADR 0017). It is most of what is left on 01, 04 and 05.
+- **Turned text** is rasterised for its angle and placed on the pixel
+  grid like upright text (ADR 0029); before that it was a resampled
+  upright bitmap and was most of what was left on 01, 04 and 05 (0.0274%,
+  0.0591% and 0.0147% then). What remains of it is glyph edges a level or
+  two off the browser's, as on upright text. Turned *icons* and pictures
+  are still resampled.
 - **Card 2 on home** is one device pixel wider than in the browser, which
   rounds the frame's width before turning it.
 - **`№`, `✓` and `→` on 03** were drawn by the browser with a system font

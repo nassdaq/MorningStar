@@ -310,6 +310,13 @@ impl Application for FundiDesk {
         theme::THEME
     }
 
+    /// The splash is the logo on green: light icons in the system's bars
+    /// there. Every other screen is on the theme's light canvas, which
+    /// gets dark icons by itself (ADR 0026).
+    fn system_bars(&self) -> Option<SystemBars> {
+        (self.screen == Screen::Splash).then_some(SystemBars::LIGHT_CONTENT)
+    }
+
     fn view(&self) -> Element<Message> {
         match self.screen {
             Screen::Splash => splash::view(&self.splash).map(Message::Splash),

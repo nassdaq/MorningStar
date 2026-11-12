@@ -160,6 +160,7 @@ fn the_six_code_boxes_fill_one_after_another() {
     device.key(TextInputEvent::Edited(TextEditState {
         text: "9".to_owned(),
         caret: 1,
+        anchor: None,
         composing: None,
     }));
     assert_eq!(device.app().verification().code(), "4719");
@@ -176,6 +177,7 @@ fn a_new_repair_is_filled_in_and_kept_clear_of_the_keyboard() {
     device.key(TextInputEvent::Edited(TextEditState {
         text: "Amina Juma".to_owned(),
         caret: 10,
+        anchor: None,
         composing: None,
     }));
     device.key(TextInputEvent::DeleteBackward);

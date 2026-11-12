@@ -46,7 +46,7 @@ impl Application for Art {
     }
 
     fn view(&self) -> Element<()> {
-        col![Picture::vector(DISC).size(self.side, self.side)]
+        col![Picture::svg(DISC.get()).size(self.side, self.side)]
             .center()
             .into()
     }

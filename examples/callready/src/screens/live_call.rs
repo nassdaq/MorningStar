@@ -79,7 +79,8 @@ pub enum Message {
 ///
 /// `<svg width="54" height="54" viewBox="0 0 54 54">` of four quarter
 /// `<path>`s and a `<circle cx="27" cy="27" r="8">`.
-const AVATAR_DISC: VectorPicture = VectorPicture::new(
+#[doc(hidden)] // Compared with the design's own SVG in `tests/svg.rs`.
+pub const AVATAR_DISC: VectorPicture = VectorPicture::new(
     54.0,
     54.0,
     &[

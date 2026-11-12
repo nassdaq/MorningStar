@@ -1,0 +1,4 @@
+<!-- CallReady home: the half-rings cut by the left edge. From design/html/02-home.html. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="220" viewBox="0 0 64 220" fill="none" stroke="#5AA9E6">
+  <circle cx="-48" cy="110" r="104" stroke-width="1.2"></circle><circle cx="-48" cy="110" r="96" stroke-width="1.2"></circle><circle cx="-48" cy="110" r="78" stroke-width="16"></circle><circle cx="-48" cy="110" r="62" stroke-width="1.2"></circle>
+</svg>

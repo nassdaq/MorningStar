@@ -45,7 +45,8 @@ const SPARK: VectorIcon = VectorIcon::svg(
 /// The waveform left of the letters: `width="120" height="44"
 /// viewBox="0 0 120 44" fill="none" stroke="#FFFFFF" stroke-width="1.6"
 /// stroke-linecap="round"`. Not square, so a picture and not an icon.
-const WAVEFORM: VectorPicture = VectorPicture::new(
+#[doc(hidden)] // Compared with the design's own SVG in `tests/svg.rs`.
+pub const WAVEFORM: VectorPicture = VectorPicture::new(
     120.0,
     44.0,
     &[Layer::path(
@@ -59,7 +60,8 @@ const WAVEFORM: VectorPicture = VectorPicture::new(
 /// The line under the first quote: `width="140" height="10"
 /// viewBox="0 0 140 10" fill="none" stroke="#FFFFFF" stroke-width="1.5"
 /// stroke-linecap="round"`.
-const UNDERLINE: VectorPicture = VectorPicture::new(
+#[doc(hidden)] // Compared with the design's own SVG in `tests/svg.rs`.
+pub const UNDERLINE: VectorPicture = VectorPicture::new(
     140.0,
     10.0,
     &[Layer::path("M2 6c30-5 80-5 136-1")
