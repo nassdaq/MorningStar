@@ -177,6 +177,23 @@ final class HostServices: NSObject, URLSessionDataDelegate, AVAudioRecorderDeleg
                         morningstar_ios_load_result(engine, id, false, nil)
                     }
                 }
+            // The clipboard (ADR 0025). NOT COMPILED, like the rest of this
+            // file. The pasteboard is read only when the application asks,
+            // which is when the user chose Paste: iOS shows a notice when
+            // an app reads what another app copied.
+            case MORNINGSTAR_SERVICE_SET_CLIPBOARD:
+                UIPasteboard.general.string = text1
+            case MORNINGSTAR_SERVICE_READ_CLIPBOARD:
+                let pasted = UIPasteboard.general.string
+                answer { engine in
+                    if let pasted = pasted, !pasted.isEmpty {
+                        pasted.withCString {
+                            morningstar_ios_clipboard_result(engine, id, true, $0)
+                        }
+                    } else {
+                        morningstar_ios_clipboard_result(engine, id, false, nil)
+                    }
+                }
             default:
                 // A library newer than this host. Nothing here knows whether
                 // the request expects an answer, so none can be given.

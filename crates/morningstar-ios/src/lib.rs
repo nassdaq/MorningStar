@@ -33,10 +33,10 @@ use std::ptr::NonNull;
 use std::time::Duration;
 
 use morningstar_runtime::{
-    App, AudioError, Capitalization, Engine, FrameOutcome, HostState, HttpError, HttpResponse,
-    ImeAction, Insets, KeyboardType, NativeSurface, Point, PointerEvent, PointerPhase, Recording,
-    ServiceCall, ServiceId, ServiceRequest, ServiceResult, SurfaceSize, TextInputCommand,
-    TextInputEvent,
+    App, AudioError, BarContent, Capitalization, CaretMove, Engine, FrameOutcome, HostState,
+    HttpError, HttpResponse, ImeAction, Insets, KeyboardType, NativeSurface, Point, PointerEvent,
+    PointerPhase, Recording, ServiceCall, ServiceId, ServiceRequest, ServiceResult, SurfaceSize,
+    TextInputCommand, TextInputEvent,
 };
 
 unsafe extern "Rust" {
@@ -475,6 +475,126 @@ pub unsafe extern "C" fn morningstar_ios_text_focus_lost(host: *mut MorningstarH
     }
 }
 
+/// An editing command for the focused field: the standard edit actions of
+/// `UIResponder` (`selectAll`, `copy`, `cut`, `paste`) and undo and redo,
+/// from a hardware keyboard's shortcuts or an edit menu. `command` is a
+/// `MORNINGSTAR_EDIT_*` constant of `morningstar_ios.h`; an unknown one is
+/// ignored. Copy and paste then appear as service requests
+/// ([`morningstar_ios_take_service_request`]).
+///
+/// # Safety
+/// `host` must be null or a pointer from [`morningstar_ios_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn morningstar_ios_text_command(host: *mut MorningstarHost, command: u32) {
+    let event = match command {
+        0 => TextInputEvent::SelectAll,
+        1 => TextInputEvent::Copy,
+        2 => TextInputEvent::Cut,
+        3 => TextInputEvent::Paste,
+        4 => TextInputEvent::Undo,
+        5 => TextInputEvent::Redo,
+        6 => TextInputEvent::DeleteForward,
+        _ => return,
+    };
+    // SAFETY: guaranteed by the caller.
+    if let Some(host) = unsafe { host.as_mut() } {
+        host.engine.text_input(event);
+    }
+}
+
+/// A key that moves the caret of the focused field (an arrow of a
+/// hardware keyboard, alone or with Option or Command). `movement` is a
+/// `MORNINGSTAR_MOVE_*` constant of `morningstar_ios.h`; `extend` is
+/// Shift: select from where the caret was.
+///
+/// # Safety
+/// `host` must be null or a pointer from [`morningstar_ios_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn morningstar_ios_text_move(
+    host: *mut MorningstarHost,
+    movement: u32,
+    extend: bool,
+) {
+    let to = match movement {
+        0 => CaretMove::Left,
+        1 => CaretMove::Right,
+        2 => CaretMove::WordLeft,
+        3 => CaretMove::WordRight,
+        4 => CaretMove::Up,
+        5 => CaretMove::Down,
+        6 => CaretMove::LineStart,
+        7 => CaretMove::LineEnd,
+        8 => CaretMove::TextStart,
+        9 => CaretMove::TextEnd,
+        _ => return,
+    };
+    // SAFETY: guaranteed by the caller.
+    if let Some(host) = unsafe { host.as_mut() } {
+        host.engine.text_input(TextInputEvent::Move { to, extend });
+    }
+}
+
+/// Says whether the user has asked the system for less motion
+/// (`UIAccessibility.isReduceMotionEnabled`). Call at start and from
+/// `UIAccessibility.reduceMotionStatusDidChangeNotification`; a change
+/// produces a frame, so ask [`morningstar_ios_needs_frame`] afterwards.
+///
+/// # Safety
+/// `host` must be null or a pointer from [`morningstar_ios_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn morningstar_ios_set_reduce_motion(
+    host: *mut MorningstarHost,
+    reduce: bool,
+) {
+    // SAFETY: guaranteed by the caller.
+    if let Some(host) = unsafe { host.as_mut() }
+        && host.engine.set_reduce_motion(reduce)
+    {
+        eprintln!(
+            "morningstar: reduce motion {}",
+            if reduce { "on" } else { "off" }
+        );
+    }
+}
+
+/// How the system's bars should look over the application: whether the
+/// status bar's content, and the home indicator's, should be dark (over a
+/// light screen).
+#[repr(C)]
+pub struct MorningstarSystemBars {
+    pub dark_status_content: bool,
+    pub dark_navigation_content: bool,
+}
+
+/// Fills `out` and returns true when the frame last built wants the
+/// system's bars to look different from how the host was last told;
+/// returns false otherwise, which is the usual case. Call it after every
+/// [`morningstar_ios_frame`], as [`morningstar_ios_take_text_input`]; on
+/// true, return the matching `preferredStatusBarStyle` and call
+/// `setNeedsStatusBarAppearanceUpdate`.
+///
+/// # Safety
+/// `host` must be null or a pointer from [`morningstar_ios_create`]; `out`
+/// must be null or valid for writing one `MorningstarSystemBars`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn morningstar_ios_take_system_bars(
+    host: *mut MorningstarHost,
+    out: *mut MorningstarSystemBars,
+) -> bool {
+    // SAFETY: guaranteed by the caller.
+    let (Some(host), Some(out)) = (unsafe { host.as_mut() }, unsafe { out.as_mut() }) else {
+        return false;
+    };
+    let Some(bars) = host.engine.take_system_bars() else {
+        return false;
+    };
+    *out = MorningstarSystemBars {
+        dark_status_content: bars.status == BarContent::Dark,
+        dark_navigation_content: bars.navigation == BarContent::Dark,
+    };
+    true
+}
+
 /// A "back" gesture, as the host defines one (iOS has no system Back; an
 /// edge swipe is the usual choice). Returns `true` if the application
 /// handled it, for example by going to its previous screen; a frame then
@@ -613,7 +733,8 @@ pub struct MorningstarServiceRequest {
     pub kind: u32,
     /// HTTP: whole-exchange timeout in milliseconds, at least 1.
     pub timeout_ms: u32,
-    /// HTTP: the method. Play: the media type. Store, remove, load: the key.
+    /// HTTP: the method. Play: the media type. Store, remove, load: the
+    /// key. Set clipboard: the text.
     pub text1: *const c_char,
     /// HTTP: the URL. Store: the value.
     pub text2: *const c_char,
@@ -636,8 +757,8 @@ fn c_string(text: &str) -> CString {
 /// in a loop after every other call into this interface, as for
 /// [`morningstar_ios_take_text_input`]: requests appear only inside them.
 ///
-/// Every request whose kind is answered (all but stop-playback, store and
-/// remove) must be answered exactly once with the matching
+/// Every request whose kind is answered (all but stop-playback, store,
+/// remove and set-clipboard) must be answered exactly once with the matching
 /// `morningstar_ios_*_result` function, on the main thread, with an error
 /// if it cannot be carried out; the application waits for it.
 ///
@@ -699,6 +820,10 @@ pub unsafe extern "C" fn morningstar_ios_take_service_request(
             (6, [key.clone(), String::new(), String::new()], no_data)
         }
         ServiceRequest::Load { key } => (7, [key.clone(), String::new(), String::new()], no_data),
+        ServiceRequest::SetClipboard(text) => {
+            (8, [text.clone(), String::new(), String::new()], no_data)
+        }
+        ServiceRequest::ReadClipboard => (9, Default::default(), no_data),
     };
     let strings = texts.map(|text| c_string(&text));
     *out = MorningstarServiceRequest {
@@ -864,6 +989,31 @@ pub unsafe extern "C" fn morningstar_ios_load_result(
     let value = found.then(|| unsafe { text(value) });
     host.engine
         .service_result(ServiceId(id), ServiceResult::Loaded(value));
+}
+
+/// The answer to a clipboard read: `UIPasteboard.general.string`, or
+/// `found` false when the pasteboard holds no text.
+///
+/// Main thread, and not after [`morningstar_ios_destroy`].
+///
+/// # Safety
+/// `host` must be null or a live pointer from [`morningstar_ios_create`];
+/// `utf8` must be null or a NUL-terminated string, which is copied.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn morningstar_ios_clipboard_result(
+    host: *mut MorningstarHost,
+    id: u64,
+    found: bool,
+    utf8: *const c_char,
+) {
+    // SAFETY: guaranteed by the caller.
+    let Some(host) = (unsafe { host.as_mut() }) else {
+        return;
+    };
+    // SAFETY: null or NUL-terminated (caller).
+    let value = found.then(|| unsafe { text(utf8) });
+    host.engine
+        .service_result(ServiceId(id), ServiceResult::Clipboard(value));
 }
 
 /// Destroys the host and releases every GPU resource.

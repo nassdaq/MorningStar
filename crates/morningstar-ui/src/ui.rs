@@ -6,15 +6,18 @@ use std::hash::Hash;
 use std::time::Duration;
 
 use morningstar_core::{
-    AudioError, Border, Color, Dash, HttpError, HttpResponse, ImeAction, LinearGradient, Point,
-    PointerEvent, PointerPhase, Recording, Rect, ServiceCall, ServiceId, ServiceRequest,
-    ServiceResult, Shadow, Size, TextInputEvent, TextInputRequest, TextInputTraits, Transform,
+    AudioError, Border, CaretMove, Color, Dash, HttpError, HttpResponse, ImeAction, LinearGradient,
+    Point, PointerEvent, PointerPhase, Recording, Rect, ServiceCall, ServiceId, ServiceRequest,
+    ServiceResult, Shadow, Size, SystemBars, TextInputEvent, TextInputRequest, TextInputTraits,
+    Transform,
 };
 use morningstar_layout::{Edges, LayoutTree, NodeId, Sizing};
-use morningstar_runtime::{App, Frame, FrameInfo, Setup, TextAlign, TextSpan, TextStyle};
+use morningstar_runtime::{
+    App, Frame, FrameInfo, Setup, TextAlign, TextSpan, TextStyle, TextWeight,
+};
 
-use crate::color::ColorRef;
-use crate::edit::{self, EditConfig, EditState};
+use crate::color::{ColorRef, with_alpha};
+use crate::edit::{self, EditConfig, EditKind, EditState, History};
 use crate::effects::{EffectState, Effects};
 use crate::element::{
     Axis, BoxNode, Container, DashKind, Element, Fill, IconNode, ImageNode, InputHandler,
@@ -63,6 +66,42 @@ const REVEAL_ABOVE: f32 = 20.0;
 const GLIDE: Animation = Animation::new(Duration::from_millis(250), Easing::EaseOut);
 /// The identity given as the parent of a tree's root.
 const NO_PARENT: u64 = 0;
+/// A finger held still on a field for this long selects the word under it.
+const LONG_PRESS: Duration = Duration::from_millis(500);
+/// Two taps on a field no further apart than this, in time and in place
+/// (dp), are a double tap; a third, a triple tap.
+const MULTI_TAP: Duration = Duration::from_millis(400);
+const MULTI_TAP_SLOP: f32 = 24.0;
+/// Opacity of the selection highlight, in the theme's primary colour
+/// (Material's text selection colour).
+const SELECTION_ALPHA: f32 = 0.4;
+/// Diameter of a selection handle, and how far around it a touch still
+/// takes hold of it (dp).
+const HANDLE_SIZE: f32 = 20.0;
+const HANDLE_REACH: f32 = 12.0;
+/// The contextual menu over a selection (dp): its height, the padding
+/// either side of each label, its corner radius, the gap between it and
+/// the text, the least distance from the screen's edges, and its type size.
+const MENU_HEIGHT: f32 = 44.0;
+const MENU_PADDING: f32 = 14.0;
+const MENU_RADIUS: f32 = 8.0;
+const MENU_GAP: f32 = 8.0;
+const MENU_MARGIN: f32 = 8.0;
+const MENU_TEXT: f32 = 14.0;
+/// While a selection handle is dragged within this distance (dp) of the
+/// edge of what can scroll, or past it, the text scrolls under the
+/// finger: at least `AUTO_SCROLL_MIN` dp per second, faster the further
+/// the finger goes, up to `AUTO_SCROLL_MAX`.
+const AUTO_SCROLL_ZONE: f32 = 24.0;
+const AUTO_SCROLL_MIN: f32 = 60.0;
+const AUTO_SCROLL_MAX: f32 = 900.0;
+/// The labels of the contextual menu.
+const MENU_LABELS: [(MenuAction, &str); 4] = [
+    (MenuAction::Cut, "Cut"),
+    (MenuAction::Copy, "Copy"),
+    (MenuAction::Paste, "Paste"),
+    (MenuAction::SelectAll, "Select all"),
+];
 
 /// A Morningstar application written with the declarative UI layer.
 ///
@@ -250,6 +289,32 @@ pub trait Application: Send + 'static {
     fn effects(&mut self, out: &mut Effects<Self::Message>) {
         let _ = out;
     }
+
+    /// Whether the icons the system draws over the application, in the
+    /// status bar and the navigation bar, should be light or dark on the
+    /// screen now showing. The application is drawn edge to edge under
+    /// transparent bars, so the system cannot know.
+    ///
+    /// `None`, the default, derives it from the theme: dark icons over a
+    /// light [`background`](crate::Colors::background), light icons over a
+    /// dark one ([`SystemBars::for_background`]). Override it for a screen
+    /// whose top or bottom is not the theme's background (a photograph
+    /// under the status bar, a dark sheet over a light app):
+    ///
+    /// ```ignore
+    /// fn system_bars(&self) -> Option<SystemBars> {
+    ///     match self.screen {
+    ///         Screen::Camera => Some(SystemBars::LIGHT_CONTENT),
+    ///         _ => None,
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// Asked once per frame; the host is told only when the answer
+    /// changes.
+    fn system_bars(&self) -> Option<SystemBars> {
+        None
+    }
 }
 
 /// The repeating timer of [`Application::tick`], while it runs.
@@ -271,6 +336,74 @@ enum RegionKind {
     Scroll,
     /// Swallows touches.
     Block,
+    /// A selection handle of the focused field: dragging it moves that
+    /// end of the selection.
+    Handle(SelectionEnd),
+    /// An item of the contextual menu over the selection.
+    Menu(MenuAction),
+}
+
+/// One end of a selection, in reading order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SelectionEnd {
+    Start,
+    End,
+}
+
+/// What an item of the contextual menu does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MenuAction {
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+}
+
+/// Something the focused field must do that needs its text laid out, and
+/// so waits for the next frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Pending {
+    /// Put the caret where this tap (px) was.
+    Caret(Point),
+    /// Select the word at this point (a double tap, a long press).
+    Word(Point),
+    /// Select everything (a triple tap).
+    All,
+    /// A key that moves by lines.
+    Move(CaretMove, bool),
+}
+
+/// The last tap on a text input, for telling a double tap from two taps.
+#[derive(Clone, Copy, Debug)]
+struct Tap {
+    input: u64,
+    /// The time of the frame before the finger lifted.
+    at: Duration,
+    position: Point,
+    count: u8,
+}
+
+/// Where the last frame drew the focused field's selection, in pixels on
+/// the screen: what the handles and the menu are placed by, and what a
+/// touch on a handle is measured against.
+#[derive(Clone, Copy, Debug)]
+struct SelectionOverlay {
+    input: u64,
+    /// The carets at the two ends, in reading order (the same twice for a
+    /// caret alone): zero wide, one line tall.
+    start: Rect,
+    end: Rect,
+    /// The part of the field that can be seen.
+    visible: Rect,
+    selected: bool,
+    /// The text reads right to left: the handles lean the other way.
+    rtl: bool,
+    handles: bool,
+    menu: bool,
+    can_cut: bool,
+    can_copy: bool,
+    can_paste: bool,
+    can_select_all: bool,
 }
 
 /// The space a transformed subtree's touch regions are in.
@@ -317,8 +450,18 @@ struct Focus {
     scroll_x: f32,
     /// The frame time the caret last became solid; `None` restarts it.
     blink_from: Option<Duration>,
-    /// A tap (px) whose caret position the next frame works out.
-    tap: Option<Point>,
+    /// What the next frame works out with the text laid out: a tap's caret
+    /// position, the word under a long press, a move by lines.
+    pending: Option<Pending>,
+    /// Where a selection handle is being dragged to (px), already moved
+    /// from the finger to the line it stands for.
+    drag: Option<Point>,
+    /// The selection shows its two handles (it was made by touch).
+    handles: bool,
+    /// The contextual menu is up.
+    menu: bool,
+    /// The edits made since the field got the focus, for undo.
+    history: History,
     /// Scroll the field into view at the next frame.
     reveal: bool,
     /// How far (dp) the screen is shifted up for this field, where
@@ -344,18 +487,19 @@ impl Region {
 impl Focus {
     /// Focus on a field not yet seen with it: the caret goes to the end
     /// unless a tap says otherwise.
-    fn new(id: u64, tap: Option<Point>) -> Self {
+    fn new(id: u64, pending: Option<Pending>) -> Self {
         Self {
             id,
-            edit: EditState {
-                caret: usize::MAX,
-                composing: None,
-            },
+            edit: EditState::at(usize::MAX),
             expected: String::new(),
             known: false,
             scroll_x: 0.0,
             blink_from: None,
-            tap,
+            pending,
+            drag: None,
+            handles: false,
+            menu: false,
+            history: History::default(),
             reveal: true,
             pan: 0.0,
             caret_moved: true,
@@ -367,6 +511,14 @@ impl Focus {
     fn touched(&mut self) {
         self.reveal = true;
         self.caret_moved = true;
+    }
+
+    /// The handles and the menu go away: the selection was replaced,
+    /// typed over or given up.
+    fn dismiss(&mut self) {
+        self.handles = false;
+        self.menu = false;
+        self.drag = None;
     }
 }
 
@@ -408,6 +560,16 @@ struct Gesture {
     press: Option<Press>,
     scroll: Option<u64>,
     drag: Option<Drag>,
+    /// A selection handle is being dragged: from the finger to the middle
+    /// of the line the handle hangs from (px).
+    handle: Option<Point>,
+    /// The frame time at which the finger was first seen down, for a long
+    /// press; `None` until a frame has been built with it down.
+    held_since: Option<Duration>,
+    /// The finger has moved too far to still be pressing, or its long
+    /// press has happened: lifting it is then not a tap.
+    moved: bool,
+    long_pressed: bool,
 }
 
 /// Per-scroll-view state kept across rebuilds. Lengths in dp.
@@ -554,6 +716,15 @@ pub struct Ui<A: Application> {
     /// Boxes that are the frame of an input: (record, input identity).
     fields: Vec<(u32, u64)>,
     focus: Option<Focus>,
+    /// The last tap on an input, and what the last frame drew of the
+    /// focused input's selection.
+    last_tap: Option<Tap>,
+    overlay: Option<SelectionOverlay>,
+    /// A paste waiting for the clipboard: the request, and the input.
+    paste: Option<(ServiceId, u64)>,
+    /// Less motion was asked for with `set_reduce_motion`, whatever the
+    /// host says.
+    forced_reduce: bool,
     keyboard_inset: f32,
     scale: f32,
     last_elapsed: Option<Duration>,
@@ -680,6 +851,10 @@ impl<A: Application> Ui<A> {
             inputs: Vec::new(),
             fields: Vec::new(),
             focus: None,
+            last_tap: None,
+            overlay: None,
+            paste: None,
+            forced_reduce: false,
             keyboard_inset: 0.0,
             scale: 1.0,
             last_elapsed: None,
@@ -806,6 +981,14 @@ impl<A: Application> Ui<A> {
     /// Hands the application the message an answer becomes, if it is
     /// still waiting for that answer.
     fn deliver_result(&mut self, id: ServiceId, result: ServiceResult) -> bool {
+        if let Some((_, input)) = self.paste.take_if(|(paste, _)| *paste == id) {
+            // The clipboard, for the field that asked to paste.
+            self.effects.settle(id);
+            if let ServiceResult::Clipboard(Some(text)) = result {
+                self.paste_into(input, &text);
+            }
+            return true;
+        }
         match self.effects.message_for(id, result) {
             Some(message) => {
                 self.deliver(message);
@@ -880,10 +1063,13 @@ impl<A: Application> Ui<A> {
     /// and animated [`ScrollTo`]s take no time: every change shows at
     /// once. Flings, which follow the finger, are unaffected.
     ///
-    /// The hosts do not report the setting yet (ADR 0021): until they do,
-    /// nothing calls this but tests and an entry point that sets it before
-    /// handing the `Ui` to `app!`.
+    /// The hosts report the setting themselves (`FrameInfo::reduce_motion`,
+    /// ADR 0026), and the layer follows it without being told. This is for
+    /// tests, and for an application that offers the choice in its own
+    /// settings: `true` here reduces motion whatever the system says;
+    /// `false` goes back to following the system.
     pub fn set_reduce_motion(&mut self, reduce: bool) {
+        self.forced_reduce = reduce;
         self.motions.reduce = reduce;
     }
 
@@ -929,6 +1115,96 @@ impl<A: Application> Ui<A> {
     /// composing (shown underlined), as byte offsets. For tests.
     pub fn composing(&self) -> Option<(usize, usize)> {
         self.focus.as_ref()?.edit.composing
+    }
+
+    /// The selected part of the focused input's value, as byte offsets
+    /// (start before end); `None` if no input has focus or nothing is
+    /// selected.
+    pub fn selection(&self) -> Option<(usize, usize)> {
+        let focus = self.focus.as_ref()?;
+        focus.edit.selection_in(&focus.expected)
+    }
+
+    /// Gives the focus to the [`TextInput`](crate::TextInput) with this
+    /// explicit `.id(..)` and selects bytes `range` of its value (moved
+    /// back to character boundaries; an empty range only places the
+    /// caret, at its start). The selection shows its handles, as one made
+    /// by touch does. Returns false if no such input was in the last
+    /// frame. For tests, and for an application that selects a field's
+    /// contents when it opens a form.
+    pub fn select(&mut self, id: impl Hash, range: std::ops::Range<usize>) -> bool {
+        let key = key_hash(id);
+        let Some(index) = self.inputs.iter().position(|record| record.id == key) else {
+            return false;
+        };
+        if self.focus.as_ref().is_none_or(|focus| focus.id != key) {
+            self.move_focus(index);
+        }
+        let value = &self.inputs[index].value;
+        if let Some(focus) = self.focus.as_mut() {
+            let start = edit::snap(value, range.start.min(range.end));
+            let end = edit::snap(value, range.end.max(range.start));
+            focus.edit.select(start, end);
+            focus.handles = start != end;
+            focus.menu = false;
+            focus.pending = None;
+            focus.blink_from = None;
+            focus.history.break_run();
+            focus.touched();
+        }
+        true
+    }
+
+    /// True while the contextual menu (Cut, Copy, Paste, Select all) is
+    /// shown over the focused input. For tests.
+    pub fn selection_menu_shown(&self) -> bool {
+        self.focus.as_ref().is_some_and(|focus| focus.menu)
+    }
+
+    /// Where the last frame put the two handles of the selection, the
+    /// start's first, as the rectangles (px) a touch takes hold of them
+    /// in; `None` for a handle that is not shown (nothing selected, the
+    /// selection was made by key, or that end is scrolled out of sight).
+    /// For tests and tools.
+    pub fn selection_handles(&self) -> [Option<Rect>; 2] {
+        let find = |end: SelectionEnd| {
+            self.regions
+                .iter()
+                .find(|region| region.kind == RegionKind::Handle(end))
+                .map(|region| region.rect)
+        };
+        [find(SelectionEnd::Start), find(SelectionEnd::End)]
+    }
+
+    /// The items of the contextual menu the last frame drew, left to
+    /// right: each label and its rectangle (px). Empty while no menu is
+    /// up. For tests and tools.
+    pub fn selection_menu(&self) -> Vec<(&'static str, Rect)> {
+        self.regions
+            .iter()
+            .filter_map(|region| match region.kind {
+                RegionKind::Menu(action) => MENU_LABELS
+                    .iter()
+                    .find(|(candidate, _)| *candidate == action)
+                    .map(|(_, label)| (*label, region.rect)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The text on the clipboard of a `Ui` that has no platform behind it
+    /// ([`testing`](Self::testing), [`with_services`](Self::with_services),
+    /// or no host at all): what a field last copied or cut, or what
+    /// [`set_clipboard`](Self::set_clipboard) put there. Always `None`
+    /// under a real host, whose clipboard is the system's.
+    pub fn clipboard(&self) -> Option<&str> {
+        self.effects.clipboard()
+    }
+
+    /// Puts text on the stand-in clipboard, as if the user had copied it
+    /// in another application; see [`clipboard`](Self::clipboard).
+    pub fn set_clipboard(&mut self, text: impl Into<String>) {
+        self.effects.set_clipboard(Some(text.into()));
     }
 
     /// Takes the focus away from whichever input has it; the keyboard goes
@@ -1020,6 +1296,9 @@ impl<A: Application> Ui<A> {
             }
             return match region.kind {
                 RegionKind::Press(_) | RegionKind::Focus(_) => (Some(region.id), region.scroll),
+                // Part of the selection's own controls: nothing under it
+                // scrolls or is pressed.
+                RegionKind::Handle(_) | RegionKind::Menu(_) => (Some(region.id), None),
                 RegionKind::Block => (None, region.scroll),
                 RegionKind::Scroll => (None, Some(region.id)),
             };
@@ -1031,7 +1310,10 @@ impl<A: Application> Ui<A> {
     /// on it.
     fn target_at(&self, id: u64, point: Point) -> Option<(RegionKind, Option<u64>)> {
         self.regions.iter().find_map(|region| match region.kind {
-            RegionKind::Press(_) | RegionKind::Focus(_)
+            RegionKind::Press(_)
+            | RegionKind::Focus(_)
+            | RegionKind::Handle(_)
+            | RegionKind::Menu(_)
                 if region.id == id && region.contains(point) =>
             {
                 Some((region.kind, region.field))
@@ -1042,14 +1324,15 @@ impl<A: Application> Ui<A> {
 
     /// Gives the focus to input `id`. `tap` is where the finger was, for
     /// placing the caret.
-    fn focus_input(&mut self, id: u64, tap: Option<Point>) {
+    fn focus_input(&mut self, id: u64, pending: Option<Pending>) {
         match self.focus.as_mut() {
             Some(focus) if focus.id == id => {
-                focus.tap = tap;
+                focus.pending = pending;
                 focus.blink_from = None;
+                focus.history.break_run();
                 focus.touched();
             }
-            _ => self.focus = Some(Focus::new(id, tap)),
+            _ => self.focus = Some(Focus::new(id, pending)),
         }
     }
 
@@ -1060,10 +1343,7 @@ impl<A: Application> Ui<A> {
             return;
         };
         self.focus = Some(Focus {
-            edit: EditState {
-                caret: record.value.len(),
-                composing: None,
-            },
+            edit: EditState::at(record.value.len()),
             expected: record.value.clone(),
             known: true,
             ..Focus::new(record.id, None)
@@ -1113,10 +1393,12 @@ impl<A: Application> Ui<A> {
         focus.edit.caret = edit::snap(&record.value, focus.edit.caret);
         focus.blink_from = None;
         focus.touched();
-        focus.tap = None;
+        focus.pending = None;
 
         let (config, value) = (&record.config, record.value.as_str());
-        let changed = match event {
+        let before = focus.edit;
+        let selected = before.selection_in(value).is_some();
+        let (changed, kind) = match event {
             TextInputEvent::FocusLost => {
                 self.focus = None;
                 return;
@@ -1125,20 +1407,78 @@ impl<A: Application> Ui<A> {
             TextInputEvent::Enter if !config.multiline => {
                 return self.perform(index, record.traits.action);
             }
+            TextInputEvent::Move { to, extend } => {
+                // A key takes over from the finger: its selection has no
+                // handles and no menu.
+                focus.dismiss();
+                focus.history.break_run();
+                if !edit::move_caret(value, &mut focus.edit, *to, *extend) {
+                    focus.pending = Some(Pending::Move(*to, *extend));
+                }
+                return;
+            }
+            TextInputEvent::SelectAll => {
+                focus.edit.select(0, value.len());
+                focus.history.break_run();
+                return;
+            }
+            TextInputEvent::Copy => return self.copy_selection(index),
+            TextInputEvent::Paste => return self.ask_for_paste(index),
             // A field nothing listens to cannot change.
             _ if record.on_input.is_none() => return,
-            TextInputEvent::Enter => edit::insert(value, &mut focus.edit, "\n", config),
-            TextInputEvent::Commit(text) => edit::insert(value, &mut focus.edit, text, config),
-            TextInputEvent::Compose(text) => edit::compose(value, &mut focus.edit, text, config),
-            TextInputEvent::DeleteForward => edit::delete_forward(value, &mut focus.edit),
+            TextInputEvent::Cut => {
+                // A password is never put on the clipboard.
+                if record.traits.secure || !selected {
+                    return;
+                }
+                self.copy_selection(index);
+                return self.cut_selection(index);
+            }
+            TextInputEvent::Undo | TextInputEvent::Redo => {
+                focus.dismiss();
+                let restored = if matches!(event, TextInputEvent::Undo) {
+                    focus.history.undo(value, &mut focus.edit)
+                } else {
+                    focus.history.redo(value, &mut focus.edit)
+                };
+                let Some(restored) = restored else {
+                    return;
+                };
+                focus.edit.caret = edit::snap(&restored, focus.edit.caret);
+                focus.edit.anchor = focus
+                    .edit
+                    .anchor
+                    .map(|anchor| edit::snap(&restored, anchor));
+                focus.expected.clone_from(&restored);
+                return self.changed(index, restored);
+            }
+            TextInputEvent::Enter => (
+                edit::insert(value, &mut focus.edit, "\n", config),
+                EditKind::Other,
+            ),
+            TextInputEvent::Commit(text) => (
+                edit::insert(value, &mut focus.edit, text, config),
+                // A word and the space after it are one step; the next
+                // word starts another.
+                if selected || text.chars().all(char::is_whitespace) {
+                    EditKind::Other
+                } else {
+                    EditKind::Typing
+                },
+            ),
+            TextInputEvent::Compose(text) => (
+                edit::compose(value, &mut focus.edit, text, config),
+                EditKind::Typing,
+            ),
+            TextInputEvent::DeleteForward => (
+                edit::delete_forward(value, &mut focus.edit),
+                EditKind::Deleting,
+            ),
             TextInputEvent::DeleteBackward => {
                 if value.is_empty() && record.auto_advance && index > 0 {
                     // An empty code box: go back one box and delete there.
                     let previous = &self.inputs[index - 1];
-                    let mut state = EditState {
-                        caret: previous.value.len(),
-                        composing: None,
-                    };
+                    let mut state = EditState::at(previous.value.len());
                     let shorter = edit::delete_backward(&previous.value, &mut state);
                     self.move_focus(index - 1);
                     if let Some(shorter) = shorter {
@@ -1150,13 +1490,35 @@ impl<A: Application> Ui<A> {
                     }
                     return;
                 }
-                edit::delete_backward(value, &mut focus.edit)
+                (
+                    edit::delete_backward(value, &mut focus.edit),
+                    EditKind::Deleting,
+                )
             }
-            TextInputEvent::Edited(state) => edit::adopt(value, &mut focus.edit, state, config),
+            TextInputEvent::Edited(state) => {
+                let kind = if state.text.len() >= value.len() {
+                    EditKind::Typing
+                } else {
+                    EditKind::Deleting
+                };
+                (edit::adopt(value, &mut focus.edit, state, config), kind)
+            }
         };
+        // The input method's own selection keeps its handles only if a
+        // touch selection was showing them already.
+        if focus.edit.selection().is_none() || changed.is_some() {
+            focus.dismiss();
+        } else {
+            focus.menu = false;
+        }
         let Some(value) = changed else {
+            if focus.edit != before {
+                focus.history.break_run();
+            }
             return;
         };
+        let kind = if selected { EditKind::Other } else { kind };
+        focus.history.record(&record.value, &before, kind);
         focus.expected.clone_from(&value);
         let full = record.auto_advance
             && focus.edit.caret == value.len()
@@ -1167,6 +1529,112 @@ impl<A: Application> Ui<A> {
             self.move_focus(index + 1);
         }
         self.changed(index, value);
+    }
+
+    /// Puts the focused input's selected text on the clipboard. A secure
+    /// field's is never copied.
+    fn copy_selection(&mut self, index: usize) {
+        let (Some(focus), Some(record)) = (self.focus.as_mut(), self.inputs.get(index)) else {
+            return;
+        };
+        focus.menu = false;
+        if record.traits.secure {
+            return;
+        }
+        let Some((start, end)) = focus.edit.selection_in(&record.value) else {
+            return;
+        };
+        let text = record.value[start..end].to_owned();
+        self.effects.request(ServiceRequest::SetClipboard(text));
+    }
+
+    /// Removes the focused input's selected text, as one step of its own.
+    fn cut_selection(&mut self, index: usize) {
+        let (Some(focus), Some(record)) = (self.focus.as_mut(), self.inputs.get(index)) else {
+            return;
+        };
+        let before = focus.edit;
+        let Some(value) = edit::delete_selection(&record.value, &mut focus.edit) else {
+            return;
+        };
+        focus.dismiss();
+        focus
+            .history
+            .record(&record.value, &before, EditKind::Other);
+        focus.expected.clone_from(&value);
+        self.changed(index, value);
+    }
+
+    /// Asks the platform for the clipboard, for the focused input. It is
+    /// read only now that the user has chosen to paste; the text arrives
+    /// as the answer to the request ([`paste_into`](Self::paste_into)).
+    fn ask_for_paste(&mut self, index: usize) {
+        let (Some(focus), Some(record)) = (self.focus.as_mut(), self.inputs.get(index)) else {
+            return;
+        };
+        focus.menu = false;
+        if record.on_input.is_none() {
+            return;
+        }
+        let id = self.effects.request(ServiceRequest::ReadClipboard);
+        self.paste = Some((id, record.id));
+    }
+
+    /// The clipboard's text, for the input that asked for it, if it still
+    /// has the focus: it replaces the selection, minus what the field does
+    /// not accept and what does not fit.
+    fn paste_into(&mut self, input: u64, text: &str) {
+        let Some(focus) = self.focus.as_mut().filter(|focus| focus.id == input) else {
+            return;
+        };
+        let Some(index) = self.inputs.iter().position(|record| record.id == input) else {
+            return;
+        };
+        let record = &self.inputs[index];
+        if !focus.known {
+            focus.known = true;
+            focus.expected.clone_from(&record.value);
+        }
+        focus.edit.caret = edit::snap(&record.value, focus.edit.caret);
+        let before = focus.edit;
+        let text = edit::pasted(text, &record.config);
+        // What was being composed stays as it is: the paste goes where
+        // the caret or the selection is.
+        focus.edit.composing = None;
+        let changed = edit::insert(&record.value, &mut focus.edit, &text, &record.config);
+        focus.dismiss();
+        focus.blink_from = None;
+        focus.touched();
+        let Some(value) = changed else {
+            return;
+        };
+        focus
+            .history
+            .record(&record.value, &before, EditKind::Other);
+        focus.expected.clone_from(&value);
+        self.changed(index, value);
+    }
+
+    /// An item of the contextual menu was tapped.
+    fn menu_action(&mut self, action: MenuAction) {
+        let event = match action {
+            MenuAction::Cut => TextInputEvent::Cut,
+            MenuAction::Copy => TextInputEvent::Copy,
+            MenuAction::Paste => TextInputEvent::Paste,
+            MenuAction::SelectAll => TextInputEvent::SelectAll,
+        };
+        let shown = self
+            .focus
+            .as_ref()
+            .is_some_and(|focus| focus.handles || focus.menu);
+        self.text_event(&event);
+        if action == MenuAction::SelectAll
+            && let Some(focus) = self.focus.as_mut()
+        {
+            // Everything is selected: offer what can be done with it.
+            focus.handles = shown && focus.edit.selection().is_some();
+            focus.menu = focus.handles;
+        }
     }
 
     fn pointer_down(&mut self, event: &PointerEvent) {
@@ -1192,13 +1660,46 @@ impl<A: Application> Ui<A> {
             self.focus = None;
             return;
         }
+        // A finger on a selection handle takes hold of that end.
+        let mut handle = None;
+        if let Some(id) = press
+            && let Some((RegionKind::Handle(end), _)) = self.target_at(id, event.position)
+        {
+            press = None;
+            handle = self.grab_handle(end, event.position);
+        }
         self.gesture = Some(Gesture {
             pointer: event.id,
             start: event.position,
             press: press.map(|id| Press { id, inside: true }),
             scroll,
             drag: None,
+            handle,
+            held_since: None,
+            moved: false,
+            long_pressed: false,
         });
+    }
+
+    /// Starts dragging the selection handle at `end`: that end becomes the
+    /// one that moves. Returns how far the finger is from the middle of
+    /// the line the handle hangs from, which is kept for the whole drag
+    /// so that the selection does not jump to the line under the finger.
+    fn grab_handle(&mut self, end: SelectionEnd, position: Point) -> Option<Point> {
+        let overlay = self.overlay?;
+        let focus = self.focus.as_mut().filter(|f| f.id == overlay.input)?;
+        let (start, finish) = focus.edit.selection()?;
+        let (caret, anchor, line) = match end {
+            SelectionEnd::Start => (start, finish, overlay.start),
+            SelectionEnd::End => (finish, start, overlay.end),
+        };
+        focus.edit.caret = caret;
+        focus.edit.anchor = Some(anchor);
+        focus.edit.composing = None;
+        focus.history.break_run();
+        let hold = Point::new(line.x, line.y + line.height / 2.0);
+        focus.drag = Some(hold);
+        Some(Point::new(position.x - hold.x, position.y - hold.y))
     }
 
     fn pointer_moved(&mut self, event: &PointerEvent) {
@@ -1206,6 +1707,14 @@ impl<A: Application> Ui<A> {
             return;
         };
         let position = event.position;
+        if let Some(offset) = gesture.handle {
+            // The end of the selection follows; the next frame works out
+            // which character that is.
+            if let Some(focus) = self.focus.as_mut() {
+                focus.drag = Some(Point::new(position.x - offset.x, position.y - offset.y));
+            }
+            return;
+        }
         let scroll = gesture.scroll.and_then(|id| self.scrolls.get_mut(&id));
 
         if let (Some(drag), Some(state)) = (gesture.drag, scroll) {
@@ -1216,6 +1725,10 @@ impl<A: Application> Ui<A> {
 
         let dx = position.x - gesture.start.x;
         let dy = position.y - gesture.start.y;
+        if dx.hypot(dy) > TOUCH_SLOP * self.scale {
+            // Too far to still become a long press.
+            gesture.moved = true;
+        }
         if let Some(state) = gesture.scroll.and_then(|id| self.scrolls.get_mut(&id))
             && state.max > 0.0
             && dy.abs() > TOUCH_SLOP * self.scale
@@ -1230,6 +1743,10 @@ impl<A: Application> Ui<A> {
             });
             state.tracking = false;
             state.velocity = 0.0;
+            // The text moves away from under its menu.
+            if let Some(focus) = self.focus.as_mut() {
+                focus.menu = false;
+            }
         } else if let Some(press) = gesture.press.as_mut() {
             press.inside = self.target_at(press.id, position).is_some();
         }
@@ -1240,11 +1757,22 @@ impl<A: Application> Ui<A> {
         let Some(gesture) = self.gesture.take_if(|g| g.pointer == event.id) else {
             return;
         };
-        if gesture.drag.is_some() {
+        if gesture.handle.is_some() {
+            // The handle is let go: offer what can be done with the
+            // selection it leaves.
+            if let Some(focus) = self.focus.as_mut() {
+                focus.drag = None;
+                focus.handles = true;
+                focus.menu = true;
+                focus.touched();
+            }
+        } else if gesture.drag.is_some() {
             if let Some(state) = gesture.scroll.and_then(|id| self.scrolls.get_mut(&id)) {
                 state.flinging = true;
                 state.released = true;
             }
+        } else if gesture.long_pressed {
+            // The long press already did what this touch was for.
         } else if let Some(press) = gesture.press {
             match self.target_at(press.id, event.position) {
                 Some((RegionKind::Press(index), field)) => {
@@ -1258,9 +1786,8 @@ impl<A: Application> Ui<A> {
                         self.deliver(message);
                     }
                 }
-                Some((RegionKind::Focus(input), _)) => {
-                    self.focus_input(input, Some(event.position));
-                }
+                Some((RegionKind::Focus(input), _)) => self.tap_input(input, event.position),
+                Some((RegionKind::Menu(action), _)) => self.menu_action(action),
                 // Slid off before lifting: nothing happens.
                 _ => {}
             }
@@ -1270,10 +1797,87 @@ impl<A: Application> Ui<A> {
         }
     }
 
+    /// A tap on text input `input`: the first places the caret, a second
+    /// soon after and nearby selects the word there, a third everything.
+    fn tap_input(&mut self, input: u64, position: Point) {
+        // Pointer events carry no time: the clock is the frames', and a
+        // frame is drawn after every touch.
+        let now = self.last_elapsed.unwrap_or_default();
+        let count = match self.last_tap {
+            Some(tap)
+                if tap.input == input
+                    && now.saturating_sub(tap.at) <= MULTI_TAP
+                    && (position.x - tap.position.x).hypot(position.y - tap.position.y)
+                        <= MULTI_TAP_SLOP * self.scale =>
+            {
+                tap.count % 3 + 1
+            }
+            _ => 1,
+        };
+        self.last_tap = Some(Tap {
+            input,
+            at: now,
+            position,
+            count,
+        });
+        let pending = match count {
+            1 => Pending::Caret(position),
+            2 => Pending::Word(position),
+            _ => Pending::All,
+        };
+        self.focus_input(input, Some(pending));
+        if let Some(focus) = self.focus.as_mut() {
+            focus.drag = None;
+            // Whether there is anything to show them for is known once
+            // the frame has found the word.
+            focus.handles = count > 1;
+            focus.menu = count > 1;
+        }
+    }
+
+    /// A finger has rested on a text input for [`LONG_PRESS`]: the word
+    /// under it is selected and the menu comes up. Called while a frame is
+    /// being built, which is where time passes.
+    fn long_press(&mut self, elapsed: Duration, frame: &mut Frame) {
+        let Some(mut gesture) = self.gesture else {
+            return;
+        };
+        let Some(press) = gesture.press.filter(|press| press.inside) else {
+            return;
+        };
+        if gesture.moved || gesture.long_pressed || gesture.drag.is_some() {
+            return;
+        }
+        let Some((RegionKind::Focus(input), _)) = self.target_at(press.id, gesture.start) else {
+            return;
+        };
+        let since = *gesture.held_since.get_or_insert(elapsed);
+        let held = elapsed.saturating_sub(since);
+        if held < LONG_PRESS {
+            frame.request_redraw_after(LONG_PRESS - held);
+            self.gesture = Some(gesture);
+            return;
+        }
+        gesture.long_pressed = true;
+        self.gesture = Some(gesture);
+        self.last_tap = None;
+        self.focus_input(input, Some(Pending::Word(gesture.start)));
+        if let Some(focus) = self.focus.as_mut() {
+            focus.drag = None;
+            focus.handles = true;
+            focus.menu = true;
+        }
+    }
+
     fn pointer_cancelled(&mut self, event: &PointerEvent) {
         let Some(gesture) = self.gesture.take_if(|g| g.pointer == event.id) else {
             return;
         };
+        if gesture.handle.is_some()
+            && let Some(focus) = self.focus.as_mut()
+        {
+            focus.drag = None;
+        }
         if let Some(state) = gesture.scroll.and_then(|id| self.scrolls.get_mut(&id)) {
             state.velocity = 0.0;
             state.tracking = false;
@@ -1316,7 +1920,20 @@ impl<A: Application> App for Ui<A> {
             // One frame when the next message is due and none before it.
             frame.request_redraw_after(tick.due.saturating_sub(info.elapsed));
         }
+        // A finger resting on a field becomes a long press here, where
+        // the time is known.
+        self.long_press(info.elapsed, frame);
+        // Less motion if the system says so (the host reports it) or the
+        // application asked for it itself.
+        self.motions.reduce = self.forced_reduce || info.reduce_motion;
         let theme = self.app.theme();
+        // Light or dark icons in the system's bars: the application's
+        // word, or what reads on the theme's background.
+        frame.set_system_bars(
+            self.app
+                .system_bars()
+                .unwrap_or_else(|| SystemBars::for_background(theme.colors.background)),
+        );
         let scale = info.scale;
         // The tree of the last frame, if something in it may be leaving.
         let mut previous = self.last_root.take();
@@ -1424,9 +2041,18 @@ impl<A: Application> App for Ui<A> {
                     } else if focus.expected != record.value {
                         focus.expected.clone_from(&record.value);
                         focus.edit.composing = None;
+                        // What was selected is not what is there now.
+                        focus.edit.anchor = None;
+                        focus.dismiss();
+                        // Nor do the steps back lead to it.
+                        focus.history.clear();
                         focus.touched();
                     }
                     focus.edit.caret = edit::snap(&record.value, focus.edit.caret);
+                    focus.edit.anchor = focus
+                        .edit
+                        .anchor
+                        .map(|anchor| edit::snap(&record.value, anchor));
                 }
             }
         }
@@ -1595,6 +2221,10 @@ impl<A: Application> App for Ui<A> {
             focus: &mut self.focus,
             elapsed: info.elapsed,
             keyboard_top,
+            overlay: None,
+            rects: Vec::new(),
+            safe_top: info.insets.top,
+            surface,
         };
         painter.paint(
             &root,
@@ -1631,6 +2261,11 @@ impl<A: Application> App for Ui<A> {
                 },
             );
         }
+        // Over everything: the handles of the focused field's selection
+        // and its menu.
+        painter.inert = false;
+        painter.paint_selection_controls();
+        self.overlay = painter.overlay;
         let animating = painter.animating;
         self.motions.end_frame(generation);
         // Frames keep coming only while something is on its way.
@@ -1644,11 +2279,19 @@ impl<A: Application> App for Ui<A> {
         if let Some(focus) = self.focus.as_ref()
             && let Some(record) = self.inputs.iter().find(|record| record.id == focus.id)
         {
+            let caret = edit::snap(&record.value, focus.edit.caret);
             frame.set_text_input(TextInputRequest {
                 session: focus.id,
                 traits: record.traits,
                 text: record.value.clone(),
-                caret: edit::snap(&record.value, focus.edit.caret),
+                caret,
+                // The input method is told what is selected, so that its
+                // suggestions and its own selection gestures agree.
+                anchor: focus
+                    .edit
+                    .anchor
+                    .map(|anchor| edit::snap(&record.value, anchor))
+                    .filter(|anchor| *anchor != caret),
             });
         }
 
@@ -1659,7 +2302,10 @@ impl<A: Application> App for Ui<A> {
             if let Some(press) = gesture.press
                 && !self.regions.iter().any(|region| {
                     region.id == press.id
-                        && matches!(region.kind, RegionKind::Press(_) | RegionKind::Focus(_))
+                        && matches!(
+                            region.kind,
+                            RegionKind::Press(_) | RegionKind::Focus(_) | RegionKind::Menu(_)
+                        )
                 })
             {
                 gesture.press = None;
@@ -1671,7 +2317,10 @@ impl<A: Application> App for Ui<A> {
                 gesture.scroll = None;
                 gesture.drag = None;
             }
-            if gesture.press.is_none() && gesture.scroll.is_none() {
+            if gesture.handle.is_some() && self.focus.is_none() {
+                gesture.handle = None;
+            }
+            if gesture.press.is_none() && gesture.scroll.is_none() && gesture.handle.is_none() {
                 self.gesture = None;
             }
         }
@@ -1693,6 +2342,44 @@ impl<A: Application> App for Ui<A> {
     fn back(&mut self) -> bool {
         Ui::back(self)
     }
+}
+
+/// The offset in `value` nearest a touch at `point` of its laid-out text
+/// (`shown`: the value, or its bullets when `secure`).
+///
+/// The text engine answers with an edge of the glyph under the point, and
+/// a glyph can be more than one character: an "fi" ligature is one glyph,
+/// and a caret belongs between its letters too. So the characters either
+/// side of the engine's answer are tried as well, and the one whose caret
+/// is drawn nearest the finger, on the same line, wins.
+fn index_near(
+    frame: &mut Frame,
+    shown: &str,
+    style: &TextStyle,
+    constraint: Option<f32>,
+    (value, secure): (&str, bool),
+    point: Point,
+) -> usize {
+    let found = frame.text_index_at(shown, style, constraint, point);
+    let found = edit::value_index(value, found, secure);
+    let mut caret_of = |index: usize| {
+        frame.text_caret(
+            shown,
+            style,
+            constraint,
+            edit::display_index(value, index, secure),
+        )
+    };
+    let at = caret_of(found);
+    let mut best = (found, (at.x - point.x).abs());
+    for candidate in [edit::previous(value, found), edit::next(value, found)] {
+        let caret = caret_of(candidate);
+        let distance = (caret.x - point.x).abs();
+        if candidate != found && caret.y == at.y && distance < best.1 {
+            best = (candidate, distance);
+        }
+    }
+    best.0
 }
 
 /// The layout node of the element with record `slot`.
@@ -2224,6 +2911,38 @@ struct Context {
     alpha: f32,
 }
 
+/// True if `element` paints anything.
+fn paints<M>(element: &Element<M>) -> bool {
+    match &element.kind {
+        Kind::Box(node) => {
+            node.fill.is_some()
+                || node.border.is_some()
+                || node.shadow.is_some()
+                || node.children.iter().any(paints)
+        }
+        _ => true,
+    }
+}
+
+/// True if `element` paints things that lie over one another, so that
+/// fading each colour would show the lower through the upper: a box with a
+/// background, border or shadow and something painted inside it; a box
+/// over its own shadow; a stack of more than one painted child; or any
+/// such box further down. A text, a picture, an icon, a box that is one
+/// primitive, and rows and columns of those, do not: for them multiplying
+/// the opacity into each colour is the same picture and costs nothing.
+fn overlaps_itself<M>(element: &Element<M>) -> bool {
+    let Kind::Box(node) = &element.kind else {
+        return false;
+    };
+    let surface = node.fill.is_some() || node.border.is_some();
+    let painted_children = || node.children.iter().filter(|child| paints(child)).count();
+    (surface && node.shadow.is_some())
+        || ((surface || node.shadow.is_some()) && painted_children() > 0)
+        || (node.axis == Axis::Stack && painted_children() > 1)
+        || node.children.iter().any(overlaps_itself)
+}
+
 /// `color` at `alpha` times its own opacity.
 fn fade(color: Color, alpha: f32) -> Color {
     if alpha >= 1.0 {
@@ -2270,6 +2989,15 @@ struct Painter<'a, M> {
     elapsed: Duration,
     /// Where the top of the soft keyboard is (dp), while it is up.
     keyboard_top: Option<f32>,
+    /// Where the focused field's selection was drawn, for its handles and
+    /// menu, which are painted last.
+    overlay: Option<SelectionOverlay>,
+    /// Reused for the rectangles of the selection.
+    rects: Vec<Rect>,
+    /// The top safe-area inset (px): the menu stays below it.
+    safe_top: f32,
+    /// The whole surface (px).
+    surface: Rect,
 }
 
 impl<M: Clone> Painter<'_, M> {
@@ -2311,6 +3039,8 @@ impl<M: Clone> Painter<'_, M> {
         let mut own = element.transform;
         let mut fill = None;
         let mut presence = None;
+        // The opacity of a layer the element is drawn through (ADR 0028).
+        let mut layer = None;
         if element.motion.opacity < 1.0 || !element.motion.is_stateless() {
             let mut opacity = element.motion.opacity;
             if !element.motion.is_stateless()
@@ -2326,7 +3056,14 @@ impl<M: Clone> Painter<'_, M> {
                 fill = shown.props.fill;
                 presence = Some((shown.presence, shown.rect));
             }
-            context.alpha *= opacity;
+            if opacity < 1.0 && overlaps_itself(element) {
+                // Parts of it lie over one another: faded colour by
+                // colour, the lower would show through the upper. Drawn
+                // as a group and faded as one instead.
+                layer = Some(opacity);
+            } else {
+                context.alpha *= opacity;
+            }
         }
 
         // The element's transform, with its lengths in pixels. One that
@@ -2389,6 +3126,9 @@ impl<M: Clone> Painter<'_, M> {
             context.cull = None;
         }
 
+        if let Some(opacity) = layer {
+            self.frame.list.push_layer(opacity);
+        }
         match &element.kind {
             Kind::Text(text) => {
                 let index = self.text_cursor;
@@ -2411,6 +3151,9 @@ impl<M: Clone> Painter<'_, M> {
                 self.paint_input(input, index, rect, &context);
             }
             Kind::Box(node_data) => self.paint_box(node_data, node, slot, rect, fill, context),
+        }
+        if layer.is_some() {
+            self.frame.list.pop_layer();
         }
 
         if transform.is_some() {
@@ -2495,42 +3238,207 @@ impl<M: Clone> Painter<'_, M> {
         let origin_x = (rect.x + shift).clamp(-MAX_TEXT_ORIGIN, MAX_TEXT_ORIGIN);
         let origin_y = rect.y.clamp(-MAX_TEXT_ORIGIN, MAX_TEXT_ORIGIN);
         let caret_width = (CARET_WIDTH * self.scale).round().max(1.0);
+        let scale = self.scale;
+        let value = input.value.as_str();
+        let secure = input.secure;
+        let space = context.space;
+        // In a transformed widget the finger is where the turned text is
+        // drawn; bring it back to the space the text is laid out in.
+        let unturned = |point: Point| space.map_or(point, |space| space.inverse.apply(point));
+        let place = |value_index: usize| edit::display_index(value, value_index, secure);
+        let furthest_x = if overflow && !input.empty {
+            (meta.measured.width - rect.width).max(0.0)
+        } else {
+            0.0
+        };
 
-        if let Some(tap) = focus.tap.take() {
-            // In a transformed widget the finger is where the turned text
-            // is drawn; bring it back to the space the text is laid out in.
-            let tap = context.space.map_or(tap, |space| space.inverse.apply(tap));
-            let local = Point::new(
-                tap.x - origin_x + focus.scroll_x,
-                tap.y - origin_y + scroll_y,
-            );
-            let at = self
-                .frame
-                .text_index_at(shown, &style, meta.constraint, local);
-            focus.edit.caret = edit::value_index(&input.value, at, input.secure);
-            // Moving the caret ends a composition where it stands.
-            focus.edit.composing = None;
+        // A selection handle held near the edge of what can scroll, or
+        // past it, scrolls the text under the finger: the field itself
+        // first, then the scroll view around it.
+        let dragging = focus.drag.map(unturned);
+        if let Some(point) = dragging {
+            let dt = self.dt.unwrap_or(1.0 / 60.0).min(0.05);
+            // Pixels per second for a finger at `at` against what is
+            // visible between `low` and `high`; negative towards `low`.
+            let pull = |at: f32, low: f32, high: f32| {
+                let zone = (AUTO_SCROLL_ZONE * scale).min((high - low) / 4.0).max(1.0);
+                let depth = if at > high - zone {
+                    at - (high - zone)
+                } else if at < low + zone {
+                    at - (low + zone)
+                } else {
+                    return 0.0;
+                };
+                let speed = (AUTO_SCROLL_MIN + depth.abs() / zone * 300.0).min(AUTO_SCROLL_MAX);
+                speed * scale * depth.signum()
+            };
+            // True if there is further to go the way the finger pulls.
+            let room = |speed: f32, offset: f32, max: f32| {
+                (speed > 0.0 && offset < max) || (speed < 0.0 && offset > 0.0)
+            };
+            let mut scrolled = false;
+            if tall && let Some(state) = self.scrolls.get_mut(&context.id) {
+                let speed = pull(point.y, rect.y, rect.y + rect.height);
+                let max = range / scale;
+                if room(speed, state.offset, max) {
+                    let to = (state.offset + speed * dt / scale).clamp(0.0, max);
+                    state.go(to, false);
+                    state.frame_offset = state.offset;
+                    scroll_y = (to * scale).round();
+                    scrolled = true;
+                }
+            }
+            if furthest_x > 0.0 {
+                let speed = pull(point.x, rect.x, rect.x + rect.width);
+                if room(speed, focus.scroll_x, furthest_x) {
+                    focus.scroll_x = (focus.scroll_x + speed * dt).clamp(0.0, furthest_x);
+                    scrolled = true;
+                }
+            }
+            if !scrolled
+                && space.is_none()
+                && let Some(state) = context.scroll.and_then(|id| self.scrolls.get_mut(&id))
+            {
+                let bottom = self
+                    .keyboard_top
+                    .map_or(f32::INFINITY, |top| top * scale)
+                    .min(context.clip.y + context.clip.height);
+                let speed = pull(point.y, context.clip.y, bottom);
+                if room(speed, state.offset, state.max) {
+                    let to = clamp_offset(state.offset + speed * dt / scale, state.max);
+                    state.go(to, false);
+                    scrolled = true;
+                }
+            }
+            // Frames keep coming while the text is moving.
+            self.animating |= scrolled;
         }
-        let place =
-            |value_index: usize| edit::display_index(&input.value, value_index, input.secure);
+        let scroll_x = focus.scroll_x.round();
+        // A point of the screen as a point of the laid-out text.
+        let in_text = |point: Point| {
+            let point = unturned(point);
+            Point::new(point.x - origin_x + scroll_x, point.y - origin_y + scroll_y)
+        };
+
+        if let Some(point) = focus.drag {
+            // The end being dragged goes to the character under the
+            // finger; the two ends never meet.
+            let at = index_near(
+                self.frame,
+                shown,
+                &style,
+                meta.constraint,
+                (value, secure),
+                in_text(point),
+            );
+            let anchor = focus.edit.anchor.unwrap_or(focus.edit.caret);
+            if at != anchor {
+                focus.edit.caret = at;
+                focus.edit.anchor = Some(anchor);
+            }
+        }
+        match focus.pending.take() {
+            Some(Pending::Caret(tap)) => {
+                let at = index_near(
+                    self.frame,
+                    shown,
+                    &style,
+                    meta.constraint,
+                    (value, secure),
+                    in_text(tap),
+                );
+                // Moving the caret ends a composition where it stands.
+                focus.edit = EditState::at(at);
+            }
+            Some(Pending::Word(point)) => {
+                let at = self
+                    .frame
+                    .text_index_at(shown, &style, meta.constraint, in_text(point));
+                let at = edit::value_index(value, at, secure);
+                // Bullets have no words: a password is selected whole.
+                let (start, end) = if secure {
+                    (0, value.len())
+                } else {
+                    edit::word_at(value, at)
+                };
+                if start == end {
+                    focus.edit = EditState::at(at);
+                } else {
+                    focus.edit.select(start, end);
+                }
+            }
+            Some(Pending::All) => focus.edit.select(0, value.len()),
+            Some(Pending::Move(to, extend)) => {
+                let from = edit::snap(value, focus.edit.caret);
+                let at = self
+                    .frame
+                    .text_caret(shown, &style, meta.constraint, place(from));
+                let middle = at.y + at.height / 2.0;
+                let mut index_at = |x: f32, y: f32| {
+                    let index =
+                        self.frame
+                            .text_index_at(shown, &style, meta.constraint, Point::new(x, y));
+                    edit::value_index(value, index, secure)
+                };
+                let target = match to {
+                    CaretMove::Up if at.y < at.height / 2.0 => 0,
+                    CaretMove::Up => index_at(at.x, middle - at.height),
+                    CaretMove::Down if middle + at.height > meta.measured.height => value.len(),
+                    CaretMove::Down => index_at(at.x, middle + at.height),
+                    CaretMove::LineStart | CaretMove::LineEnd => {
+                        // The two edges of the line, whichever way it
+                        // reads.
+                        let (left, right) = (index_at(-1.0e6, middle), index_at(1.0e6, middle));
+                        if to == CaretMove::LineStart {
+                            left.min(right)
+                        } else {
+                            let end = left.max(right);
+                            // Where a line wraps, its end is also the
+                            // start of the next, and that is where a caret
+                            // there is drawn: stay on this line.
+                            let drawn =
+                                self.frame
+                                    .text_caret(shown, &style, meta.constraint, place(end));
+                            if drawn.y > at.y + 0.5 {
+                                edit::previous(value, end)
+                            } else {
+                                end
+                            }
+                        }
+                    }
+                    _ => from,
+                };
+                edit::place_caret(&mut focus.edit, from, target, extend);
+                focus.caret_moved = true;
+            }
+            None => {}
+        }
+        let selection = focus.edit.selection_in(value).filter(|_| !input.empty);
+        if selection.is_none() {
+            // Nothing to hold on to.
+            focus.handles = false;
+        }
+
         let caret = self
             .frame
             .text_caret(shown, &style, meta.constraint, place(focus.edit.caret));
-        if overflow && !input.empty {
-            // The caret may sit on the right edge itself: the clip below
-            // is one caret wider than the box.
-            if caret.x - focus.scroll_x > rect.width {
-                focus.scroll_x = caret.x - rect.width;
+        if dragging.is_none() {
+            if furthest_x > 0.0 {
+                // The caret may sit on the right edge itself: the clip below
+                // is one caret wider than the box.
+                if caret.x - focus.scroll_x > rect.width {
+                    focus.scroll_x = caret.x - rect.width;
+                }
+                if caret.x - focus.scroll_x < 0.0 {
+                    focus.scroll_x = caret.x;
+                }
+                focus.scroll_x = focus.scroll_x.clamp(0.0, furthest_x).round();
+            } else {
+                focus.scroll_x = 0.0;
             }
-            if caret.x - focus.scroll_x < 0.0 {
-                focus.scroll_x = caret.x;
-            }
-            let furthest = (meta.measured.width - rect.width).max(0.0);
-            focus.scroll_x = focus.scroll_x.clamp(0.0, furthest).round();
-        } else {
-            focus.scroll_x = 0.0;
         }
-        if tall && std::mem::take(&mut focus.caret_moved) {
+        let scroll_x = focus.scroll_x.round();
+        if tall && dragging.is_none() && std::mem::take(&mut focus.caret_moved) {
             // Bring the caret's line into the field, with a line of
             // context above and below it where the field has the room:
             // a tap on the first or last visible line then brings the
@@ -2566,7 +3474,38 @@ impl<M: Clone> Painter<'_, M> {
                 rect.height,
             ));
         }
-        let origin = Point::new(origin_x - focus.scroll_x, origin_y - scroll_y);
+        let origin = Point::new(origin_x - scroll_x, origin_y - scroll_y);
+
+        // The selection, behind the text: one rectangle per line, and per
+        // run of a line that mixes directions.
+        if let Some((start, end)) = selection {
+            let color = fade(
+                with_alpha(self.theme.colors.primary, SELECTION_ALPHA),
+                context.alpha,
+            );
+            let mut rects = std::mem::take(&mut self.rects);
+            rects.clear();
+            self.frame.text_selection_rects(
+                shown,
+                &style,
+                meta.constraint,
+                place(start),
+                place(end),
+                &mut rects,
+            );
+            for line in &rects {
+                // Edges on whole pixels, so that lines meet without a seam.
+                let (left, top) = ((origin.x + line.x).round(), (origin.y + line.y).round());
+                let right = (origin.x + line.x + line.width).round();
+                let bottom = (origin.y + line.y + line.height).round();
+                self.frame.list.fill_rect(
+                    Rect::new(left, top, (right - left).max(1.0), bottom - top),
+                    color,
+                );
+            }
+            self.rects = rects;
+        }
+
         self.frame
             .draw_text(&input.text.content, &style, origin, meta.constraint);
 
@@ -2596,35 +3535,267 @@ impl<M: Clone> Painter<'_, M> {
             }
         }
 
-        // The caret: solid for half a second, gone for half a second, by
-        // asking for one frame at each change and none in between.
-        let from = *focus.blink_from.get_or_insert(self.elapsed);
-        let since = self.elapsed.saturating_sub(from);
-        let phase = (since.as_millis() / CARET_BLINK.as_millis()) as u32;
-        if phase.is_multiple_of(2) {
-            let height = (style.size * 1.3).min(caret.height).max(1.0);
-            let top = origin.y + caret.y + (caret.height - height) / 2.0;
-            self.frame.list.fill_rounded_rect(
-                Rect::new(
-                    (origin.x + caret.x).round(),
-                    top.round(),
-                    caret_width,
-                    height.round(),
-                ),
-                0.0,
-                fade(input.caret_color.resolve(self.theme), context.alpha),
-            );
+        if selection.is_none() {
+            // The caret: solid for half a second, gone for half a second,
+            // by asking for one frame at each change and none in between.
+            // A selection has no caret, and asks for no frames.
+            let from = *focus.blink_from.get_or_insert(self.elapsed);
+            let since = self.elapsed.saturating_sub(from);
+            let phase = (since.as_millis() / CARET_BLINK.as_millis()) as u32;
+            if phase.is_multiple_of(2) {
+                let height = (style.size * 1.3).min(caret.height).max(1.0);
+                let top = origin.y + caret.y + (caret.height - height) / 2.0;
+                self.frame.list.fill_rounded_rect(
+                    Rect::new(
+                        (origin.x + caret.x).round(),
+                        top.round(),
+                        caret_width,
+                        height.round(),
+                    ),
+                    0.0,
+                    fade(input.caret_color.resolve(self.theme), context.alpha),
+                );
+            }
+            let next = CARET_BLINK
+                .saturating_mul(phase.saturating_add(1))
+                .saturating_sub(since)
+                .max(Duration::from_millis(1));
+            self.frame.request_redraw_after(next);
         }
-        let next = CARET_BLINK
-            .saturating_mul(phase.saturating_add(1))
-            .saturating_sub(since)
-            .max(Duration::from_millis(1));
-        self.frame.request_redraw_after(next);
 
         if clip {
             self.frame.list.pop_clip();
         }
+
+        // Where the handles and the menu go, once everything else has
+        // been painted. Not inside a turned or scaled widget: they are
+        // drawn upright on the screen.
+        if space.is_none() && (focus.handles || focus.menu) {
+            let (start, end) = selection.unwrap_or((focus.edit.caret, focus.edit.caret));
+            let mut line = |index: usize| {
+                let at = self
+                    .frame
+                    .text_caret(shown, &style, meta.constraint, place(index));
+                Rect::new(
+                    (origin.x + at.x).round(),
+                    (origin.y + at.y).round(),
+                    0.0,
+                    at.height.round(),
+                )
+            };
+            let (start_line, mut end_line) = (line(start), line(end));
+            if selection.is_some() && end_line.y > start_line.y {
+                // A selection that ends where a line wraps ends on that
+                // line, not at the start of the next.
+                let before = line(edit::previous(value, end));
+                let mut ends = Vec::new();
+                self.frame.text_selection_rects(
+                    shown,
+                    &style,
+                    meta.constraint,
+                    place(edit::previous(value, end)),
+                    place(end),
+                    &mut ends,
+                );
+                if let Some(last) = ends.last()
+                    && before.y < end_line.y
+                {
+                    let rtl = edit::reads_right_to_left(value);
+                    let x = if rtl { last.x } else { last.x + last.width };
+                    end_line = Rect::new((origin.x + x).round(), before.y, 0.0, before.height);
+                }
+            }
+            let editable = input.on_input.is_some();
+            self.overlay = Some(SelectionOverlay {
+                input: context.id,
+                start: start_line,
+                end: end_line,
+                visible,
+                selected: selection.is_some(),
+                rtl: edit::reads_right_to_left(value),
+                handles: focus.handles,
+                menu: focus.menu && focus.drag.is_none(),
+                can_cut: selection.is_some() && !secure && editable,
+                can_copy: selection.is_some() && !secure,
+                can_paste: editable,
+                can_select_all: !value.is_empty() && selection != Some((0, value.len())),
+            });
+        }
         *self.focus = Some(focus);
+    }
+
+    // (see `index_near` below for how a touch becomes a character.)
+
+    /// The two handles of the focused field's selection and the menu over
+    /// it, painted after everything else and clipped by nothing, with the
+    /// touch regions that make them work.
+    fn paint_selection_controls(&mut self) {
+        let Some(overlay) = self.overlay else {
+            return;
+        };
+        let scale = self.scale;
+        let colors = self.theme.colors;
+        let size = (HANDLE_SIZE * scale).round();
+        // Only an end that can be seen has a handle.
+        let seen = |line: Rect| {
+            let visible = overlay.visible;
+            let foot = line.y + line.height;
+            line.x >= visible.x - 1.0
+                && line.x <= visible.x + visible.width + 2.0 * scale
+                && foot > visible.y
+                && foot <= visible.y + visible.height + 1.0
+        };
+        if overlay.handles && overlay.selected {
+            let ends = [
+                (SelectionEnd::Start, overlay.start, !overlay.rtl),
+                (SelectionEnd::End, overlay.end, overlay.rtl),
+            ];
+            for (index, (end, line, leans_left)) in ends.into_iter().enumerate() {
+                if !seen(line) {
+                    continue;
+                }
+                // A drop hanging from the foot of the line: a disc with
+                // one square corner, the corner on the text.
+                let half = (size / 2.0).round();
+                let (x, y) = (line.x, line.y + line.height);
+                let (disc, corner) = if leans_left {
+                    (
+                        Rect::new(x - size, y, size, size),
+                        Rect::new(x - half, y, half, half),
+                    )
+                } else {
+                    (Rect::new(x, y, size, size), Rect::new(x, y, half, half))
+                };
+                self.frame
+                    .list
+                    .fill_rounded_rect(disc, size / 2.0, colors.primary);
+                self.frame.list.fill_rect(corner, colors.primary);
+                let reach = HANDLE_REACH * scale;
+                self.regions.push(Region {
+                    id: overlay.input ^ (0x5E1E_C7ED_0000_0001 + index as u64),
+                    rect: Rect::new(
+                        disc.x - reach,
+                        disc.y - reach / 2.0,
+                        disc.width + 2.0 * reach,
+                        disc.height + 1.5 * reach,
+                    ),
+                    space: None,
+                    kind: RegionKind::Handle(end),
+                    scroll: None,
+                    field: Some(overlay.input),
+                });
+            }
+        }
+        if !overlay.menu {
+            return;
+        }
+
+        let style = TextStyle {
+            weight: TextWeight::MEDIUM,
+            line_height: 1.3,
+            family: self.theme.fonts.body,
+            ..TextStyle::new(MENU_TEXT * scale, colors.text)
+        };
+        let mut items = [(MenuAction::Copy, "", Size::ZERO); 4];
+        let mut count = 0;
+        let padding = (MENU_PADDING * scale).round();
+        let mut width = 0.0;
+        for (action, label) in MENU_LABELS {
+            let offered = match action {
+                MenuAction::Cut => overlay.can_cut,
+                MenuAction::Copy => overlay.can_copy,
+                MenuAction::Paste => overlay.can_paste,
+                MenuAction::SelectAll => overlay.can_select_all,
+            };
+            if offered {
+                let measured = self.frame.measure_text(label, &style, None);
+                width += measured.width.ceil() + 2.0 * padding;
+                items[count] = (action, label, measured);
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return;
+        }
+        let height = (MENU_HEIGHT * scale).round();
+        let (gap, margin) = (MENU_GAP * scale, MENU_MARGIN * scale);
+        let visible = overlay.visible;
+        // Above the selection; below it (and its handles) when there is
+        // no room above.
+        let top = overlay.start.y.min(overlay.end.y).max(visible.y);
+        let bottom = (overlay.start.y + overlay.start.height)
+            .max(overlay.end.y + overlay.end.height)
+            .min(visible.y + visible.height);
+        let center = if overlay.start.y == overlay.end.y {
+            (overlay.start.x + overlay.end.x) / 2.0
+        } else {
+            visible.x + visible.width / 2.0
+        };
+        let mut y = top - gap - height;
+        if y < self.safe_top + margin {
+            let handles = if overlay.handles && overlay.selected {
+                size
+            } else {
+                0.0
+            };
+            y = bottom + handles + gap;
+        }
+        let floor = self
+            .keyboard_top
+            .map_or(self.surface.height, |top| top * scale);
+        let y = y.min(floor - height - margin).max(0.0).round();
+        let x = (center - width / 2.0)
+            .min(self.surface.width - margin - width)
+            .max(margin)
+            .round();
+        let menu = Rect::new(x, y, width, height);
+        let radius = MENU_RADIUS * scale;
+        self.frame.list.draw_shadow(
+            menu,
+            radius,
+            Shadow::new(
+                0.0,
+                2.0 * scale,
+                10.0 * scale,
+                Color::rgba(0.0, 0.0, 0.0, 0.28),
+            ),
+        );
+        self.frame
+            .list
+            .fill_rounded_rect(menu, radius, colors.surface);
+        self.frame.list.stroke_rounded_rect(
+            menu,
+            radius,
+            Border::new(scale.round().max(1.0), colors.divider),
+        );
+        let mut left = x;
+        for (index, (action, label, measured)) in items.into_iter().take(count).enumerate() {
+            let item = Rect::new(left, y, measured.width.ceil() + 2.0 * padding, height);
+            let id = overlay.input ^ (0x5E1E_C7ED_0000_0010 + index as u64);
+            if self.pressed == Some(id) {
+                self.frame.list.push_rounded_clip(menu, radius);
+                self.frame.list.fill_rect(item, colors.pressed_overlay);
+                self.frame.list.pop_clip();
+            }
+            self.frame.draw_text(
+                label,
+                &style,
+                Point::new(
+                    item.x + padding,
+                    item.y + ((height - measured.height) / 2.0).round(),
+                ),
+                None,
+            );
+            self.regions.push(Region {
+                id,
+                rect: item,
+                space: None,
+                kind: RegionKind::Menu(action),
+                scroll: None,
+                field: Some(overlay.input),
+            });
+            left += item.width;
+        }
     }
 
     fn paint_text(
@@ -2734,18 +3905,24 @@ impl<M: Clone> Painter<'_, M> {
     fn paint_image(&mut self, data: &ImageNode, rect: Rect, context: &Context) {
         let radius = data.radius * self.scale;
         let tint = fade(data.tint.resolve(self.theme), context.alpha);
-        match data.source {
+        // Pictures scrolled out of view cost no rasterisation.
+        let visible = !intersect(rect, context.clip).is_empty();
+        match &data.source {
             PictureSource::Image(image) => {
                 self.frame
                     .list
-                    .draw_image_fit(image, rect, data.fit, radius, tint);
+                    .draw_image_fit(*image, rect, data.fit, radius, tint);
             }
-            PictureSource::Vector(picture) => {
-                // Pictures scrolled out of view cost no rasterisation.
-                if !intersect(rect, context.clip).is_empty() {
-                    self.frame.draw_picture(&picture, rect, radius, tint);
-                }
+            PictureSource::Vector(picture) if visible => {
+                self.frame.draw_picture(picture, rect, radius, tint);
             }
+            PictureSource::Svg(picture) if visible => {
+                self.frame.draw_picture(picture, rect, radius, tint);
+            }
+            PictureSource::SvgIcon(picture) if visible => {
+                self.frame.draw_svg_icon(picture, rect, tint);
+            }
+            _ => {}
         }
     }
 

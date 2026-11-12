@@ -4,10 +4,11 @@
 //! render thread. The one exception is `nativeSurfaceDestroyed`, which
 //! Android requires to block until the surface is no longer in use.
 //!
-//! They are called on the Android main thread, except the three that carry
+//! They are called on the Android main thread, except the four that carry
 //! the answer to a platform service request (`nativeHttpResult`,
-//! `nativeAudioResult`, `nativeLoadResult`; ADR 0019), which the host calls
-//! from whichever worker thread finished the work. That is sound: each
+//! `nativeAudioResult`, `nativeLoadResult`, `nativeClipboardResult`; ADRs
+//! 0019 and 0025), which the host calls from whichever thread finished the
+//! work. That is sound: each
 //! copies its arguments with the calling thread's own `JNIEnv*` and sends
 //! them through the channel to the render thread, whose sender may be used
 //! from any thread.
@@ -17,9 +18,9 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use morningstar_runtime::{
-    AudioError, HostState, HttpError, HttpResponse, ImeAction, Insets, Point, PointerEvent,
-    PointerPhase, Recording, ServiceId, ServiceResult, SurfaceSize, TextEditState, TextInputEvent,
-    utf16_to_byte_offset,
+    AudioError, CaretMove, HostState, HttpError, HttpResponse, ImeAction, Insets, Point,
+    PointerEvent, PointerPhase, Recording, ServiceId, ServiceResult, SurfaceSize, TextEditState,
+    TextInputEvent, utf16_to_byte_offset,
 };
 
 use crate::java;
@@ -232,8 +233,9 @@ pub extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeSetKeyb
 }
 
 /// The input method edited the host's copy of the focused field; this is
-/// the whole result. Offsets are in UTF-16 code units; a composing start of
-/// -1 means nothing is being composed. `serial` is the one the host was
+/// the whole result. Offsets are in UTF-16 code units; the selection runs
+/// from where it was started to the caret (the two are equal when nothing
+/// is selected); a composing start of -1 means nothing is being composed. `serial` is the one the host was
 /// given with the keyboard request this text belongs to.
 ///
 /// # Safety
@@ -244,7 +246,7 @@ pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_native
     _class: JObject,
     serial: i32,
     text: JObject,
-    _selection_start: i32,
+    selection_start: i32,
     selection_end: i32,
     composing_start: i32,
     composing_end: i32,
@@ -252,8 +254,9 @@ pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_native
     // SAFETY: the JVM passes this thread's env and a live String reference.
     let text = unsafe { java::string(env, text) };
     let offset = |utf16: i32| utf16_to_byte_offset(&text, usize::try_from(utf16).unwrap_or(0));
-    // There is no selection yet (ADR 0016): its end is the caret.
+    // Android's selection end is the edge that moves: the caret.
     let caret = offset(selection_end);
+    let anchor = Some(offset(selection_start)).filter(|anchor| *anchor != caret);
     let composing = (composing_start >= 0 && composing_end > composing_start)
         .then(|| (offset(composing_start), offset(composing_end)));
     render_thread::send(Message::Text {
@@ -261,6 +264,7 @@ pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_native
         event: TextInputEvent::Edited(TextEditState {
             text,
             caret,
+            anchor,
             composing,
         }),
     });
@@ -304,6 +308,12 @@ pub extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeTextCom
         6 => TextInputEvent::DeleteBackward,
         7 => TextInputEvent::DeleteForward,
         8 => TextInputEvent::FocusLost,
+        9 => TextInputEvent::SelectAll,
+        10 => TextInputEvent::Copy,
+        11 => TextInputEvent::Cut,
+        12 => TextInputEvent::Paste,
+        13 => TextInputEvent::Undo,
+        14 => TextInputEvent::Redo,
         // A host newer than this library; ignoring is safer than guessing.
         _ => return,
     };
@@ -311,6 +321,51 @@ pub extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeTextCom
         serial: None,
         event,
     });
+}
+
+/// A key that moves the caret of the focused field: an arrow, Home or End
+/// of a hardware keyboard, or of an input method that moves its cursor
+/// with key events. `movement` uses the `TEXT_MOVE_*` constants of
+/// `MorningstarNative.java`; `extend` (a `jboolean`) is Shift.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeTextMove(
+    _env: JniEnv,
+    _class: JObject,
+    movement: i32,
+    extend: u8,
+) {
+    let to = match movement {
+        0 => CaretMove::Left,
+        1 => CaretMove::Right,
+        2 => CaretMove::WordLeft,
+        3 => CaretMove::WordRight,
+        4 => CaretMove::Up,
+        5 => CaretMove::Down,
+        6 => CaretMove::LineStart,
+        7 => CaretMove::LineEnd,
+        8 => CaretMove::TextStart,
+        9 => CaretMove::TextEnd,
+        // A host newer than this library; ignoring is safer than guessing.
+        _ => return,
+    };
+    render_thread::send(Message::Text {
+        serial: None,
+        event: TextInputEvent::Move {
+            to,
+            extend: extend != 0,
+        },
+    });
+}
+
+/// Whether the user has asked the system for less motion: the animator
+/// duration scale is zero ("remove animations"). A `jboolean`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeSetReduceMotion(
+    _env: JniEnv,
+    _class: JObject,
+    reduce: u8,
+) {
+    render_thread::send(Message::ReduceMotion(reduce != 0));
 }
 
 // ------------------------------------------------------- platform services
@@ -436,5 +491,27 @@ pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_native
     render_thread::send(Message::Service {
         id: ServiceId(id.cast_unsigned()),
         result: ServiceResult::Loaded(value),
+    });
+}
+
+/// The answer to a clipboard read: its plain text, or `found` false (zero)
+/// when the clipboard is empty or holds no text.
+///
+/// # Safety
+/// Called by the JVM with a valid `JNIEnv*` and a `String` (or null). May
+/// be called on any thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeClipboardResult(
+    env: JniEnv,
+    _class: JObject,
+    id: i64,
+    found: u8,
+    text: JObject,
+) {
+    // SAFETY: the JVM passes this thread's env and a live String reference.
+    let text = (found != 0).then(|| unsafe { java::string(env, text) });
+    render_thread::send(Message::Service {
+        id: ServiceId(id.cast_unsigned()),
+        result: ServiceResult::Clipboard(text),
     });
 }

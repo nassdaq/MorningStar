@@ -13,7 +13,10 @@
 //! a recording, a clip to play, a value to store) are handed to
 //! `MorningstarNative.onHttpRequest` and `onServiceCommand`, which pass
 //! them to worker threads; the answers come back through native methods
-//! like everything else.
+//! like everything else. The clipboard is one of those services. The
+//! last is the look of the system's bars (ADR 0026): whether their icons
+//! should be light or dark over the frame just built goes to
+//! `MorningstarNative.onSystemBars`.
 //!
 //! This is done with the JNI function tables directly rather than a binding
 //! crate (ADR 0007): seventeen functions are needed. Their positions in the
@@ -75,8 +78,9 @@ const OK: i32 = 0;
 
 const METHOD_NAME: &CStr = c"onTextInputCommand";
 /// `(int command, int serial, int keyboard, int capitalization, int action,
-/// int flags, String text, int caret)`, returning void.
-const METHOD_SIGNATURE: &CStr = c"(IIIIIILjava/lang/String;I)V";
+/// int flags, String text, int selectionStart, int selectionEnd)`,
+/// returning void.
+const METHOD_SIGNATURE: &CStr = c"(IIIIIILjava/lang/String;II)V";
 
 const BACK_METHOD_NAME: &CStr = c"onBackResult";
 /// `(boolean handled)`, returning void.
@@ -92,6 +96,10 @@ const SERVICE_METHOD_NAME: &CStr = c"onServiceCommand";
 /// `(int command, long id, String first, String second, byte[] data)`,
 /// returning void.
 const SERVICE_METHOD_SIGNATURE: &CStr = c"(IJLjava/lang/String;Ljava/lang/String;[B)V";
+
+const BARS_METHOD_NAME: &CStr = c"onSystemBars";
+/// `(boolean darkStatusIcons, boolean darkNavigationIcons)`, returning void.
+const BARS_METHOD_SIGNATURE: &CStr = c"(ZZ)V";
 
 /// `jvalue`: one argument of a `Call...MethodA` function.
 #[repr(C)]
@@ -157,6 +165,8 @@ struct Host {
     /// application is then told its requests are unsupported.
     http_method: MethodId,
     service_method: MethodId,
+    /// `onSystemBars`, or null likewise: the bars keep the host's look.
+    bars_method: MethodId,
 }
 
 // SAFETY: a `JavaVM*`, a global reference and a method id are valid on
@@ -243,7 +253,12 @@ pub unsafe fn init(env: JniEnv, class: JObject) {
         let service_method = optional(
             SERVICE_METHOD_NAME,
             SERVICE_METHOD_SIGNATURE,
-            "audio and storage are unsupported",
+            "audio, storage and the clipboard are unsupported",
+        );
+        let bars_method = optional(
+            BARS_METHOD_NAME,
+            BARS_METHOD_SIGNATURE,
+            "the system bars keep their icons' colour",
         );
         Host {
             vm,
@@ -252,6 +267,7 @@ pub unsafe fn init(env: JniEnv, class: JObject) {
             back_method,
             http_method,
             service_method,
+            bars_method,
         }
     };
     let _ = HOST.set(host);
@@ -273,8 +289,11 @@ pub struct KeyboardCall<'a> {
     pub action: i32,
     pub flags: i32,
     pub text: &'a str,
-    /// The caret in UTF-16 code units, which is what Java counts in.
-    pub caret: i32,
+    /// The selection in UTF-16 code units, which is what Java counts in:
+    /// where it was started from, and the caret. Equal when nothing is
+    /// selected.
+    pub selection_start: i32,
+    pub selection_end: i32,
 }
 
 impl Env {
@@ -331,7 +350,12 @@ impl Env {
                     JValue { int: call.action },
                     JValue { int: call.flags },
                     JValue { object: string },
-                    JValue { int: call.caret },
+                    JValue {
+                        int: call.selection_start,
+                    },
+                    JValue {
+                        int: call.selection_end,
+                    },
                 ];
                 entry::<CallStaticVoidMethodA>(env, CALL_STATIC_VOID_METHOD_A)(
                     env,
@@ -380,6 +404,48 @@ impl Env {
                 entry::<ExceptionVoid>(env, EXCEPTION_DESCRIBE)(env);
                 entry::<ExceptionVoid>(env, EXCEPTION_CLEAR)(env);
                 log::error("the host threw from onBackResult");
+            }
+        }
+        true
+    }
+}
+
+impl Env {
+    /// Calls `MorningstarNative.onSystemBars` on this thread: whether the
+    /// status bar's and the navigation bar's icons should be dark (over a
+    /// light screen). The Java method only posts to the main thread, so
+    /// this returns at once. Returns false if the host could not be told
+    /// (it has no such method).
+    pub fn system_bars(&self, dark_status_icons: bool, dark_navigation_icons: bool) -> bool {
+        let Some(host) = HOST.get().filter(|host| !host.bars_method.is_null()) else {
+            return false;
+        };
+        let env = self.env;
+        // SAFETY: `env` belongs to this thread (`Env` is not `Send`). The
+        // class and the method id are valid for the life of the process,
+        // and the method id was checked not to be null. The argument array
+        // matches the method's signature: two `jboolean`s. No local
+        // reference is created, and an exception is cleared before
+        // returning.
+        unsafe {
+            let arguments = [
+                JValue {
+                    boolean: u8::from(dark_status_icons),
+                },
+                JValue {
+                    boolean: u8::from(dark_navigation_icons),
+                },
+            ];
+            entry::<CallStaticVoidMethodA>(env, CALL_STATIC_VOID_METHOD_A)(
+                env,
+                host.class,
+                host.bars_method,
+                arguments.as_ptr(),
+            );
+            if entry::<ExceptionCheck>(env, EXCEPTION_CHECK)(env) != 0 {
+                entry::<ExceptionVoid>(env, EXCEPTION_DESCRIBE)(env);
+                entry::<ExceptionVoid>(env, EXCEPTION_CLEAR)(env);
+                log::error("the host threw from onSystemBars");
             }
         }
         true

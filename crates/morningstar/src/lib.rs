@@ -34,6 +34,11 @@ pub use morningstar_runtime::{
     TextInputRequest, TextInputTraits, TextSpan, TextStyle, TextWeight, Transform, VectorIcon,
     VectorPicture, app,
 };
+// Loaded SVG files (ADR 0027).
+pub use morningstar_runtime::{RasterPicture, SvgAsset, SvgError, SvgErrorKind, SvgPicture};
+// What a host is told about the system's bars, and the keys that move a
+// caret (ADRs 0025 and 0026).
+pub use morningstar_runtime::{BarContent, CaretMove, SystemBars};
 // Platform services (ADR 0019): the data of a request to the device and of
 // its answer. Applications reach them through `ui::Effects`; a low-level
 // `App` through `App::service_requests` and `App::service_result`.

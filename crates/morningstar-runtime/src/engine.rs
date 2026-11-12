@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use morningstar_core::{
     AtlasView, Color, DisplayList, FrameStats, FrameSummary, HostState, ImagesView, Insets,
     Lifecycle, LifecycleEvent, PointerEvent, ServiceCall, ServiceId, ServiceResult, SurfaceSize,
-    TextInputCommand, TextInputEvent, TextInputRequest,
+    SystemBars, TextInputCommand, TextInputEvent, TextInputRequest,
 };
 use morningstar_gpu::{AdapterInfo, FrameOutcome, GpuError, NativeSurface, Renderer};
 
@@ -134,6 +134,12 @@ pub struct Engine {
     /// through `take_text_input_command`, brought up to date by the edits it
     /// reports itself.
     text_host: Option<TextInputRequest>,
+    /// How the last frame built said the system bars should look, and how
+    /// the host is believed to show them.
+    bars_declared: Option<SystemBars>,
+    bars_host: Option<SystemBars>,
+    /// The user asked the system for less motion.
+    reduce_motion: bool,
     /// Benchmark mode: every frame asks for another.
     continuous: bool,
     /// Foreground time accumulated before the current resume.
@@ -209,6 +215,9 @@ impl Engine {
             timed_frames: 0,
             text_declared: None,
             text_host: None,
+            bars_declared: None,
+            bars_host: None,
+            reduce_motion: false,
             continuous: false,
             elapsed_before_resume: Duration::ZERO,
             resumed_at: None,
@@ -327,6 +336,20 @@ impl Engine {
         true
     }
 
+    /// Says whether the user has asked the system for less motion
+    /// (Android: the animator duration scale is zero; iOS: "reduce
+    /// motion"); see [`FrameInfo::reduce_motion`]. Returns true if it
+    /// changed, in which case a frame is produced. Hosts call it at start
+    /// and whenever the setting may have changed.
+    pub fn set_reduce_motion(&mut self, reduce: bool) -> bool {
+        if reduce == self.reduce_motion {
+            return false;
+        }
+        self.reduce_motion = reduce;
+        self.redraw = true;
+        true
+    }
+
     /// The keyboard inset most recently set.
     pub fn keyboard_inset(&self) -> f32 {
         self.keyboard_inset
@@ -440,7 +463,8 @@ impl Engine {
             .with_elapsed(self.elapsed())
             .with_scale(self.scale)
             .with_insets(self.insets)
-            .with_keyboard_inset(self.keyboard_inset);
+            .with_keyboard_inset(self.keyboard_inset)
+            .with_reduce_motion(self.reduce_motion);
         self.app.frame(&info, &mut self.frame);
         let build = build_start.elapsed();
         self.redraw_at = self
@@ -452,6 +476,10 @@ impl Engine {
         // change costs no allocation.
         if self.text_declared.as_ref() != self.frame.text_input() {
             self.text_declared = self.frame.text_input().cloned();
+        }
+        // A frame with no opinion about the bars leaves them as they are.
+        if let Some(bars) = self.frame.system_bars() {
+            self.bars_declared = Some(bars);
         }
         let again = self.continuous || self.frame.redraw_requested();
 
@@ -513,6 +541,7 @@ impl Engine {
                 if let Some(host) = self.text_host.as_mut() {
                     host.text.clone_from(&state.text);
                     host.caret = state.caret;
+                    host.anchor = state.anchor.filter(|anchor| *anchor != state.caret);
                 }
             }
             TextInputEvent::FocusLost => {
@@ -591,6 +620,19 @@ impl Engine {
         Some(command)
     }
 
+    /// How the host must now show the system's bars (light or dark icons),
+    /// if the last frame built wants them different from how the host was
+    /// last told to show them; `None` otherwise, which is the usual answer.
+    /// Hosts call this after every [`frame`](Self::frame), as they call
+    /// [`take_text_input_command`](Self::take_text_input_command).
+    pub fn take_system_bars(&mut self) -> Option<SystemBars> {
+        if self.bars_declared == self.bars_host {
+            return None;
+        }
+        self.bars_host = self.bars_declared;
+        self.bars_declared
+    }
+
     /// Number of frames presented so far.
     pub fn frames_presented(&self) -> u64 {
         self.frame_index
@@ -652,6 +694,8 @@ mod tests {
         redraw_after: Option<Duration>,
         /// The app declares this text input on every frame.
         text: Option<TextInputRequest>,
+        /// The app declares these system bars on every frame.
+        bars: Option<SystemBars>,
         text_events: Vec<TextInputEvent>,
         /// What the app answers to `back`, and how often it was asked.
         handles_back: bool,
@@ -714,6 +758,9 @@ mod tests {
             }
             if let Some(request) = probe.text.clone() {
                 frame.set_text_input(request);
+            }
+            if let Some(bars) = probe.bars {
+                frame.set_system_bars(bars);
             }
         }
 
@@ -1405,6 +1452,7 @@ mod tests {
             traits: morningstar_core::TextInputTraits::default(),
             text: text.to_owned(),
             caret: text.len(),
+            anchor: None,
         }
     }
 
@@ -1414,6 +1462,99 @@ mod tests {
             self.touch(PointerPhase::Down);
             self.run();
         }
+    }
+
+    #[test]
+    fn a_selection_the_app_makes_is_an_update_and_the_hosts_own_is_not_echoed() {
+        let mut h = Harness::idle();
+        h.declare(Some(request(7, "habari yako")));
+        assert!(h.engine.take_text_input_command().is_some());
+
+        // The application selects a word: the host must be told.
+        let selected = TextInputRequest {
+            caret: 6,
+            anchor: Some(0),
+            ..request(7, "habari yako")
+        };
+        h.declare(Some(selected.clone()));
+        assert_eq!(
+            h.engine.take_text_input_command(),
+            Some(TextInputCommand::Update(selected))
+        );
+
+        // The input method selects another: the field adopts it and
+        // declares it, and nothing goes back.
+        h.engine
+            .text_input(TextInputEvent::Edited(morningstar_core::TextEditState {
+                text: "habari yako".to_owned(),
+                caret: 11,
+                anchor: Some(7),
+                composing: None,
+            }));
+        h.declare(Some(TextInputRequest {
+            caret: 11,
+            anchor: Some(7),
+            ..request(7, "habari yako")
+        }));
+        assert_eq!(h.engine.take_text_input_command(), None);
+
+        // A collapsed selection from the host is no selection.
+        h.engine
+            .text_input(TextInputEvent::Edited(morningstar_core::TextEditState {
+                text: "habari yako".to_owned(),
+                caret: 3,
+                anchor: Some(3),
+                composing: None,
+            }));
+        h.declare(Some(TextInputRequest {
+            caret: 3,
+            ..request(7, "habari yako")
+        }));
+        assert_eq!(h.engine.take_text_input_command(), None);
+    }
+
+    // --- System bars and reduce motion --------------------------------------
+
+    #[test]
+    fn the_host_is_told_about_the_system_bars_only_when_they_change() {
+        let mut h = Harness::idle();
+        assert_eq!(h.engine.take_system_bars(), None, "no opinion yet");
+
+        h.probe.lock().unwrap().bars = Some(SystemBars::DARK_CONTENT);
+        h.touch(PointerPhase::Down);
+        h.run();
+        assert_eq!(h.engine.take_system_bars(), Some(SystemBars::DARK_CONTENT));
+        assert_eq!(h.engine.take_system_bars(), None, "told once");
+        h.touch(PointerPhase::Down);
+        h.run();
+        assert_eq!(h.engine.take_system_bars(), None, "the same again");
+
+        h.probe.lock().unwrap().bars = Some(SystemBars::LIGHT_CONTENT);
+        h.touch(PointerPhase::Down);
+        h.run();
+        assert_eq!(h.engine.take_system_bars(), Some(SystemBars::LIGHT_CONTENT));
+
+        // A frame that says nothing leaves the bars as they are.
+        h.probe.lock().unwrap().bars = None;
+        h.touch(PointerPhase::Down);
+        h.run();
+        assert_eq!(h.engine.take_system_bars(), None);
+    }
+
+    #[test]
+    fn reduce_motion_reaches_the_app_and_a_change_produces_one_frame() {
+        let mut h = Harness::idle();
+        assert!(!h.probe.lock().unwrap().frames.last().unwrap().reduce_motion);
+        assert!(h.engine.set_reduce_motion(true));
+        assert!(h.engine.needs_frame());
+        assert_eq!(h.run(), 1);
+        assert!(h.probe.lock().unwrap().frames.last().unwrap().reduce_motion);
+        // Repeating the value costs nothing.
+        assert!(!h.engine.set_reduce_motion(true));
+        assert!(!h.engine.needs_frame());
+        assert!(h.engine.set_reduce_motion(false));
+        assert_eq!(h.run(), 1);
+        assert!(!h.probe.lock().unwrap().frames.last().unwrap().reduce_motion);
     }
 
     #[test]
@@ -1471,6 +1612,7 @@ mod tests {
             .text_input(TextInputEvent::Edited(morningstar_core::TextEditState {
                 text: "hi".to_owned(),
                 caret: 2,
+                anchor: None,
                 composing: Some((0, 2)),
             }));
         assert!(h.engine.needs_frame(), "text input produces a frame");
@@ -1491,6 +1633,7 @@ mod tests {
             .text_input(TextInputEvent::Edited(morningstar_core::TextEditState {
                 text: "12x".to_owned(),
                 caret: 3,
+                anchor: None,
                 composing: None,
             }));
         h.run();

@@ -21,14 +21,16 @@ pub use morningstar_core::{
     ServiceCall, ServiceId, ServiceRequest, ServiceResult,
 };
 pub use morningstar_core::{
-    Capitalization, ImeAction, KeyboardType, TextEditState, TextInputCommand, TextInputEvent,
-    TextInputRequest, TextInputTraits, byte_to_utf16_offset, utf16_to_byte_offset,
+    BarContent, Capitalization, CaretMove, ImeAction, KeyboardType, SystemBars, TextEditState,
+    TextInputCommand, TextInputEvent, TextInputRequest, TextInputTraits, byte_to_utf16_offset,
+    utf16_to_byte_offset,
 };
 pub use morningstar_core::{Image, ImageError, ImageFit, ImageId, ImagePlacement, ImagesView};
 pub use morningstar_gpu::{AdapterInfo, FrameOutcome, GpuError, NativeSurface};
 pub use morningstar_text::{
-    FontFamily, IconError, Layer, LineCap, LineJoin, Shape, TextAlign, TextSpan, TextStyle,
-    TextWeight, VectorIcon, VectorPicture,
+    FontFamily, IconError, Layer, LineCap, LineJoin, RasterPicture, Shape, SvgAsset, SvgError,
+    SvgErrorKind, SvgPicture, TextAlign, TextSpan, TextStyle, TextWeight, VectorIcon,
+    VectorPicture,
 };
 
 /// Registers the application type for the platform host to start.

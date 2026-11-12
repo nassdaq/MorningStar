@@ -7,7 +7,7 @@
 
 use std::borrow::Cow;
 
-use morningstar_core::TextEditState;
+use morningstar_core::{CaretMove, TextEditState};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// The character a secure field shows for each character of its value.
@@ -30,9 +30,47 @@ pub(crate) struct EditConfig {
 /// The transient state of the field being edited.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct EditState {
+    /// Where typing goes. With a selection, the end of it that moves.
     pub caret: usize,
+    /// The other end of the selection: where it was started from, before
+    /// or after the caret. `None`, or equal to the caret, when nothing is
+    /// selected.
+    pub anchor: Option<usize>,
     /// The part of the value still being composed by the input method.
     pub composing: Option<(usize, usize)>,
+}
+
+impl EditState {
+    /// A caret at `caret`, nothing selected, nothing being composed.
+    pub(crate) const fn at(caret: usize) -> Self {
+        Self {
+            caret,
+            anchor: None,
+            composing: None,
+        }
+    }
+
+    /// The selected range, start before end, if anything is selected.
+    pub(crate) fn selection(&self) -> Option<(usize, usize)> {
+        let anchor = self.anchor.filter(|anchor| *anchor != self.caret)?;
+        Some((anchor.min(self.caret), anchor.max(self.caret)))
+    }
+
+    /// The selection of `value`, with both ends moved to character
+    /// boundaries inside it.
+    pub(crate) fn selection_in(&self, value: &str) -> Option<(usize, usize)> {
+        let (start, end) = self.selection()?;
+        let (start, end) = (snap(value, start), snap(value, end));
+        (start < end).then_some((start, end))
+    }
+
+    /// Selects `start..end` with the caret at `end`; a range of nothing is
+    /// a caret.
+    pub(crate) fn select(&mut self, start: usize, end: usize) {
+        self.caret = end;
+        self.anchor = (start != end).then_some(start);
+        self.composing = None;
+    }
 }
 
 /// Number of characters (grapheme clusters) in `text`.
@@ -155,7 +193,12 @@ pub(crate) fn insert(
     text: &str,
     config: &EditConfig,
 ) -> Option<String> {
-    let range = state.composing.take().unwrap_or((state.caret, state.caret));
+    let range = state
+        .composing
+        .take()
+        .or(state.selection())
+        .unwrap_or((state.caret, state.caret));
+    state.anchor = None;
     let caret = snap(value, state.caret);
     match replace(value, range, text, config) {
         Some((result, caret)) => {
@@ -178,7 +221,11 @@ pub(crate) fn compose(
     text: &str,
     config: &EditConfig,
 ) -> Option<String> {
-    let range = state.composing.unwrap_or((state.caret, state.caret));
+    let range = state
+        .composing
+        .or(state.selection())
+        .unwrap_or((state.caret, state.caret));
+    state.anchor = None;
     let start = snap(value, range.0);
     match replace(value, range, text, config) {
         Some((result, caret)) => {
@@ -198,6 +245,9 @@ pub(crate) fn compose(
 /// Backspace: removes the character before the caret, all of it (a letter
 /// with its marks goes as one).
 pub(crate) fn delete_backward(value: &str, state: &mut EditState) -> Option<String> {
+    if let Some(removed) = delete_selection(value, state) {
+        return Some(removed);
+    }
     let caret = snap(value, state.caret);
     let start = previous(value, caret);
     state.caret = start;
@@ -206,9 +256,22 @@ pub(crate) fn delete_backward(value: &str, state: &mut EditState) -> Option<Stri
 
 /// Forward delete: removes the character after the caret.
 pub(crate) fn delete_forward(value: &str, state: &mut EditState) -> Option<String> {
+    if let Some(removed) = delete_selection(value, state) {
+        return Some(removed);
+    }
     let caret = snap(value, state.caret);
     state.caret = caret;
     remove(value, state, caret, next(value, caret))
+}
+
+/// Removes the selected text, if any, leaving the caret where it was.
+/// `None` if nothing is selected.
+pub(crate) fn delete_selection(value: &str, state: &mut EditState) -> Option<String> {
+    let selection = state.selection_in(value);
+    state.anchor = None;
+    let (start, end) = selection?;
+    state.caret = start;
+    remove(value, state, start, end)
 }
 
 fn remove(value: &str, state: &mut EditState, start: usize, end: usize) -> Option<String> {
@@ -274,6 +337,13 @@ pub(crate) fn adopt(
     }
     let unchanged_by_field = *text == *edited.text;
     state.caret = snap(&text, new_caret);
+    // The platform's own selection is taken as it is; one over text the
+    // field changed means nothing any more.
+    state.anchor = edited
+        .anchor
+        .filter(|_| unchanged_by_field)
+        .map(|anchor| snap(&text, anchor))
+        .filter(|anchor| *anchor != state.caret);
     // A composition only survives if the field took the text as it was.
     state.composing = edited
         .composing
@@ -281,6 +351,266 @@ pub(crate) fn adopt(
         .map(|(from, to)| (snap(&text, from), snap(&text, to)))
         .filter(|(from, to)| to > from);
     (*text != *value).then(|| text.into_owned())
+}
+
+/// True for whitespace, which is never a word.
+fn is_space(segment: &str) -> bool {
+    segment.chars().all(char::is_whitespace)
+}
+
+/// The word a double tap or a long press at `index` selects: the word (or
+/// run of punctuation) the index is in or at the end of. On whitespace, or
+/// in an empty value, nothing: the range is empty, at the index.
+pub(crate) fn word_at(value: &str, index: usize) -> (usize, usize) {
+    let index = snap(value, index);
+    let mut before: Option<(usize, usize)> = None;
+    for (start, segment) in value.split_word_bound_indices() {
+        let end = start + segment.len();
+        if index < start {
+            break;
+        }
+        if index < end {
+            if !is_space(segment) {
+                return (start, end);
+            }
+            // On a space: the word that ends exactly here, if there is one.
+            return before
+                .filter(|word| word.1 == index)
+                .unwrap_or((index, index));
+        }
+        before = (!is_space(segment)).then_some((start, end));
+    }
+    // At the very end of the value.
+    before
+        .filter(|word| word.1 == index)
+        .unwrap_or((index, index))
+}
+
+/// Where Ctrl+Left goes from `index`: the start of the word the index is in
+/// or after.
+pub(crate) fn word_start_before(value: &str, index: usize) -> usize {
+    let index = snap(value, index);
+    value
+        .unicode_word_indices()
+        .map(|(start, _)| start)
+        .take_while(|start| *start < index)
+        .last()
+        .unwrap_or(0)
+}
+
+/// Where Ctrl+Right goes from `index`: the end of the word the index is in
+/// or before.
+pub(crate) fn word_end_after(value: &str, index: usize) -> usize {
+    let index = snap(value, index);
+    value
+        .unicode_word_indices()
+        .map(|(start, word)| start + word.len())
+        .find(|end| *end > index)
+        .unwrap_or(value.len())
+}
+
+/// True if `value` reads from right to left: its first letter is Hebrew or
+/// Arabic (the first-strong rule of the bidirectional algorithm, for the
+/// scripts the bundled fonts cover).
+pub(crate) fn reads_right_to_left(value: &str) -> bool {
+    value
+        .chars()
+        .find(|character| character.is_alphabetic())
+        .is_some_and(|character| {
+            matches!(
+                u32::from(character),
+                0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF
+            )
+        })
+}
+
+/// Moves the caret as a key does. Returns false for the moves that depend
+/// on how the text is laid out in lines ([`CaretMove::Up`],
+/// [`CaretMove::Down`], [`CaretMove::LineStart`], [`CaretMove::LineEnd`]),
+/// which the caller works out with the text engine; they change nothing
+/// here.
+///
+/// Left and right are the reading direction's backward and forward: in a
+/// value that reads right to left the Left key moves on. Without `extend`
+/// a selection collapses to the end the key points at instead of moving
+/// from it, as on every platform.
+pub(crate) fn move_caret(value: &str, state: &mut EditState, to: CaretMove, extend: bool) -> bool {
+    let caret = snap(value, state.caret);
+    let rtl = reads_right_to_left(value);
+    let backward = |to: CaretMove| match to {
+        CaretMove::Left | CaretMove::WordLeft => !rtl,
+        _ => rtl,
+    };
+    let selection = state.selection_in(value);
+    let target = match to {
+        CaretMove::Left | CaretMove::Right => match selection.filter(|_| !extend) {
+            Some((start, end)) => {
+                if backward(to) {
+                    start
+                } else {
+                    end
+                }
+            }
+            None if backward(to) => previous(value, caret),
+            None => next(value, caret),
+        },
+        CaretMove::WordLeft | CaretMove::WordRight => {
+            if backward(to) {
+                word_start_before(value, caret)
+            } else {
+                word_end_after(value, caret)
+            }
+        }
+        CaretMove::TextStart => 0,
+        CaretMove::TextEnd => value.len(),
+        CaretMove::Up | CaretMove::Down | CaretMove::LineStart | CaretMove::LineEnd => {
+            return false;
+        }
+    };
+    place_caret(state, caret, target, extend);
+    true
+}
+
+/// Puts the caret at `target`. With `extend` the other end of the
+/// selection stays where it is (or starts at `from`, where the caret was).
+pub(crate) fn place_caret(state: &mut EditState, from: usize, target: usize, extend: bool) {
+    let anchor = if extend {
+        Some(state.anchor.unwrap_or(from))
+    } else {
+        None
+    };
+    state.caret = target;
+    state.anchor = anchor.filter(|anchor| *anchor != target);
+    // Moving the caret ends a composition where it stands.
+    state.composing = None;
+}
+
+/// Text from the clipboard, as a field takes it: line breaks of every
+/// kind become `\n` for a field of several lines and a space for a field
+/// of one, so that two pasted lines do not run together into one word.
+/// What the field does not accept, and what does not fit, is then dropped
+/// by [`insert`] like typed text.
+pub(crate) fn pasted<'a>(text: &'a str, config: &EditConfig) -> Cow<'a, str> {
+    if !text.contains(['\r', '\n', '\u{2028}', '\u{2029}']) {
+        return Cow::Borrowed(text);
+    }
+    let line_break = if config.multiline { "\n" } else { " " };
+    let mut result = String::with_capacity(text.len());
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        match character {
+            '\r' => {
+                if characters.peek() == Some(&'\n') {
+                    characters.next();
+                }
+                result.push_str(line_break);
+            }
+            '\n' | '\u{2028}' | '\u{2029}' => result.push_str(line_break),
+            other => result.push(other),
+        }
+    }
+    // A single line does not end in the space its last line break became.
+    if !config.multiline {
+        let kept = result.trim_end_matches(' ').len();
+        if text.ends_with(['\r', '\n', '\u{2028}', '\u{2029}']) {
+            result.truncate(kept);
+        }
+    }
+    Cow::Owned(result)
+}
+
+/// Most steps a field can be taken back.
+const HISTORY_LIMIT: usize = 100;
+
+/// What kind of edit the last recorded step was, so that a run of typing
+/// (or of backspaces) is taken back as one step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EditKind {
+    Typing,
+    Deleting,
+    /// A paste, a cut, a replaced selection: always a step of its own.
+    Other,
+}
+
+/// A field as it was before an edit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Snapshot {
+    value: String,
+    caret: usize,
+    anchor: Option<usize>,
+}
+
+/// The edits made to a field since it got the focus, for undo and redo.
+/// Bounded: beyond [`HISTORY_LIMIT`] steps the oldest is forgotten.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct History {
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+    last: Option<EditKind>,
+}
+
+impl History {
+    /// Notes the field as it is before an edit of `kind` changes it. An
+    /// edit that continues a run of the same kind is part of that run's
+    /// step.
+    pub(crate) fn record(&mut self, value: &str, state: &EditState, kind: EditKind) {
+        self.redo.clear();
+        let continues = kind != EditKind::Other && self.last == Some(kind);
+        self.last = Some(kind);
+        if continues {
+            return;
+        }
+        if self.undo.len() == HISTORY_LIMIT {
+            self.undo.remove(0);
+        }
+        self.undo.push(Snapshot {
+            value: value.to_owned(),
+            caret: state.caret,
+            anchor: state.anchor,
+        });
+    }
+
+    /// The caret moved, or something else happened that ends a run: the
+    /// next edit is a new step.
+    pub(crate) fn break_run(&mut self) {
+        self.last = None;
+    }
+
+    /// Takes the last step back: returns the value before it and restores
+    /// the caret of that time. `None` if there is nothing to take back.
+    pub(crate) fn undo(&mut self, value: &str, state: &mut EditState) -> Option<String> {
+        Self::step(&mut self.undo, &mut self.redo, value, state).inspect(|_| self.last = None)
+    }
+
+    /// Makes the step last taken back again.
+    pub(crate) fn redo(&mut self, value: &str, state: &mut EditState) -> Option<String> {
+        Self::step(&mut self.redo, &mut self.undo, value, state).inspect(|_| self.last = None)
+    }
+
+    fn step(
+        from: &mut Vec<Snapshot>,
+        to: &mut Vec<Snapshot>,
+        value: &str,
+        state: &mut EditState,
+    ) -> Option<String> {
+        let snapshot = from.pop()?;
+        to.push(Snapshot {
+            value: value.to_owned(),
+            caret: state.caret,
+            anchor: state.anchor,
+        });
+        state.caret = snapshot.caret;
+        state.anchor = snapshot.anchor;
+        state.composing = None;
+        Some(snapshot.value)
+    }
+
+    /// Forgets everything: the field holds something no step here led to.
+    pub(crate) fn clear(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+        self.last = None;
+    }
 }
 
 /// What a field shows for `value`: the value itself, or one bullet per
@@ -328,10 +658,7 @@ mod tests {
     };
 
     fn at(caret: usize) -> EditState {
-        EditState {
-            caret,
-            composing: None,
-        }
+        EditState::at(caret)
     }
 
     #[test]
@@ -452,6 +779,7 @@ mod tests {
         // Replacing a composition frees its room first.
         let mut state = EditState {
             caret: 4,
+            anchor: None,
             composing: Some((2, 4)),
         };
         assert_eq!(insert("abcd", &mut state, "XY", &config).unwrap(), "abXY");
@@ -536,6 +864,7 @@ mod tests {
     fn backspace_inside_a_composition_shrinks_it() {
         let mut state = EditState {
             caret: 5,
+            anchor: None,
             composing: Some((2, 5)),
         };
         let value = delete_backward("abcde", &mut state).unwrap();
@@ -543,6 +872,7 @@ mod tests {
         assert_eq!((state.caret, state.composing), (4, Some((2, 4))));
         let mut state = EditState {
             caret: 3,
+            anchor: None,
             composing: Some((2, 3)),
         };
         delete_backward("abc", &mut state).unwrap();
@@ -555,6 +885,7 @@ mod tests {
         let edited = TextEditState {
             text: "Juma".to_owned(),
             caret: 4,
+            anchor: None,
             composing: Some((0, 4)),
         };
         assert_eq!(adopt("", &mut state, &edited, &FREE).unwrap(), "Juma");
@@ -574,6 +905,7 @@ mod tests {
         let edited = TextEditState {
             text: "12ab3".to_owned(),
             caret: 4,
+            anchor: None,
             composing: Some((2, 4)),
         };
         assert_eq!(adopt("12", &mut state, &edited, &digits).unwrap(), "123");
@@ -583,6 +915,7 @@ mod tests {
         let edited = TextEditState {
             text: "12345678".to_owned(),
             caret: 8,
+            anchor: None,
             composing: None,
         };
         assert_eq!(
@@ -604,6 +937,7 @@ mod tests {
         let edited = TextEditState {
             text: "47".to_owned(),
             caret: 2,
+            anchor: None,
             composing: None,
         };
         assert_eq!(adopt("4", &mut state, &edited, &boxed).unwrap(), "7");
@@ -628,5 +962,310 @@ mod tests {
         assert_eq!(value_index(value, 99 * bullet, true), value.len());
         assert_eq!(value_index(value, 2, false), 1, "snapped to a boundary");
         assert_eq!(display_index(value, 4, false), 4);
+    }
+
+    // ------------------------------------------------------------ selection
+
+    fn selecting(anchor: usize, caret: usize) -> EditState {
+        EditState {
+            caret,
+            anchor: Some(anchor),
+            composing: None,
+        }
+    }
+
+    #[test]
+    fn a_selection_is_ordered_and_an_empty_one_is_none() {
+        assert_eq!(selecting(2, 5).selection(), Some((2, 5)));
+        assert_eq!(selecting(5, 2).selection(), Some((2, 5)));
+        assert_eq!(selecting(3, 3).selection(), None);
+        assert_eq!(at(3).selection(), None);
+        // Ends inside a character move back to its start.
+        let value = "ae\u{301}b";
+        assert_eq!(selecting(0, 2).selection_in(value), Some((0, 1)));
+        assert_eq!(selecting(1, 3).selection_in(value), None);
+        let mut state = at(0);
+        state.select(4, 1);
+        assert_eq!((state.caret, state.anchor), (1, Some(4)));
+        state.select(2, 2);
+        assert_eq!((state.caret, state.anchor), (2, None));
+    }
+
+    #[test]
+    fn typing_replaces_the_selection_whichever_way_it_was_made() {
+        for mut state in [selecting(7, 11), selecting(11, 7)] {
+            let value = insert("Habari yako rafiki", &mut state, "zetu", &FREE).unwrap();
+            assert_eq!(value, "Habari zetu rafiki");
+            assert_eq!((state.caret, state.anchor), (11, None));
+        }
+        // Text the field refuses still removes what was selected.
+        let digits = EditConfig {
+            digits_only: true,
+            ..FREE
+        };
+        let mut state = selecting(0, 3);
+        assert_eq!(insert("123456", &mut state, "x", &digits).unwrap(), "456");
+        assert_eq!((state.caret, state.anchor), (0, None));
+        // A composition starts in place of the selection.
+        let mut state = selecting(3, 5);
+        assert_eq!(compose("Na we", &mut state, "mi", &FREE).unwrap(), "Na mi");
+        assert_eq!((state.anchor, state.composing), (None, Some((3, 5))));
+    }
+
+    #[test]
+    fn replacing_a_selection_frees_its_room_in_a_full_field() {
+        let config = EditConfig {
+            max_length: Some(6),
+            ..FREE
+        };
+        let mut state = selecting(1, 5);
+        // Four characters go, so five fit beside the two that stay... but
+        // only four of them: the limit is six.
+        assert_eq!(
+            insert("abcdef", &mut state, "VWXYZ", &config).unwrap(),
+            "aVWXYf"
+        );
+        assert_eq!(state.caret, 5);
+    }
+
+    #[test]
+    fn backspace_and_delete_remove_the_selection_and_nothing_more() {
+        let mut state = selecting(7, 12);
+        assert_eq!(
+            delete_backward("Habari yako rafiki", &mut state).unwrap(),
+            "Habari rafiki"
+        );
+        assert_eq!((state.caret, state.anchor), (7, None));
+        let mut state = selecting(12, 7);
+        assert_eq!(
+            delete_forward("Habari yako rafiki", &mut state).unwrap(),
+            "Habari rafiki"
+        );
+        assert_eq!((state.caret, state.anchor), (7, None));
+        // A selection of whole Arabic characters with their marks.
+        let word = "مَرْحَبًا";
+        let second = next(word, next(word, 0));
+        let mut state = selecting(0, second);
+        let rest = delete_selection(word, &mut state).unwrap();
+        assert_eq!(length(&rest), 3);
+        assert_eq!(state.caret, 0);
+        assert_eq!(delete_selection("abc", &mut at(1)), None);
+    }
+
+    #[test]
+    fn the_platforms_selection_is_adopted_and_dropped_if_the_text_was_changed() {
+        let mut state = at(0);
+        let edited = TextEditState {
+            text: "Habari yako".to_owned(),
+            caret: 11,
+            anchor: Some(7),
+            composing: None,
+        };
+        assert_eq!(adopt("Habari yako", &mut state, &edited, &FREE), None);
+        assert_eq!(state.selection(), Some((7, 11)));
+        // A collapsed one is a caret.
+        let collapsed = TextEditState {
+            anchor: Some(11),
+            ..edited.clone()
+        };
+        adopt("Habari yako", &mut state, &collapsed, &FREE);
+        assert_eq!((state.caret, state.anchor), (11, None));
+        // The field refused part of the text: its offsets mean nothing.
+        let digits = EditConfig {
+            digits_only: true,
+            ..FREE
+        };
+        let edited = TextEditState {
+            text: "12ab34".to_owned(),
+            caret: 6,
+            anchor: Some(1),
+            composing: None,
+        };
+        assert_eq!(adopt("12", &mut state, &edited, &digits).unwrap(), "1234");
+        assert_eq!((state.caret, state.anchor), (4, None));
+    }
+
+    #[test]
+    fn a_word_is_what_a_reader_calls_one() {
+        let value = "Habari yako, rafiki!";
+        assert_eq!(word_at(value, 0), (0, 6));
+        assert_eq!(word_at(value, 3), (0, 6));
+        // At the end of a word: that word.
+        assert_eq!(word_at(value, 6), (0, 6));
+        assert_eq!(word_at(value, 8), (7, 11));
+        // Punctuation is a "word" of its own; the space after it is not.
+        assert_eq!(word_at(value, 11), (11, 12));
+        assert_eq!(word_at(value, 12), (11, 12));
+        assert_eq!(word_at(value, 20), (19, 20));
+        // In the middle of a run of spaces: nothing.
+        assert_eq!(word_at("a   b", 2), (2, 2));
+        assert_eq!(word_at("", 0), (0, 0));
+        assert_eq!(word_at("ab ", 3), (3, 3));
+        // An apostrophe inside a word, and a number with a decimal point.
+        assert_eq!(word_at("ng'ombe 12.5", 4), (0, 7));
+        assert_eq!(word_at("ng'ombe 12.5", 10), (8, 12));
+        // Arabic: a word with its marks, never half a character.
+        let arabic = "مَرْحَبًا بك";
+        let space = arabic.find(' ').unwrap();
+        assert_eq!(word_at(arabic, 4), (0, space));
+        assert_eq!(word_at(arabic, space + 1), (space + 1, arabic.len()));
+        // An index inside a character is first moved to its start.
+        assert_eq!(word_at("e\u{301}t", 1), (0, 4));
+    }
+
+    #[test]
+    fn word_jumps_skip_spaces_and_punctuation() {
+        let value = "Habari yako, rafiki!";
+        assert_eq!(word_end_after(value, 0), 6);
+        assert_eq!(word_end_after(value, 6), 11);
+        assert_eq!(word_end_after(value, 11), 19);
+        assert_eq!(word_end_after(value, 19), 20, "nothing but the end");
+        assert_eq!(word_start_before(value, 20), 13);
+        assert_eq!(word_start_before(value, 13), 7);
+        assert_eq!(word_start_before(value, 9), 7);
+        assert_eq!(word_start_before(value, 7), 0);
+        assert_eq!(word_start_before(value, 0), 0);
+    }
+
+    #[test]
+    fn keys_move_the_caret_and_shift_extends() {
+        let value = "Habari yako";
+        let mut state = at(3);
+        assert!(move_caret(value, &mut state, CaretMove::Right, false));
+        assert_eq!((state.caret, state.anchor), (4, None));
+        assert!(move_caret(value, &mut state, CaretMove::Left, true));
+        assert!(move_caret(value, &mut state, CaretMove::Left, true));
+        assert_eq!((state.caret, state.anchor), (2, Some(4)));
+        // Back to where it started: no selection is left.
+        move_caret(value, &mut state, CaretMove::Right, true);
+        move_caret(value, &mut state, CaretMove::Right, true);
+        assert_eq!((state.caret, state.anchor), (4, None));
+        // A selection collapses to the side the key points at.
+        let mut state = selecting(2, 6);
+        move_caret(value, &mut state, CaretMove::Left, false);
+        assert_eq!((state.caret, state.anchor), (2, None));
+        let mut state = selecting(6, 2);
+        move_caret(value, &mut state, CaretMove::Right, false);
+        assert_eq!((state.caret, state.anchor), (6, None));
+        move_caret(value, &mut state, CaretMove::WordRight, true);
+        assert_eq!(state.selection(), Some((6, 11)));
+        move_caret(value, &mut state, CaretMove::TextStart, true);
+        assert_eq!(state.selection(), Some((0, 6)));
+        move_caret(value, &mut state, CaretMove::TextEnd, false);
+        assert_eq!((state.caret, state.anchor), (11, None));
+        // By whole characters.
+        let mut state = at(0);
+        move_caret("e\u{301}x", &mut state, CaretMove::Right, false);
+        assert_eq!(state.caret, 3);
+        // A move ends a composition; moves by lines are not made here.
+        let mut state = EditState {
+            caret: 4,
+            anchor: None,
+            composing: Some((2, 4)),
+        };
+        assert!(!move_caret(value, &mut state, CaretMove::Up, false));
+        assert_eq!(state.composing, Some((2, 4)));
+        move_caret(value, &mut state, CaretMove::Left, false);
+        assert_eq!(state.composing, None);
+    }
+
+    #[test]
+    fn in_right_to_left_text_the_left_key_moves_on() {
+        let value = "مَرْحَبًا بك";
+        assert!(reads_right_to_left(value));
+        assert!(reads_right_to_left("123 שלום"));
+        assert!(!reads_right_to_left("abc مرحبا"));
+        assert!(!reads_right_to_left(""));
+        let mut state = at(0);
+        move_caret(value, &mut state, CaretMove::Left, false);
+        assert_eq!(state.caret, next(value, 0));
+        move_caret(value, &mut state, CaretMove::Right, false);
+        assert_eq!(state.caret, 0);
+        move_caret(value, &mut state, CaretMove::WordLeft, true);
+        assert_eq!(state.selection(), Some((0, value.find(' ').unwrap())));
+    }
+
+    #[test]
+    fn pasted_line_breaks_fit_the_field() {
+        let multiline = EditConfig {
+            multiline: true,
+            ..FREE
+        };
+        assert_eq!(pasted("a\r\nb\rc\nd", &FREE), "a b c d");
+        assert_eq!(pasted("a\r\nb\rc\nd", &multiline), "a\nb\nc\nd");
+        assert_eq!(pasted("line\n", &FREE), "line");
+        assert_eq!(pasted("line\n", &multiline), "line\n");
+        assert_eq!(pasted("a\u{2028}b", &FREE), "a b");
+        assert!(matches!(pasted("plain", &FREE), Cow::Borrowed("plain")));
+        // What is left goes through the same rules as typed text.
+        let phone = EditConfig {
+            digits_only: true,
+            max_length: Some(10),
+            ..FREE
+        };
+        let mut state = at(0);
+        let text = pasted("+255 712 345 678\n", &phone);
+        assert_eq!(insert("", &mut state, &text, &phone).unwrap(), "2557123456");
+        // A tab or another control character never gets in.
+        let mut state = at(0);
+        assert_eq!(
+            insert("", &mut state, &pasted("a\tb\u{7}c", &FREE), &FREE).unwrap(),
+            "abc"
+        );
+    }
+
+    #[test]
+    fn history_steps_back_by_runs_and_forward_again() {
+        let mut history = History::default();
+        let mut value = String::new();
+        let mut state = at(0);
+        let apply =
+            |history: &mut History, value: &mut String, state: &mut EditState, text: &str| {
+                history.record(value, state, EditKind::Typing);
+                *value = insert(value, state, text, &FREE).unwrap();
+            };
+        apply(&mut history, &mut value, &mut state, "H");
+        apply(&mut history, &mut value, &mut state, "a");
+        history.break_run();
+        apply(&mut history, &mut value, &mut state, "b");
+        assert_eq!(value, "Hab");
+        value = history.undo(&value, &mut state).unwrap();
+        assert_eq!((value.as_str(), state.caret), ("Ha", 2));
+        value = history.undo(&value, &mut state).unwrap();
+        assert_eq!((value.as_str(), state.caret), ("", 0));
+        assert_eq!(history.undo(&value, &mut state), None);
+        value = history.redo(&value, &mut state).unwrap();
+        value = history.redo(&value, &mut state).unwrap();
+        assert_eq!((value.as_str(), state.caret), ("Hab", 3));
+        assert_eq!(history.redo(&value, &mut state), None);
+        // A new edit after stepping back forgets what was ahead.
+        value = history.undo(&value, &mut state).unwrap();
+        apply(&mut history, &mut value, &mut state, "!");
+        assert_eq!(history.redo(&value, &mut state), None);
+        // A selection is restored with the text it was in.
+        let mut state = selecting(0, 3);
+        history.record("Ha!", &state, EditKind::Other);
+        let cut = delete_selection("Ha!", &mut state).unwrap();
+        assert_eq!(history.undo(&cut, &mut state).unwrap(), "Ha!");
+        assert_eq!(state.selection(), Some((0, 3)));
+    }
+
+    #[test]
+    fn history_is_bounded() {
+        let mut history = History::default();
+        let mut state = at(0);
+        for step in 0..(HISTORY_LIMIT + 50) {
+            history.record(&step.to_string(), &state, EditKind::Other);
+        }
+        let mut steps = 0;
+        let mut oldest = String::new();
+        while let Some(value) = history.undo("now", &mut state) {
+            oldest = value;
+            steps += 1;
+        }
+        assert_eq!(steps, HISTORY_LIMIT);
+        assert_eq!(oldest, "50");
+        history.clear();
+        assert_eq!(history.redo("now", &mut state), None);
     }
 }

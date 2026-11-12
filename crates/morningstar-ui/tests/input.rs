@@ -523,6 +523,7 @@ fn backspace_removes_a_letter_with_its_marks() {
     h.key(TextInputEvent::Edited(TextEditState {
         text: "مَرْحَبًا".to_owned(),
         caret: "مَرْحَبًا".len(),
+        anchor: None,
         composing: None,
     }));
     for remaining in (0..5).rev() {
@@ -611,6 +612,7 @@ fn the_platforms_own_edit_is_adopted_with_its_composition() {
     h.key(TextInputEvent::Edited(TextEditState {
         text: "Amina J".to_owned(),
         caret: 7,
+        anchor: None,
         composing: Some((6, 7)),
     }));
     assert_eq!(h.app().name, "Amina J");
@@ -628,6 +630,7 @@ fn a_filtered_field_asks_the_platform_to_drop_what_it_refused() {
     h.key(TextInputEvent::Edited(TextEditState {
         text: "07x".to_owned(),
         caret: 3,
+        anchor: None,
         composing: Some((2, 3)),
     }));
     assert_eq!(h.app().phone, "07");
@@ -650,6 +653,7 @@ fn a_value_the_application_refuses_stays_as_the_application_has_it() {
     h.key(TextInputEvent::Edited(TextEditState {
         text: "Ashax".to_owned(),
         caret: 5,
+        anchor: None,
         composing: Some((4, 5)),
     }));
     assert_eq!(h.log(), [Msg::Name("Ashax".to_owned())]);

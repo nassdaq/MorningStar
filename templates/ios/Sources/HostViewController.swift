@@ -51,6 +51,97 @@ final class MetalView: UIView, UIKeyInput {
         onDeleteBackward?()
     }
 
+    // The standard edit actions (ADR 0025): a hardware keyboard's Cmd+A,
+    // C, X, V, and anything else that sends them up the responder chain.
+    // The application's field does them; the selection, its handles and
+    // its menu are drawn by the application, not by UIKit. NOT COMPILED.
+    var onEditCommand: ((UInt32) -> Void)?
+    var onCaretMove: ((UInt32, Bool) -> Void)?
+
+    override func selectAll(_ sender: Any?) {
+        onEditCommand?(UInt32(MORNINGSTAR_EDIT_SELECT_ALL))
+    }
+
+    override func copy(_ sender: Any?) {
+        onEditCommand?(UInt32(MORNINGSTAR_EDIT_COPY))
+    }
+
+    override func cut(_ sender: Any?) {
+        onEditCommand?(UInt32(MORNINGSTAR_EDIT_CUT))
+    }
+
+    override func paste(_ sender: Any?) {
+        onEditCommand?(UInt32(MORNINGSTAR_EDIT_PASTE))
+    }
+
+    @objc private func undoEdit() {
+        onEditCommand?(UInt32(MORNINGSTAR_EDIT_UNDO))
+    }
+
+    @objc private func redoEdit() {
+        onEditCommand?(UInt32(MORNINGSTAR_EDIT_REDO))
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        switch action {
+        case #selector(selectAll(_:)), #selector(copy(_:)), #selector(cut(_:)),
+            #selector(paste(_:)):
+            return editing
+        default:
+            return super.canPerformAction(action, withSender: sender)
+        }
+    }
+
+    // Arrow keys of a hardware keyboard: alone by characters and lines,
+    // with Option by words, with Command to the ends; Shift selects.
+    override var keyCommands: [UIKeyCommand]? {
+        guard editing else { return nil }
+        var commands: [UIKeyCommand] = []
+        let arrows = [
+            UIKeyCommand.inputLeftArrow, UIKeyCommand.inputRightArrow,
+            UIKeyCommand.inputUpArrow, UIKeyCommand.inputDownArrow,
+        ]
+        for input in arrows {
+            for flags: UIKeyModifierFlags in [
+                [], .shift, .alternate, [.alternate, .shift], .command, [.command, .shift],
+            ] {
+                commands.append(
+                    UIKeyCommand(
+                        input: input, modifierFlags: flags, action: #selector(arrowKey(_:))))
+            }
+        }
+        commands.append(
+            UIKeyCommand(input: "z", modifierFlags: .command, action: #selector(undoEdit)))
+        commands.append(
+            UIKeyCommand(
+                input: "z", modifierFlags: [.command, .shift], action: #selector(redoEdit)))
+        return commands
+    }
+
+    @objc private func arrowKey(_ command: UIKeyCommand) {
+        let flags = command.modifierFlags
+        let words = flags.contains(.alternate)
+        let ends = flags.contains(.command)
+        let move: Int
+        switch command.input {
+        case UIKeyCommand.inputLeftArrow:
+            move =
+                ends
+                ? MORNINGSTAR_MOVE_LINE_START
+                : (words ? MORNINGSTAR_MOVE_WORD_LEFT : MORNINGSTAR_MOVE_LEFT)
+        case UIKeyCommand.inputRightArrow:
+            move =
+                ends
+                ? MORNINGSTAR_MOVE_LINE_END
+                : (words ? MORNINGSTAR_MOVE_WORD_RIGHT : MORNINGSTAR_MOVE_RIGHT)
+        case UIKeyCommand.inputUpArrow:
+            move = ends ? MORNINGSTAR_MOVE_TEXT_START : MORNINGSTAR_MOVE_UP
+        default:
+            move = ends ? MORNINGSTAR_MOVE_TEXT_END : MORNINGSTAR_MOVE_DOWN
+        }
+        onCaretMove?(UInt32(move), flags.contains(.shift))
+    }
+
     override var canBecomeFirstResponder: Bool { editing }
 
     /// Shows the keyboard for a field with these traits, or reconfigures it
@@ -190,8 +281,15 @@ final class HostViewController: UIViewController {
     /// posts notifications that call back into this class.
     private var syncing = false
     private var syncAgain = false
+    /// Dark status-bar content (over a light screen), as the application
+    /// last asked (ADR 0026). NOT COMPILED.
+    private var darkStatusContent = false
 
     private var metalView: MetalView? { view as? MetalView }
+
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        darkStatusContent ? .darkContent : .lightContent
+    }
 
     override func loadView() {
         let metalView = MetalView()
@@ -213,6 +311,16 @@ final class HostViewController: UIViewController {
         metalView.onFocusLost = { [weak self] in
             guard let self = self else { return }
             morningstar_ios_text_focus_lost(self.engine)
+            self.syncWithEngine()
+        }
+        metalView.onEditCommand = { [weak self] command in
+            guard let self = self else { return }
+            morningstar_ios_text_command(self.engine, command)
+            self.syncWithEngine()
+        }
+        metalView.onCaretMove = { [weak self] move, extend in
+            guard let self = self else { return }
+            morningstar_ios_text_move(self.engine, move, extend)
             self.syncWithEngine()
         }
         view = metalView
@@ -252,6 +360,33 @@ final class HostViewController: UIViewController {
             selector: #selector(keyboardFrameWillChange(_:)),
             name: UIResponder.keyboardWillChangeFrameNotification,
             object: nil)
+
+        // "Reduce Motion" in the accessibility settings (ADR 0026): now,
+        // and whenever the user changes it. NOT COMPILED.
+        morningstar_ios_set_reduce_motion(engine, UIAccessibility.isReduceMotionEnabled)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reduceMotionChanged),
+            name: UIAccessibility.reduceMotionStatusDidChangeNotification,
+            object: nil)
+    }
+
+    @objc private func reduceMotionChanged() {
+        morningstar_ios_set_reduce_motion(engine, UIAccessibility.isReduceMotionEnabled)
+        syncWithEngine()
+    }
+
+    /// Light or dark status-bar content, when the frame just built wants
+    /// it changed. The home indicator takes its colour from what is drawn
+    /// under it and needs nothing.
+    private func updateSystemBars() {
+        var bars = MorningstarSystemBars()
+        if morningstar_ios_take_system_bars(engine, &bars),
+            bars.dark_status_content != darkStatusContent
+        {
+            darkStatusContent = bars.dark_status_content
+            setNeedsStatusBarAppearanceUpdate()
+        }
     }
 
     @objc private func keyboardFrameWillChange(_ notification: Notification) {
@@ -356,6 +491,7 @@ final class HostViewController: UIViewController {
                 services.drain(engine)
             }
             updateKeyboard()
+            updateSystemBars()
             updateDisplayLink()
         } while syncAgain
         syncing = false

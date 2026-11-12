@@ -9,7 +9,9 @@ use morningstar_core::{
     Transform,
 };
 use morningstar_layout::{Alignment, CrossAlign, Edges, MainAlign, Sizing, Style};
-use morningstar_runtime::{FontFamily, TextAlign, TextWeight, VectorIcon, VectorPicture};
+use morningstar_runtime::{
+    FontFamily, SvgPicture, TextAlign, TextWeight, VectorIcon, VectorPicture,
+};
 
 use crate::color::{ColorRef, ThemeColor};
 use crate::edit::{self, EditConfig};
@@ -191,12 +193,15 @@ macro_rules! layout_methods {
 macro_rules! motion_methods {
     () => {
         /// Draws the widget and everything inside it at this opacity:
-        /// `0.0` invisible, `1.0` (the default) as given. It is multiplied
-        /// into every colour drawn (fills, borders, text, shadows, image
-        /// tints), so children that overlap each other show through one
-        /// another while faded: right for fading something in or out, not
-        /// a group opacity. An invisible widget still takes its room and
-        /// its touches.
+        /// `0.0` invisible, `1.0` (the default) as given. It is a group
+        /// opacity, as in CSS: a card fades as one picture, and its
+        /// label does not let its background show through. Where nothing
+        /// in the widget lies over anything else (a text, a picture, a
+        /// plain box, a row of those) the opacity is simply multiplied
+        /// into each colour, which is the same picture for nothing; a
+        /// widget whose parts overlap is drawn through a layer (ADR
+        /// 0028), which costs two render passes while it is faded. An
+        /// invisible widget still takes its room and its touches.
         pub fn opacity(mut self, opacity: f32) -> Self {
             self.motion.opacity = if opacity.is_nan() {
                 1.0
@@ -606,13 +611,17 @@ pub fn span(content: impl Into<Cow<'static, str>>) -> Span {
 }
 
 /// What a [`Picture`] shows.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PictureSource {
     Image(Image),
     Vector(VectorPicture),
+    /// A loaded SVG file, with its own colours (ADR 0027).
+    Svg(SvgPicture),
+    /// A loaded SVG file drawn as an icon, in the node's tint.
+    SvgIcon(SvgPicture),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ImageNode {
     pub source: PictureSource,
     pub fit: ImageFit,
@@ -1513,7 +1522,18 @@ pub fn text(content: impl Into<Cow<'static, str>>) -> Text {
 /// it as wide as its text (a centred code box). A
 /// [`multiline`](Self::multiline) field grows with its text, up to
 /// [`max_lines`](Self::max_lines) if that is set, and then scrolls inside
-/// itself. Not supported: selection, copy and paste.
+/// itself.
+///
+/// Selection and the clipboard work as in a native field and need
+/// nothing from the application: a double tap or a long press selects a
+/// word and shows two handles and a menu (Cut, Copy, Paste, Select all;
+/// only what applies), dragging a handle extends the selection and scrolls
+/// the field at its edges, typing replaces what is selected, and a
+/// hardware keyboard's arrows, Home, End and Ctrl/Cmd shortcuts work. A
+/// [`secure`](Self::secure) field can be pasted into and never copied
+/// from; pasted text passes [`digits_only`](Self::digits_only) and
+/// [`max_length`](Self::max_length) like typed text. `on_input` still
+/// delivers only the new string.
 pub struct TextInput<M> {
     layout: Style,
     key: Option<u64>,
@@ -2127,6 +2147,40 @@ impl Picture {
         }
     }
 
+    /// A picture loaded from an SVG file: [`SvgPicture::parse`], or a
+    /// `static` [`SvgAsset`](crate::SvgAsset) beside `include_str!`. Parse
+    /// the file once and keep the value; this takes a cheap handle to it.
+    ///
+    /// ```
+    /// use morningstar_ui::prelude::*;
+    ///
+    /// // In an application: SvgAsset::new(include_str!("../assets/svg/disc.svg"))
+    /// static DISC: SvgAsset = SvgAsset::new(
+    ///     r##"<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="#0E0E0E"/></svg>"##,
+    /// );
+    /// let disc = Picture::svg(DISC.get()).size(250.0, 250.0);
+    /// # let _ = disc;
+    /// ```
+    ///
+    /// With no size given it is as many dp as the file's `width` and
+    /// `height` say, or its view box where they are absent. Otherwise as a
+    /// [vector picture](Self::vector): shown whole, centred, rasterised
+    /// for the pixels it covers; `currentColor` in the file is the colour
+    /// of [`SvgPicture::with_current_color`], black unless set.
+    pub fn svg(picture: &SvgPicture) -> Self {
+        Self {
+            layout: Style::new(),
+            key: None,
+            transform: None,
+            node: ImageNode {
+                source: PictureSource::Svg(picture.clone()),
+                fit: ImageFit::Contain,
+                radius: 0.0,
+                tint: ColorRef::Value(Color::WHITE),
+            },
+        }
+    }
+
     layout_methods!();
     box_size_method!();
 
@@ -2155,9 +2209,10 @@ impl Picture {
 impl<M> From<Picture> for Element<M> {
     fn from(picture: Picture) -> Self {
         let mut layout = picture.layout;
-        let (width, height) = match picture.node.source {
+        let (width, height) = match &picture.node.source {
             PictureSource::Image(image) => (image.width() as f32, image.height() as f32),
             PictureSource::Vector(vector) => (vector.width(), vector.height()),
+            PictureSource::Svg(svg) | PictureSource::SvgIcon(svg) => (svg.width(), svg.height()),
         };
         match (layout.width, layout.height) {
             // Natural size: one dp per image pixel or view-box unit.
@@ -2316,6 +2371,7 @@ pub struct Icon {
     transform: Option<Transform>,
     glyph: Cow<'static, str>,
     vector: Option<VectorIcon>,
+    svg: Option<SvgPicture>,
     stroke_width: Option<f32>,
     side: f32,
     radius: f32,
@@ -2334,6 +2390,7 @@ impl Icon {
             transform: None,
             glyph: glyph.into(),
             vector: None,
+            svg: None,
             stroke_width: None,
             side: 40.0,
             radius: 12.0,
@@ -2347,6 +2404,26 @@ impl Icon {
     pub fn vector(icon: VectorIcon) -> Self {
         Self {
             vector: Some(icon),
+            side: 24.0,
+            background: None,
+            color: ColorRef::Token(ThemeColor::Text),
+            ..Self::new("")
+        }
+    }
+
+    /// An icon from a loaded SVG file ([`SvgPicture`]), 24 dp square, in
+    /// the theme's text colour, with no tile behind it. Otherwise as
+    /// [`vector`](Self::vector), without its limits on what the file may
+    /// contain.
+    ///
+    /// A file painted in one colour or in `currentColor` throughout takes
+    /// [`color`](Self::color) and shares text's draw call. A file with
+    /// several colours keeps them, with `currentColor` drawn in
+    /// [`color`](Self::color), and is drawn as a picture.
+    /// [`stroke_width`](Self::stroke_width) does not apply.
+    pub fn svg(picture: &SvgPicture) -> Self {
+        Self {
+            svg: Some(picture.clone()),
             side: 24.0,
             background: None,
             color: ColorRef::Token(ThemeColor::Text),
@@ -2410,13 +2487,22 @@ impl<M> From<Icon> for Element<M> {
             height: Sizing::Fixed(side),
             ..layout
         };
-        let content: Element<M> = match icon.vector {
-            Some(vector) => {
-                let node = IconNode {
-                    icon: vector,
-                    color: icon.color,
-                    stroke_width: icon.stroke_width,
-                };
+        let art = match (icon.svg, icon.vector) {
+            (Some(svg), _) => Some(Kind::Image(ImageNode {
+                source: PictureSource::SvgIcon(svg),
+                fit: ImageFit::Contain,
+                radius: 0.0,
+                tint: icon.color,
+            })),
+            (None, Some(vector)) => Some(Kind::Icon(IconNode {
+                icon: vector,
+                color: icon.color,
+                stroke_width: icon.stroke_width,
+            })),
+            (None, None) => None,
+        };
+        let content: Element<M> = match art {
+            Some(kind) => {
                 let Some(_) = icon.background else {
                     // Bare: the element is the icon itself.
                     return Self {
@@ -2424,7 +2510,7 @@ impl<M> From<Icon> for Element<M> {
                         key: icon.key,
                         transform: icon.transform,
                         motion: Motion::PLAIN,
-                        kind: Kind::Icon(node),
+                        kind,
                     };
                 };
                 Self {
@@ -2432,7 +2518,7 @@ impl<M> From<Icon> for Element<M> {
                     key: None,
                     transform: None,
                     motion: Motion::PLAIN,
-                    kind: Kind::Icon(node),
+                    kind,
                 }
             }
             None => Text::new(icon.glyph)

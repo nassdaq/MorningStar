@@ -6,16 +6,17 @@ import android.view.Surface;
 
 /**
  * The complete interface between Java and Rust. The native methods are
- * implemented in crates/morningstar-android/src/jni.rs; the four methods
- * Rust calls (onTextInputCommand, onBackResult, onHttpRequest and
- * onServiceCommand) are looked up by name and signature in
+ * implemented in crates/morningstar-android/src/jni.rs; the five methods
+ * Rust calls (onTextInputCommand, onBackResult, onHttpRequest,
+ * onServiceCommand and onSystemBars) are looked up by name and signature in
  * crates/morningstar-android/src/java.rs. Both sides must change together.
  *
  * All native methods are called on the main thread and return immediately,
  * except nativeSurfaceDestroyed, which blocks until the renderer has let go
- * of the surface, and the three results of platform services
- * (nativeHttpResult, nativeAudioResult, nativeLoadResult), which are called
- * from the worker thread that did the work.
+ * of the surface, and the four results of platform services
+ * (nativeHttpResult, nativeAudioResult, nativeLoadResult,
+ * nativeClipboardResult), which are called from the thread that did the
+ * work.
  *
  * Rust draws on demand: after any of these calls that can change the picture
  * it produces a frame, and between them it draws nothing.
@@ -89,8 +90,9 @@ final class MorningstarNative {
 
     /**
      * The input method changed the host's copy of the focused field: its
-     * whole text, the selection and the composing (pre-edit) range, in
-     * UTF-16 code units; composingStart is -1 when nothing is being
+     * whole text, the selection (from where it was started to the caret;
+     * equal when nothing is selected) and the composing (pre-edit) range,
+     * in UTF-16 code units; composingStart is -1 when nothing is being
      * composed. serial is the one given with the SHOW command the edit was
      * made under.
      */
@@ -117,9 +119,45 @@ final class MorningstarNative {
     static final int TEXT_KEY_DELETE_FORWARD = 7;
     /** The user put the keyboard away: the field should give up focus. */
     static final int TEXT_KEY_FOCUS_LOST = 8;
+    // Ctrl+A, C, X, V, Z and Shift+Z (or Y) of a hardware keyboard, and
+    // the same asked for by an input method (performContextMenuAction).
+    static final int TEXT_KEY_SELECT_ALL = 9;
+    static final int TEXT_KEY_COPY = 10;
+    static final int TEXT_KEY_CUT = 11;
+    static final int TEXT_KEY_PASTE = 12;
+    static final int TEXT_KEY_UNDO = 13;
+    static final int TEXT_KEY_REDO = 14;
 
-    /** An editing key, an action key, or the loss of focus. */
+    /** An editing key, an action key, a shortcut, or the loss of focus. */
     static native void nativeTextCommand(int command);
+
+    // Values of nativeTextMove's first argument. Must match jni.rs.
+    static final int TEXT_MOVE_LEFT = 0;
+    static final int TEXT_MOVE_RIGHT = 1;
+    static final int TEXT_MOVE_WORD_LEFT = 2;
+    static final int TEXT_MOVE_WORD_RIGHT = 3;
+    static final int TEXT_MOVE_UP = 4;
+    static final int TEXT_MOVE_DOWN = 5;
+    static final int TEXT_MOVE_LINE_START = 6;
+    static final int TEXT_MOVE_LINE_END = 7;
+    static final int TEXT_MOVE_TEXT_START = 8;
+    static final int TEXT_MOVE_TEXT_END = 9;
+
+    /**
+     * A key that moves the caret (an arrow, Home, End; with Ctrl, by words
+     * or to the ends of the text). extend is Shift: select from where the
+     * caret was.
+     */
+    static native void nativeTextMove(int move, boolean extend);
+
+    // ------------------------------------------------------- reduce motion
+
+    /**
+     * Whether the user has asked the system for less motion ("remove
+     * animations": the animator duration scale is zero). Call at start and
+     * whenever it may have changed; repeating the current value is free.
+     */
+    static native void nativeSetReduceMotion(boolean reduce);
 
     // Values of onTextInputCommand's arguments. Must match render_thread.rs.
     static final int TEXT_HIDE = 0;
@@ -146,8 +184,10 @@ final class MorningstarNative {
      * main-thread work, so this only posts.
      *
      * TEXT_SHOW: a field has focus; show the keyboard described by the
-     * arguments, holding text with the caret at caret (UTF-16 units).
-     * TEXT_UPDATE: Rust changed the same field's text or caret; replace the
+     * arguments, holding text with the selection from selectionStart
+     * (where it was started) to selectionEnd (the caret), in UTF-16 units;
+     * the two are equal when nothing is selected. TEXT_UPDATE: Rust
+     * changed the same field's text, caret or selection; replace the
      * host's copy. TEXT_HIDE: no field has focus.
      *
      * Looked up by name through JNI: keep it out of any code shrinker.
@@ -161,16 +201,57 @@ final class MorningstarNative {
             final int action,
             final int flags,
             final String text,
-            final int caret) {
+            final int selectionStart,
+            final int selectionEnd) {
         MAIN.post(
                 () -> {
                     MorningstarActivity activity = MorningstarActivity.current();
                     if (activity != null) {
                         activity.onTextInputCommand(
                                 command, serial, keyboard, capitalization, action, flags, text,
-                                caret);
+                                selectionStart, selectionEnd);
                     }
                 });
+    }
+
+    // ---------------------------------------------------------- system bars
+
+    // What Rust last asked for, kept for activities created later: the
+    // Rust runtime outlives an activity and tells the host only when the
+    // answer changes. Main thread only. Null until Rust has said.
+    private static Boolean darkStatusIcons;
+    private static Boolean darkNavigationIcons;
+
+    /**
+     * Called by Rust, on its render thread, when the frame it has just
+     * built needs the system bars' icons in another colour than the host
+     * was last told: dark icons over a light screen, light over a dark
+     * one. The bars themselves stay transparent. Changing a window is
+     * main-thread work, so this only posts.
+     *
+     * Looked up by name through JNI: keep it out of any code shrinker.
+     */
+    @SuppressWarnings("unused") // Called from native code.
+    static void onSystemBars(final boolean darkStatus, final boolean darkNavigation) {
+        MAIN.post(
+                () -> {
+                    darkStatusIcons = darkStatus;
+                    darkNavigationIcons = darkNavigation;
+                    MorningstarActivity activity = MorningstarActivity.current();
+                    if (activity != null) {
+                        activity.applySystemBars(darkStatus, darkNavigation);
+                    }
+                });
+    }
+
+    /**
+     * Gives a newly created activity the look Rust last asked for, if it
+     * has asked. Main thread.
+     */
+    static void restoreSystemBars(MorningstarActivity activity) {
+        if (darkStatusIcons != null && darkNavigationIcons != null) {
+            activity.applySystemBars(darkStatusIcons, darkNavigationIcons);
+        }
     }
 
     /**
@@ -213,6 +294,10 @@ final class MorningstarNative {
     static final int SERVICE_REMOVE = 5;
     /** first: the key. Answered with nativeLoadResult. */
     static final int SERVICE_LOAD = 6;
+    /** first: plain text to put on the clipboard. */
+    static final int SERVICE_SET_CLIPBOARD = 7;
+    /** Answered with nativeClipboardResult. */
+    static final int SERVICE_READ_CLIPBOARD = 8;
 
     // Values of nativeHttpResult's error argument. Must match jni.rs.
     static final int HTTP_OK = 0;
@@ -263,6 +348,12 @@ final class MorningstarNative {
 
     /** The answer to SERVICE_LOAD: the value, or found false. Any thread. */
     static native void nativeLoadResult(long id, boolean found, String value);
+
+    /**
+     * The answer to SERVICE_READ_CLIPBOARD: the clipboard as plain text, or
+     * found false when it is empty or holds no text. Any thread.
+     */
+    static native void nativeClipboardResult(long id, boolean found, String text);
 
     /**
      * Called by Rust, on its render thread, to make an HTTP request: method

@@ -225,21 +225,26 @@ impl Device {
     }
 
     /// Filled rectangles of the frame whose colour is `color` at any
-    /// opacity, with that opacity, in dp.
+    /// opacity, with the opacity they are shown at, in dp: the colour's
+    /// own times that of the layers they are drawn through (ADR 0028).
     fn fills(&self, color: Color) -> Vec<(Rect, f32)> {
-        self.frame
-            .list
-            .ops()
-            .iter()
-            .filter_map(|op| match *op {
+        let mut layers: Vec<f32> = Vec::new();
+        let mut found = Vec::new();
+        for op in self.frame.list.ops() {
+            match *op {
+                DrawOp::PushLayer { opacity } => layers.push(opacity),
+                DrawOp::PopLayer => {
+                    layers.pop();
+                }
                 DrawOp::Rect { rect, color: c, .. }
                     if (c.r, c.g, c.b) == (color.r, color.g, color.b) =>
                 {
-                    Some((dp(rect), c.a))
+                    found.push((dp(rect), c.a * layers.iter().product::<f32>()));
                 }
-                _ => None,
-            })
-            .collect()
+                _ => {}
+            }
+        }
+        found
     }
 
     fn fill(&self, color: Color) -> (Rect, f32) {

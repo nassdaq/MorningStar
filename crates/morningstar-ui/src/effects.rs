@@ -199,6 +199,29 @@ impl<M> Effects<M> {
         );
     }
 
+    /// Puts plain text on the system clipboard, replacing what is there.
+    /// (A [`TextInput`](crate::TextInput) copies and cuts by itself; this
+    /// is for a "copy code" button.)
+    pub fn set_clipboard(&mut self, text: impl Into<String>) {
+        self.push(ServiceRequest::SetClipboard(text.into()), None);
+    }
+
+    /// Reads the system clipboard as plain text: `None` if it is empty or
+    /// holds something that is not text. Ask only when the user has chosen
+    /// to paste: on Android 12 and later the system shows them a notice
+    /// every time an application reads what another one copied.
+    pub fn clipboard(&mut self, on_text: impl FnOnce(Option<String>) -> M + Send + 'static) {
+        self.push(
+            ServiceRequest::ReadClipboard,
+            Some(Box::new(move |result| {
+                on_text(match result {
+                    ServiceResult::Clipboard(text) => text,
+                    _ => None,
+                })
+            })),
+        );
+    }
+
     /// Gives up on every request made before this call that has not been
     /// answered yet: their messages will never arrive. The platform may
     /// still finish the work (a request already sent reaches the server),
@@ -255,6 +278,10 @@ pub(crate) struct EffectState<M> {
     /// the start of the next frame.
     ready: VecDeque<(ServiceId, ServiceResult)>,
     carrier: Carrier,
+    /// The clipboard where there is no platform to keep one: under the
+    /// test driver, and with no host at all (a screenshot tool), so that
+    /// what a field copies can be pasted again.
+    clipboard: Option<String>,
 }
 
 impl<M> EffectState<M> {
@@ -266,6 +293,7 @@ impl<M> EffectState<M> {
             outbox: Vec::new(),
             ready: VecDeque::new(),
             carrier: Carrier::Host { attached: false },
+            clipboard: None,
         }
     }
 
@@ -312,6 +340,33 @@ impl<M> EffectState<M> {
         self.scratch.entries = entries;
     }
 
+    /// A request the UI layer makes for itself (a field's copy or paste):
+    /// numbered and carried out like the application's, but no handler of
+    /// the application's waits for it. The caller remembers the id.
+    pub(crate) fn request(&mut self, request: ServiceRequest) -> ServiceId {
+        self.next_id += 1;
+        let id = ServiceId(self.next_id);
+        self.dispatch(ServiceCall { id, request });
+        id
+    }
+
+    /// An answer to a request made with [`request`](Self::request) has
+    /// been taken: nothing else is to be delivered for it.
+    pub(crate) fn settle(&mut self, id: ServiceId) {
+        if let Carrier::Driver(driver) = &mut self.carrier {
+            driver.held.retain(|call| call.id != id);
+        }
+        self.ready.retain(|(ready, _)| *ready != id);
+    }
+
+    pub(crate) fn clipboard(&self) -> Option<&str> {
+        self.clipboard.as_deref()
+    }
+
+    pub(crate) fn set_clipboard(&mut self, text: Option<String>) {
+        self.clipboard = text;
+    }
+
     fn forget(&mut self) {
         self.handlers.clear();
         self.ready.clear();
@@ -339,6 +394,12 @@ impl<M> EffectState<M> {
                 let value = driver.stored.get(key).cloned();
                 self.ready
                     .push_back((call.id, ServiceResult::Loaded(value)));
+            }
+            ServiceRequest::SetClipboard(text) => self.clipboard = Some(text.clone()),
+            ServiceRequest::ReadClipboard => {
+                let text = self.clipboard.clone().filter(|text| !text.is_empty());
+                self.ready
+                    .push_back((call.id, ServiceResult::Clipboard(text)));
             }
             ServiceRequest::StopPlayback => interrupt_playback(driver, &mut self.ready),
             request => {
@@ -369,8 +430,19 @@ impl<M> EffectState<M> {
             return;
         }
         for call in self.outbox.drain(..) {
-            if let Some(result) = call.request.unsupported() {
-                self.ready.push_back((call.id, result));
+            match call.request {
+                // Copy and paste still work inside the application.
+                ServiceRequest::SetClipboard(text) => self.clipboard = Some(text),
+                ServiceRequest::ReadClipboard => {
+                    let text = self.clipboard.clone().filter(|text| !text.is_empty());
+                    self.ready
+                        .push_back((call.id, ServiceResult::Clipboard(text)));
+                }
+                request => {
+                    if let Some(result) = request.unsupported() {
+                        self.ready.push_back((call.id, result));
+                    }
+                }
             }
         }
     }

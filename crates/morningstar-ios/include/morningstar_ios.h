@@ -160,11 +160,67 @@ typedef struct MorningstarTextInput {
 bool morningstar_ios_take_text_input(MorningstarHost *host,
                                      MorningstarTextInput *out);
 
+// morningstar_ios_text_command's command: the standard edit actions of
+// UIResponder and the shortcuts of a hardware keyboard. The application's
+// field does them; copy and paste then arrive as service requests
+// (MORNINGSTAR_SERVICE_SET_CLIPBOARD, MORNINGSTAR_SERVICE_READ_CLIPBOARD).
+enum {
+  MORNINGSTAR_EDIT_SELECT_ALL = 0,
+  MORNINGSTAR_EDIT_COPY = 1,
+  MORNINGSTAR_EDIT_CUT = 2,
+  MORNINGSTAR_EDIT_PASTE = 3,
+  MORNINGSTAR_EDIT_UNDO = 4,
+  MORNINGSTAR_EDIT_REDO = 5,
+  MORNINGSTAR_EDIT_DELETE_FORWARD = 6,
+};
+
+void morningstar_ios_text_command(MorningstarHost *host, uint32_t command);
+
+// morningstar_ios_text_move's movement: a key that moves the caret.
+enum {
+  MORNINGSTAR_MOVE_LEFT = 0,
+  MORNINGSTAR_MOVE_RIGHT = 1,
+  MORNINGSTAR_MOVE_WORD_LEFT = 2,
+  MORNINGSTAR_MOVE_WORD_RIGHT = 3,
+  MORNINGSTAR_MOVE_UP = 4,
+  MORNINGSTAR_MOVE_DOWN = 5,
+  MORNINGSTAR_MOVE_LINE_START = 6,
+  MORNINGSTAR_MOVE_LINE_END = 7,
+  MORNINGSTAR_MOVE_TEXT_START = 8,
+  MORNINGSTAR_MOVE_TEXT_END = 9,
+};
+
+// extend is Shift: select from where the caret was.
+void morningstar_ios_text_move(MorningstarHost *host, uint32_t movement,
+                               bool extend);
+
 // Seconds until the app wants a frame with nothing else happening (a caret's
 // blink), or negative when it wants none. While morningstar_ios_needs_frame
 // is false and this is not negative, arm a one-shot timer for that long and,
 // when it fires, ask morningstar_ios_needs_frame again.
 double morningstar_ios_redraw_delay(const MorningstarHost *host);
+
+// ----------------------------------------------- system bars, reduce motion
+
+// UIAccessibility.isReduceMotionEnabled. Call at start and from
+// reduceMotionStatusDidChangeNotification; then ask
+// morningstar_ios_needs_frame.
+void morningstar_ios_set_reduce_motion(MorningstarHost *host, bool reduce);
+
+// Whether the status bar's content and the home indicator should be dark
+// (over a light screen).
+typedef struct MorningstarSystemBars {
+  bool dark_status_content;
+  bool dark_navigation_content;
+} MorningstarSystemBars;
+
+// Fills *out and returns true when the frame last built wants the bars to
+// look different from how the host was last told; false (the usual case)
+// otherwise. Call after every morningstar_ios_frame; on true, answer
+// preferredStatusBarStyle accordingly and call
+// setNeedsStatusBarAppearanceUpdate.
+bool morningstar_ios_take_system_bars(MorningstarHost *host,
+                                      MorningstarSystemBars *out);
 
 // ---------------------------------------------------------- platform services
 //
@@ -202,6 +258,11 @@ enum {
   MORNINGSTAR_SERVICE_REMOVE = 6,
   // Answered with morningstar_ios_load_result. text1: key.
   MORNINGSTAR_SERVICE_LOAD = 7,
+  // Not answered. text1: plain text for UIPasteboard.general.
+  MORNINGSTAR_SERVICE_SET_CLIPBOARD = 8,
+  // Answered with morningstar_ios_clipboard_result. Read the pasteboard
+  // only now: iOS tells the user when an app reads what another copied.
+  MORNINGSTAR_SERVICE_READ_CLIPBOARD = 9,
 };
 
 // One request. Strings are NUL-terminated UTF-8 and never NULL (unused ones
@@ -276,6 +337,11 @@ void morningstar_ios_audio_result(MorningstarHost *host, uint64_t id,
 // false when the key holds nothing. Main thread.
 void morningstar_ios_load_result(MorningstarHost *host, uint64_t id,
                                  bool found, const char *value);
+
+// The answer to a MORNINGSTAR_SERVICE_READ_CLIPBOARD request: the
+// pasteboard's string, or found false when it holds no text. Main thread.
+void morningstar_ios_clipboard_result(MorningstarHost *host, uint64_t id,
+                                      bool found, const char *utf8);
 
 void morningstar_ios_destroy(MorningstarHost *host);
 

@@ -5,9 +5,10 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryR
 use std::time::{Duration, Instant};
 
 use morningstar_runtime::{
-    App, Capitalization, Engine, FrameOutcome, HostState, ImeAction, Insets, KeyboardType,
-    NativeSurface, PointerEvent, ServiceCall, ServiceId, ServiceRequest, ServiceResult,
-    SurfaceSize, TextInputCommand, TextInputEvent, TextInputRequest, byte_to_utf16_offset,
+    App, BarContent, Capitalization, Engine, FrameOutcome, HostState, ImeAction, Insets,
+    KeyboardType, NativeSurface, PointerEvent, ServiceCall, ServiceId, ServiceRequest,
+    ServiceResult, SurfaceSize, TextInputCommand, TextInputEvent, TextInputRequest,
+    byte_to_utf16_offset,
 };
 
 use crate::java::{Env, HttpCall, KeyboardCall, ServiceCommand};
@@ -53,6 +54,8 @@ pub enum Message {
     Continuous(bool),
     /// Pixels of the bottom of the surface under the soft keyboard.
     KeyboardInset(f32),
+    /// The user has asked the system for less motion, or no longer does.
+    ReduceMotion(bool),
     /// Text input. `serial` is the keyboard request the host made the edit
     /// under, for events that only make sense for that request.
     Text {
@@ -245,6 +248,26 @@ fn run(messages: Receiver<Message>, host: &HostState) {
         if let Some(command) = engine.take_text_input_command() {
             keyboard.send(java.as_ref(), &command);
         }
+        // And whether the system's bars need light or dark icons over it.
+        if let Some(bars) = engine.take_system_bars() {
+            let (status, navigation) = (
+                bars.status == BarContent::Dark,
+                bars.navigation == BarContent::Dark,
+            );
+            let told = java
+                .as_ref()
+                .is_some_and(|java| java.system_bars(status, navigation));
+            log::info(&format!(
+                "system bars: status icons {}, navigation icons {}{}",
+                if status { "dark" } else { "light" },
+                if navigation { "dark" } else { "light" },
+                if told {
+                    ""
+                } else {
+                    " (the host could not be told)"
+                },
+            ));
+        }
         // A timer message delivered in the frame may have asked for work.
         services.dispatch(&mut engine, java.as_ref());
         match outcome {
@@ -299,10 +322,14 @@ impl Keyboard {
             traits: Default::default(),
             text: String::new(),
             caret: 0,
+            anchor: None,
         };
         let request = request.unwrap_or(&empty);
         let traits = request.traits;
         let caret = byte_to_utf16_offset(&request.text, request.caret);
+        let anchor = request
+            .anchor
+            .map_or(caret, |anchor| byte_to_utf16_offset(&request.text, anchor));
         match command {
             TextInputCommand::Hide => log::info("text input: hide keyboard"),
             TextInputCommand::Show(_) => log::info(&format!(
@@ -316,7 +343,7 @@ impl Keyboard {
                 request.text.chars().count(),
             )),
             TextInputCommand::Update(_) => log::info(&format!(
-                "text input: update host text chars={} caret={caret}",
+                "text input: update host text chars={} selection={anchor}..{caret}",
                 request.text.chars().count(),
             )),
         }
@@ -351,7 +378,8 @@ impl Keyboard {
                 | i32::from(traits.multiline) << 1
                 | i32::from(traits.autocorrect) << 2,
             text: &request.text,
-            caret: i32::try_from(caret).unwrap_or(i32::MAX),
+            selection_start: i32::try_from(anchor).unwrap_or(i32::MAX),
+            selection_end: i32::try_from(caret).unwrap_or(i32::MAX),
         });
     }
 
@@ -385,6 +413,8 @@ const SERVICE_STOP_PLAYBACK: i32 = 3;
 const SERVICE_STORE: i32 = 4;
 const SERVICE_REMOVE: i32 = 5;
 const SERVICE_LOAD: i32 = 6;
+const SERVICE_SET_CLIPBOARD: i32 = 7;
+const SERVICE_READ_CLIPBOARD: i32 = 8;
 
 /// How many times in a row the application may answer a request that
 /// could not be made with another request before the render thread moves
@@ -473,6 +503,8 @@ fn send_to_host(java: &Env, call: &ServiceCall) -> bool {
         } => command(SERVICE_STORE, key, value, &[]),
         ServiceRequest::Store { key, value: None } => command(SERVICE_REMOVE, key, "", &[]),
         ServiceRequest::Load { key } => command(SERVICE_LOAD, key, "", &[]),
+        ServiceRequest::SetClipboard(text) => command(SERVICE_SET_CLIPBOARD, text, "", &[]),
+        ServiceRequest::ReadClipboard => command(SERVICE_READ_CLIPBOARD, "", "", &[]),
     }
 }
 
@@ -515,6 +547,11 @@ fn describe_result(result: &ServiceResult) -> String {
                 "nothing"
             }
         ),
+        // Never what is on it.
+        ServiceResult::Clipboard(text) => match text {
+            Some(text) => format!("clipboard chars={}", text.chars().count()),
+            None => "clipboard empty or not text".to_owned(),
+        },
     }
 }
 
@@ -527,12 +564,20 @@ fn describe(event: &TextInputEvent) -> String {
         TextInputEvent::Enter => "enter".to_owned(),
         TextInputEvent::Action(action) => format!("action {action:?}"),
         TextInputEvent::Edited(state) => format!(
-            "edited by the input method chars={} caret={} composing={}",
+            "edited by the input method chars={} caret={} selected={} composing={}",
             state.text.chars().count(),
             state.caret,
+            state.anchor.is_some(),
             state.composing.is_some(),
         ),
         TextInputEvent::FocusLost => "keyboard dismissed by the user".to_owned(),
+        TextInputEvent::Move { to, extend } => format!("move {to:?} extend={extend}"),
+        TextInputEvent::SelectAll => "select all".to_owned(),
+        TextInputEvent::Copy => "copy".to_owned(),
+        TextInputEvent::Cut => "cut".to_owned(),
+        TextInputEvent::Paste => "paste".to_owned(),
+        TextInputEvent::Undo => "undo".to_owned(),
+        TextInputEvent::Redo => "redo".to_owned(),
     }
 }
 
@@ -585,6 +630,14 @@ fn handle(
                     "keyboard inset {} px: frames={}",
                     engine.keyboard_inset(),
                     engine.frames_presented()
+                ));
+            }
+        }
+        Message::ReduceMotion(reduce) => {
+            if engine.set_reduce_motion(reduce) {
+                log::info(&format!(
+                    "reduce motion {}",
+                    if reduce { "on" } else { "off" }
                 ));
             }
         }

@@ -5,10 +5,10 @@ use std::time::Duration;
 use morningstar_core::{
     AtlasView, Color, DisplayList, HostState, Image, ImageError, ImageStore, ImagesView, Insets,
     Point, PointerEvent, Rect, ServiceCall, ServiceId, ServiceResult, Size, SurfaceSize,
-    TextInputEvent, TextInputRequest,
+    SystemBars, TextInputEvent, TextInputRequest,
 };
 use morningstar_text::{
-    MAX_PICTURE_PIXELS, TextContext, TextSpan, TextStyle, VectorIcon, VectorPicture,
+    MAX_PICTURE_PIXELS, RasterPicture, SvgPicture, TextContext, TextSpan, TextStyle, VectorIcon,
 };
 
 /// A cached picture is dropped once this many frames have been built
@@ -83,6 +83,12 @@ pub struct FrameInfo {
     /// should usually move or scroll clear of the keyboard rather than be
     /// padded as it is for a status bar. A change produces a new frame.
     pub keyboard_inset: f32,
+    /// The user has asked the system for less motion (Android's "remove
+    /// animations", an animator duration scale of zero; iOS's "reduce
+    /// motion"). Animations that only decorate a change should then take
+    /// no time. False until a host says otherwise; a change produces a new
+    /// frame.
+    pub reduce_motion: bool,
 }
 
 impl FrameInfo {
@@ -96,6 +102,7 @@ impl FrameInfo {
             scale: 1.0,
             insets: Insets::ZERO,
             keyboard_inset: 0.0,
+            reduce_motion: false,
         }
     }
 
@@ -127,6 +134,12 @@ impl FrameInfo {
     /// Sets the keyboard inset; a negative or non-finite value becomes zero.
     pub fn with_keyboard_inset(mut self, inset: f32) -> Self {
         self.keyboard_inset = clean_inset(inset);
+        self
+    }
+
+    /// Sets whether the user has asked the system for less motion.
+    pub const fn with_reduce_motion(mut self, reduce: bool) -> Self {
+        self.reduce_motion = reduce;
         self
     }
 
@@ -185,6 +198,7 @@ pub struct Frame {
     redraw_requested: bool,
     redraw_after: Option<Duration>,
     text_input: Option<TextInputRequest>,
+    system_bars: Option<SystemBars>,
 }
 
 impl Frame {
@@ -201,6 +215,7 @@ impl Frame {
             redraw_requested: false,
             redraw_after: None,
             text_input: None,
+            system_bars: None,
         }
     }
 
@@ -239,6 +254,7 @@ impl Frame {
         self.redraw_requested = false;
         self.redraw_after = None;
         self.text_input = None;
+        self.system_bars = None;
     }
 
     /// Asks for another frame at the next display refresh.
@@ -299,6 +315,40 @@ impl Frame {
         self.text_input.as_ref()
     }
 
+    /// Says whether the system's status and navigation bars should show
+    /// light or dark icons over this frame. The surface is drawn edge to
+    /// edge under transparent bars, so only the application knows what is
+    /// behind them. Declared per frame, like the keyboard; the host is told
+    /// only when it changes, and a frame that does not call this leaves the
+    /// bars as they are.
+    pub fn set_system_bars(&mut self, bars: SystemBars) {
+        self.system_bars = Some(bars);
+    }
+
+    /// What [`set_system_bars`](Self::set_system_bars) was given since
+    /// [`begin`](Self::begin).
+    pub fn system_bars(&self) -> Option<SystemBars> {
+        self.system_bars
+    }
+
+    /// The rectangles a selection of bytes `from..to` of `text` covers,
+    /// relative to the origin the text would be drawn at with the same
+    /// style and width, appended to `out`: one per visual line, and more
+    /// than one on a line whose selected part is split by a change of
+    /// writing direction.
+    pub fn text_selection_rects(
+        &mut self,
+        text: &str,
+        style: &TextStyle,
+        max_width: Option<f32>,
+        from: usize,
+        to: usize,
+        out: &mut Vec<Rect>,
+    ) {
+        self.text
+            .selection_rects(text, style, max_width, from, to, out);
+    }
+
     /// Where a caret at byte offset `index` of `text` belongs, relative to
     /// the origin the text would be drawn at with the same style and width:
     /// a rectangle of zero width, one line tall. `index` is clamped to the
@@ -340,8 +390,11 @@ impl Frame {
         origin: Point,
         max_width: Option<f32>,
     ) -> Size {
-        self.text
-            .draw(&mut self.list, text, style, origin, max_width)
+        let size = self
+            .text
+            .draw(&mut self.list, text, style, origin, max_width);
+        self.settle_turned_text();
+        size
     }
 
     /// The size [`draw_text`](Self::draw_text) would occupy, without drawing.
@@ -360,8 +413,20 @@ impl Frame {
         origin: Point,
         max_width: Option<f32>,
     ) -> Size {
-        self.text
-            .draw_spans(&mut self.list, spans, style, origin, max_width)
+        let size = self
+            .text
+            .draw_spans(&mut self.list, spans, style, origin, max_width);
+        self.settle_turned_text();
+        size
+    }
+
+    /// Text drawn through a transform that changed since the previous
+    /// frame is left to the renderer to turn for that frame (ADR 0029).
+    /// One more frame draws it sharp once the transform has stopped.
+    fn settle_turned_text(&mut self) {
+        if self.text.take_settle_request() {
+            self.redraw_requested = true;
+        }
     }
 
     /// The size [`draw_text_spans`](Self::draw_text_spans) would occupy.
@@ -413,9 +478,12 @@ impl Frame {
     /// and a third more than that on the GPU, with mipmaps. Pictures larger
     /// than 2048 pixels on a side are rasterised at that size and
     /// stretched.
+    ///
+    /// `picture` is a [`VectorPicture`](morningstar_text::VectorPicture) or
+    /// a loaded [`SvgPicture`]; both go through this one path and cache.
     pub fn draw_picture(
         &mut self,
-        picture: &VectorPicture,
+        picture: &impl RasterPicture,
         rect: Rect,
         corner_radius: f32,
         tint: Color,
@@ -472,6 +540,31 @@ impl Frame {
             Rect::new(left, top, width, height),
             corner_radius,
             tint,
+        );
+    }
+
+    /// Draws a loaded SVG as an icon in `color`, into `rect` (physical
+    /// pixels), fitted and centred.
+    ///
+    /// A [single-ink](SvgPicture::is_single_ink) file (the usual icon: one
+    /// colour or `currentColor` throughout) is a mask in the glyph atlas,
+    /// like a [`VectorIcon`]: it shares text's draw call and changes
+    /// colour without being rasterised again. Any other file is drawn as a
+    /// [picture](Self::draw_picture) with `currentColor` set to `color`
+    /// and its other colours kept, faded by the colour's alpha.
+    pub fn draw_svg_icon(&mut self, picture: &SvgPicture, rect: Rect, color: Color) {
+        if self
+            .text
+            .draw_svg_icon(&mut self.list, picture, rect, color)
+        {
+            return;
+        }
+        let opaque = Color::rgb(color.r, color.g, color.b);
+        self.draw_picture(
+            &picture.with_current_color(opaque),
+            rect,
+            0.0,
+            Color::rgba(1.0, 1.0, 1.0, color.a),
         );
     }
 

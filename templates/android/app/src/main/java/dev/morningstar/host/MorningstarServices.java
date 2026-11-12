@@ -1,6 +1,8 @@
 package dev.morningstar.host;
 
 import android.Manifest;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -45,8 +47,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The platform services an application can ask for: HTTP requests, recording
- * from the microphone, playing a clip, and a few stored values. See
- * docs/architecture/0019-effects-and-platform-services.md.
+ * from the microphone, playing a clip, a few stored values, and the
+ * clipboard. See docs/architecture/0019-effects-and-platform-services.md and
+ * 0025-text-selection-and-clipboard.md.
  *
  * Rust asks from its render thread (MorningstarNative.onHttpRequest and
  * onServiceCommand), and those calls only hand the work on:
@@ -59,7 +62,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  *     else.
  *
  * Nothing here runs on the main thread except asking the user for the
- * microphone, which Android only allows from an activity. Every request that
+ * microphone, which Android only allows from an activity, and the clipboard,
+ * which is quick and which Android only lets the focused app read. Every request that
  * expects an answer gets exactly one, through a native method of
  * MorningstarNative, from whichever thread finished the work.
  *
@@ -194,6 +198,18 @@ final class MorningstarServices {
             unsupported(command, id);
             return;
         }
+        if (command == MorningstarNative.SERVICE_SET_CLIPBOARD
+                || command == MorningstarNative.SERVICE_READ_CLIPBOARD) {
+            MAIN.post(
+                    () -> {
+                        if (command == MorningstarNative.SERVICE_SET_CLIPBOARD) {
+                            setClipboard(first);
+                        } else {
+                            readClipboard(id);
+                        }
+                    });
+            return;
+        }
         handler.post(
                 () -> {
                     switch (command) {
@@ -247,9 +263,69 @@ final class MorningstarServices {
             case MorningstarNative.SERVICE_LOAD:
                 MorningstarNative.nativeLoadResult(id, false, null);
                 break;
+            case MorningstarNative.SERVICE_READ_CLIPBOARD:
+                MorningstarNative.nativeClipboardResult(id, false, null);
+                break;
             default:
                 break;
         }
+    }
+
+    // ------------------------------------------------------------ clipboard
+
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    /** Puts plain text on the clipboard. Main thread. */
+    private static void setClipboard(String text) {
+        try {
+            ClipboardManager clipboard =
+                    (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (clipboard != null) {
+                // The label is for the system's own UI and is never shown
+                // with the text; nothing about the text is logged.
+                clipboard.setPrimaryClip(ClipData.newPlainText("text", text));
+            }
+        } catch (RuntimeException refused) {
+            // A clip too large for a binder transaction, or a device policy
+            // that forbids copying: the text is simply not copied.
+            Log.w(TAG, "clipboard: could not copy (" + refused.getClass().getSimpleName() + ")");
+        }
+    }
+
+    /**
+     * Reads the clipboard as plain text and answers with it. Called only
+     * when the user chose Paste: from Android 12 the system shows "pasted
+     * from your clipboard" each time an app reads what another app copied,
+     * and from Android 10 only the focused app may read at all. Formatting
+     * is dropped (coerceToText): a styled clip pastes as its characters.
+     * Main thread.
+     */
+    private static void readClipboard(long id) {
+        String text = null;
+        try {
+            ClipboardManager clipboard =
+                    (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+            ClipData clip = clipboard == null ? null : clipboard.getPrimaryClip();
+            if (clip != null && clip.getItemCount() > 0) {
+                StringBuilder all = new StringBuilder();
+                for (int index = 0; index < clip.getItemCount(); index++) {
+                    CharSequence item = clip.getItemAt(index).coerceToText(context);
+                    if (item != null && item.length() > 0) {
+                        if (all.length() > 0) {
+                            all.append('\n');
+                        }
+                        all.append(item);
+                    }
+                }
+                if (all.length() > 0) {
+                    text = all.toString();
+                }
+            }
+        } catch (RuntimeException refused) {
+            // Not focused, or a content URI that cannot be opened.
+            Log.w(TAG, "clipboard: could not read (" + refused.getClass().getSimpleName() + ")");
+        }
+        MorningstarNative.nativeClipboardResult(id, text != null, text);
     }
 
     private static SharedPreferences store() {

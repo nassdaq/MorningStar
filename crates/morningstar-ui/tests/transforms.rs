@@ -98,12 +98,25 @@ fn a_turned_tile_is_drawn_through_a_transform_about_its_centre() {
         13,
         "the label turns with the tile"
     );
+    // The text's glyphs are rasterised for the turn and placed in screen
+    // space (ADR 0029): as many as without it, in other rectangles. Every
+    // other operation is the one drawn without the turn.
     let unturned: Vec<_> = ops
         .iter()
-        .filter(|op| !matches!(op, DrawOp::PushTransform { .. } | DrawOp::PopTransform))
+        .filter(|op| {
+            !matches!(
+                op,
+                DrawOp::PushTransform { .. }
+                    | DrawOp::PopTransform
+                    | DrawOp::PushScreenSpace
+                    | DrawOp::PopScreenSpace
+            )
+        })
         .collect();
     assert_eq!(unturned.len(), plain.ops().len());
-    assert!(unturned.iter().zip(plain.ops()).all(|(a, b)| *a == b));
+    assert!(unturned.iter().zip(plain.ops()).all(|(a, b)| {
+        *a == b || matches!((a, b), (DrawOp::Glyph { .. }, DrawOp::Glyph { .. }))
+    }));
 }
 
 #[test]

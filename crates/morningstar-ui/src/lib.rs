@@ -77,8 +77,8 @@
 //! | Flexible or fixed gap | [`Spacer`] |
 //! | Scrolling content | [`ScrollView`] |
 //! | Status bar / gesture bar margins | [`SafeArea`], [`Container::safe_area`] |
-//! | Image | [`Picture`]; a person: [`Avatar`] (image, or initials as the fallback) |
-//! | Icon | [`Icon::vector`] with a [`VectorIcon`] (a small subset of SVG); the [`Icon::new`] glyph tile as a stand-in |
+//! | Image | [`Picture`]; an SVG file: [`Picture::svg`] with an [`SvgAsset`]; a person: [`Avatar`] (image, or initials as the fallback) |
+//! | Icon | [`Icon::svg`] with a loaded SVG file, or [`Icon::vector`] with a [`VectorIcon`] (one-colour markup in the source); the [`Icon::new`] glyph tile as a stand-in |
 //! | A bold or coloured phrase inside a sentence | [`Text::rich`] with [`span`]s |
 //! | Font family, letter spacing, capitals | [`Text::family`] (defaults in [`Fonts`]), [`Text::letter_spacing`], [`Text::uppercase`] |
 //! | Dashed outline | [`Container::border_dashed`] |
@@ -181,8 +181,9 @@
 //! * [`ScrollTo::animated`]: a scroll that glides.
 //!
 //! Frames are produced only while something is on its way; when the last
-//! animation ends the app is as idle as it was. [`Ui::set_reduce_motion`]
-//! makes every one of these take no time. A widget that asks for none of
+//! animation ends the app is as idle as it was. When the user has asked the
+//! system for less motion (or [`Ui::set_reduce_motion`] has) every one of
+//! these takes no time. A widget that asks for none of
 //! this costs one comparison per frame.
 //!
 //! # Navigation
@@ -204,9 +205,22 @@
 //! safe area pad for the keyboard instead, and the focused field is kept in
 //! view: every [`ScrollView`] around it scrolls, and what scrolling cannot
 //! do the screen makes up by shifting. A multi-line field can be bounded
-//! ([`TextInput::max_lines`]) and then scrolls inside itself. There is no
-//! selection, copy or paste yet. `docs/building-screens.md` has a worked
-//! form.
+//! ([`TextInput::max_lines`]) and then scrolls inside itself.
+//!
+//! A field behaves as a native one does: a double tap or a long press
+//! selects a word and brings up two handles and a small menu (Cut, Copy,
+//! Paste, Select all) drawn by the framework; a hardware keyboard's
+//! arrows and shortcuts work; the clipboard is the platform's. None of it
+//! reaches the application, which still sees only the new string;
+//! [`Ui::selection`] and [`Ui::select`] reach in from outside.
+//! `docs/building-screens.md` has a worked form.
+//!
+//! # The system's bars
+//!
+//! The screen is drawn under the status bar and the navigation bar. Their
+//! icons are dark over a light theme and light over a dark one without
+//! the application saying anything; [`Application::system_bars`] overrides
+//! that for a screen whose edges are not the theme's background.
 //!
 //! # Talking to a server, sound, and remembering things
 //!
@@ -277,12 +291,13 @@ pub use morningstar_core::{
     ServiceCall, ServiceId, ServiceRequest, ServiceResult,
 };
 pub use morningstar_core::{
-    Capitalization, Color, Image, ImageError, ImageFit, ImeAction, KeyboardType, Shadow, Transform,
+    BarContent, Capitalization, CaretMove, Color, Image, ImageError, ImageFit, ImeAction,
+    KeyboardType, Shadow, SystemBars, Transform,
 };
 pub use morningstar_layout::{Align, Alignment, CrossAlign, MainAlign, Sizing};
 pub use morningstar_runtime::{
-    FontFamily, IconError, Layer, LineCap, LineJoin, Setup, Shape, TextAlign, TextWeight,
-    VectorIcon, VectorPicture,
+    FontFamily, IconError, Layer, LineCap, LineJoin, Setup, Shape, SvgAsset, SvgError,
+    SvgErrorKind, SvgPicture, TextAlign, TextWeight, VectorIcon, VectorPicture,
 };
 
 /// Everything a screen is written with: `use morningstar::ui::prelude::*;`.
@@ -292,13 +307,14 @@ pub mod prelude {
         Column, Container, CrossAlign, Divider, Element, FontFamily, Fonts, Gradient, Icon, Image,
         ImageFit, ImeAction, KeyboardType, Layer, LineCap, LineJoin, MainAlign, Picture, Pressable,
         Radii, Row, SafeArea, SafeEdges, ScrollView, Setup, Shadow, Shape, Sizing, Spacer, Spacing,
-        Span, Stack, Text, TextAlign, TextInput, TextRole, TextSpec, TextWeight, Theme, ThemeColor,
-        Transform, TypeScale, Ui, VectorIcon, VectorPicture, col, elevation, hex, hexa, icon, rgb8,
-        row, span, stack, text, with_alpha,
+        Span, Stack, SvgAsset, SvgPicture, Text, TextAlign, TextInput, TextRole, TextSpec,
+        TextWeight, Theme, ThemeColor, Transform, TypeScale, Ui, VectorIcon, VectorPicture, col,
+        elevation, hex, hexa, icon, rgb8, row, span, stack, text, with_alpha,
     };
     pub use crate::{
         AudioClip, AudioError, Effects, HttpError, HttpMethod, HttpRequest, HttpResponse,
         Recording, ServiceRequest, ServiceResult,
     };
+    pub use crate::{BarContent, SystemBars};
     pub use crate::{Easing, Navigation, Navigator, ScrollTo, Transition, Viewport, Wrap};
 }

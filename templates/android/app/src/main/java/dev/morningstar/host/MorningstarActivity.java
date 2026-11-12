@@ -1,15 +1,18 @@
 package dev.morningstar.host;
 
 import android.app.Activity;
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.database.ContentObserver;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.Selection;
@@ -23,6 +26,7 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
@@ -54,6 +58,16 @@ import android.window.OnBackInvokedDispatcher;
  * (MorningstarNative.onBackResult): the application went back a screen, or
  * it had nowhere to go and the host leaves the app. The main thread never
  * waits for the answer. See docs/architecture/0018-back-and-timers.md.
+ *
+ * Selection and the clipboard: the field's selection is Rust's, drawn by
+ * Rust, and mirrored in the copy the input method sees (both ways). Arrow
+ * keys and the Ctrl shortcuts of a hardware keyboard are passed on as they
+ * are. See docs/architecture/0025-text-selection-and-clipboard.md.
+ *
+ * System bars and reduce motion: Rust says whether the bars' icons should
+ * be light or dark (MorningstarNative.onSystemBars), and is told whether
+ * the user has switched animations off (nativeSetReduceMotion). See
+ * docs/architecture/0026-system-bars-and-reduce-motion.md.
  *
  * Platform services (HTTP, recording, playback, stored values) are in
  * MorningstarServices; this class only tells it when the activity comes and
@@ -120,8 +134,12 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
         MorningstarNative.nativeSetContinuous(
                 getIntent().getBooleanExtra(CONTINUOUS_EXTRA, false));
         sendScale();
+        sendReduceMotion();
 
         layoutEdgeToEdge();
+        // An activity recreated in a live process: Rust said long ago how
+        // the bars should look and will not say again until it changes.
+        MorningstarNative.restoreSystemBars(this);
 
         current = this;
         inputMethodManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
@@ -160,6 +178,14 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
     protected void onStart() {
         super.onStart();
         MorningstarServices.activityStarted();
+        // The setting may have changed while the app was off screen, and
+        // is watched while it is on.
+        sendReduceMotion();
+        getContentResolver()
+                .registerContentObserver(
+                        Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
+                        false,
+                        animatorScaleObserver);
         MorningstarNative.nativeResume();
     }
 
@@ -171,6 +197,7 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
         // Sound stops with the screen: a clip ends as interrupted and a
         // recording is closed and kept (ADR 0019).
         MorningstarServices.activityStopped();
+        getContentResolver().unregisterContentObserver(animatorScaleObserver);
         MorningstarNative.nativePause();
         super.onStop();
     }
@@ -324,6 +351,81 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
 
     private void sendScale() {
         MorningstarNative.nativeSetScale(getResources().getDisplayMetrics().density);
+    }
+
+    // -------------------------------------------------------- reduce motion
+
+    /** Told when the user changes "animator duration scale" in the settings. */
+    private final ContentObserver animatorScaleObserver =
+            new ContentObserver(mainHandler) {
+                @Override
+                public void onChange(boolean selfChange) {
+                    sendReduceMotion();
+                }
+            };
+
+    /**
+     * Tells Rust whether animations are switched off: "Remove animations"
+     * in the accessibility settings, or an animator duration scale of zero
+     * in the developer options, which is the same setting. From API 26 the
+     * platform answers directly; before that the setting is read.
+     */
+    private void sendReduceMotion() {
+        boolean enabled;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            enabled = ValueAnimator.areAnimatorsEnabled();
+        } else {
+            enabled =
+                    Settings.Global.getFloat(
+                                    getContentResolver(),
+                                    Settings.Global.ANIMATOR_DURATION_SCALE,
+                                    1f)
+                            != 0f;
+        }
+        MorningstarNative.nativeSetReduceMotion(!enabled);
+    }
+
+    // ---------------------------------------------------------- system bars
+
+    /**
+     * Makes the icons of the status bar and of the navigation bar dark
+     * (over a light screen) or light, as Rust asked. The bars stay
+     * transparent and the window edge to edge.
+     *
+     * API 30 and later: WindowInsetsController. API 23 to 29: the
+     * SYSTEM_UI_FLAG_LIGHT_STATUS_BAR flag, and from API 26 the one for the
+     * navigation bar; before API 26 the navigation bar's icons are always
+     * light, and before API 23 the status bar's too.
+     */
+    @SuppressWarnings("deprecation") // The flags are the only way before API 30.
+    void applySystemBars(boolean darkStatusIcons, boolean darkNavigationIcons) {
+        Window window = getWindow();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController controller = window.getInsetsController();
+            if (controller == null) {
+                return;
+            }
+            controller.setSystemBarsAppearance(
+                    darkStatusIcons ? WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS : 0,
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
+            controller.setSystemBarsAppearance(
+                    darkNavigationIcons
+                            ? WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                            : 0,
+                    WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+            return;
+        }
+        View decor = window.getDecorView();
+        int flags = decor.getSystemUiVisibility();
+        flags = withFlag(flags, View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR, darkStatusIcons);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            flags = withFlag(flags, View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR, darkNavigationIcons);
+        }
+        decor.setSystemUiVisibility(flags);
+    }
+
+    private static int withFlag(int flags, int flag, boolean set) {
+        return set ? flags | flag : flags & ~flag;
     }
 
     /**
@@ -526,16 +628,20 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
             }
         }
 
-        /** Replaces the copy with Rust's text and caret; nothing composing. */
-        void set(String newText, int caret) {
+        /**
+         * Replaces the copy with Rust's text and selection (from start,
+         * where it was begun, to end, the caret); nothing composing.
+         */
+        void set(String newText, int start, int end) {
             if (!text.toString().equals(newText)) {
                 text.replace(0, text.length(), newText);
             }
             BaseInputConnection.removeComposingSpans(text);
-            int at = Math.max(0, Math.min(caret, text.length()));
-            Selection.setSelection(text, at);
+            int from = Math.max(0, Math.min(start, text.length()));
+            int at = Math.max(0, Math.min(end, text.length()));
+            Selection.setSelection(text, from, at);
             knownText = newText;
-            knownStart = at;
+            knownStart = from;
             knownEnd = at;
             knownComposingStart = -1;
             knownComposingEnd = -1;
@@ -551,7 +657,8 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
             int action,
             int flags,
             String text,
-            int caret) {
+            int selectionStart,
+            int selectionEnd) {
         switch (command) {
             case MorningstarNative.TEXT_SHOW:
                 {
@@ -561,7 +668,7 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
                     session.capitalization = capitalization;
                     session.action = action;
                     session.flags = flags;
-                    session.set(text, caret);
+                    session.set(text, selectionStart, selectionEnd);
                     textSession = session;
                     hostView.requestFocus();
                     // A new field: the input method must read its type and
@@ -583,11 +690,14 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
                         break;
                     }
                     boolean sameText = session.text.toString().equals(text);
-                    session.set(text, caret);
+                    session.set(text, selectionStart, selectionEnd);
                     if (sameText) {
-                        // Only the caret moved; the composition, if any,
-                        // ended. The input method follows from this.
-                        inputMethodManager.updateSelection(hostView, caret, caret, -1, -1);
+                        // Only the caret or the selection moved (a handle
+                        // was dragged, a word double-tapped); the
+                        // composition, if any, ended. The input method
+                        // follows from this, without being restarted.
+                        inputMethodManager.updateSelection(
+                                hostView, session.knownStart, session.knownEnd, -1, -1);
                     } else {
                         // What the input method believes is in the field is
                         // wrong: make it start again from the new text.
@@ -722,7 +832,20 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
                 default:
                     break;
             }
-            if (event.isCtrlPressed() || event.isMetaPressed()) {
+            // Arrows, Home and End: of a hardware keyboard, and of input
+            // methods that move their cursor with key events.
+            boolean control = event.isCtrlPressed() || event.isMetaPressed();
+            int move = caretMove(keyCode, control);
+            if (move >= 0) {
+                MorningstarNative.nativeTextMove(move, event.isShiftPressed());
+                return true;
+            }
+            if (control) {
+                int shortcut = shortcut(keyCode, event.isShiftPressed());
+                if (shortcut >= 0) {
+                    MorningstarNative.nativeTextCommand(shortcut);
+                    return true;
+                }
                 return super.onKeyDown(keyCode, event);
             }
             int character = event.getUnicodeChar();
@@ -734,6 +857,54 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
                 return true;
             }
             return super.onKeyDown(keyCode, event);
+        }
+    }
+
+    /** The TEXT_MOVE_* of a key, or -1 if it does not move the caret. */
+    private static int caretMove(int keyCode, boolean control) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                return control
+                        ? MorningstarNative.TEXT_MOVE_WORD_LEFT
+                        : MorningstarNative.TEXT_MOVE_LEFT;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                return control
+                        ? MorningstarNative.TEXT_MOVE_WORD_RIGHT
+                        : MorningstarNative.TEXT_MOVE_RIGHT;
+            case KeyEvent.KEYCODE_DPAD_UP:
+                return MorningstarNative.TEXT_MOVE_UP;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                return MorningstarNative.TEXT_MOVE_DOWN;
+            case KeyEvent.KEYCODE_MOVE_HOME:
+                return control
+                        ? MorningstarNative.TEXT_MOVE_TEXT_START
+                        : MorningstarNative.TEXT_MOVE_LINE_START;
+            case KeyEvent.KEYCODE_MOVE_END:
+                return control
+                        ? MorningstarNative.TEXT_MOVE_TEXT_END
+                        : MorningstarNative.TEXT_MOVE_LINE_END;
+            default:
+                return -1;
+        }
+    }
+
+    /** The TEXT_KEY_* of a key pressed with Ctrl (or Meta), or -1. */
+    private static int shortcut(int keyCode, boolean shift) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_A:
+                return MorningstarNative.TEXT_KEY_SELECT_ALL;
+            case KeyEvent.KEYCODE_C:
+                return MorningstarNative.TEXT_KEY_COPY;
+            case KeyEvent.KEYCODE_X:
+                return MorningstarNative.TEXT_KEY_CUT;
+            case KeyEvent.KEYCODE_V:
+                return MorningstarNative.TEXT_KEY_PASTE;
+            case KeyEvent.KEYCODE_Z:
+                return shift ? MorningstarNative.TEXT_KEY_REDO : MorningstarNative.TEXT_KEY_UNDO;
+            case KeyEvent.KEYCODE_Y:
+                return MorningstarNative.TEXT_KEY_REDO;
+            default:
+                return -1;
         }
     }
 
@@ -866,6 +1037,34 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
                     // "Unspecified": the Return key itself.
                     key = MorningstarNative.TEXT_KEY_ENTER;
                     break;
+            }
+            MorningstarNative.nativeTextCommand(key);
+            return true;
+        }
+
+        // An input method's own "select all", "cut", "copy" and "paste"
+        // (a clipboard row, a text-editing panel). Rust does them: it owns
+        // the selection, the field's rules and the clipboard request.
+        @Override
+        public boolean performContextMenuAction(int id) {
+            if (session != textSession) {
+                return false;
+            }
+            int key;
+            if (id == android.R.id.selectAll) {
+                key = MorningstarNative.TEXT_KEY_SELECT_ALL;
+            } else if (id == android.R.id.cut) {
+                key = MorningstarNative.TEXT_KEY_CUT;
+            } else if (id == android.R.id.copy) {
+                key = MorningstarNative.TEXT_KEY_COPY;
+            } else if (id == android.R.id.paste || id == android.R.id.pasteAsPlainText) {
+                key = MorningstarNative.TEXT_KEY_PASTE;
+            } else if (id == android.R.id.undo) {
+                key = MorningstarNative.TEXT_KEY_UNDO;
+            } else if (id == android.R.id.redo) {
+                key = MorningstarNative.TEXT_KEY_REDO;
+            } else {
+                return false;
             }
             MorningstarNative.nativeTextCommand(key);
             return true;
