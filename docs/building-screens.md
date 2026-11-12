@@ -694,6 +694,64 @@ assert_matches_reference(&png, "tests/references/settings.png", Tolerance::DEFAU
 // create or update: MORNINGSTAR_UPDATE_REFERENCES=1 cargo test -p my-app
 ```
 
+## Accessibility
+
+A Morningstar screen is described to TalkBack and VoiceOver as a tree of nodes derived from its widgets ([ADR 0032](architecture/0032-accessibility.md)). Most of it needs nothing from you:
+
+- a `Text` is read as text; a `Button` as a button with its label, "disabled" without `on_press`;
+- anything with `on_press` (a row, a card) is **one** stop, read as the texts inside it in order: a list row is one swipe, not five;
+- a `TextInput` is an edit box: its placeholder is its hint, its text its value, and a `secure` field's value is bullets, never its characters;
+- a `ScrollView` is a list that can be scrolled; icons, pictures, shapes and dividers say nothing;
+- the order is the order of the layout; the layers of a `Stack` are read top to bottom.
+
+What the defaults cannot know, you say:
+
+```rust
+// An icon-only control has no words: a label is required.
+Pressable::new(Icon::vector(BACK).size(24.0)).size(48.0, 48.0).on_press(Message::Back).label("Back")
+// What something is, and its state.
+tab_item.role(Role::Tab).selected(tab == current)
+mute_button.label("Mute").role(Role::Switch).checked(muted)
+title.heading()
+// A value, for bars and scores.
+bar.role(Role::Progress).label("Clarity").value("88 out of 100")
+// A label above a field is the field's name: label the field's frame, and drop the text.
+col![label_text.exclude_semantics(), field_frame.label("Customer name")]
+// Several texts that are one thing; pieces of a picture that are not text at all.
+row![name, amount].merge_semantics()
+collage.exclude_semantics()
+// A region whose changes should be read out without being looked for.
+callers_line.live(Live::Polite)
+// Something that happened and is not on the screen.
+out.announce("Report ready");
+```
+
+On `Text` and `TextInput`, where `.label()` and `.role(..)` set the text style, the same modifiers are `.semantic_label(..)` and `.semantic_role(..)`. A label on a box replaces the texts inside it; `.semantics_group()` keeps them as separate stops under a named container.
+
+**A label is required** for every control with no text inside it: back, close, the bell, a tab bar of icons, send. The checker finds them.
+
+**Testing.** Turn it on in the test, then assert on the tree and act through it:
+
+```rust
+let mut ui = Ui::testing(app);
+ui.set_accessibility(true);
+ui.frame(&info, &mut frame);
+assert_eq!(ui.accessibility_issues(), []);              // labels, 48 dp targets, twins, contrast
+let tree = ui.semantics();
+assert!(tree.find(Role::Tab, "Home").unwrap().is(States::SELECTED));
+println!("{:#?}", tree.spoken());                         // what a reader says, in order
+let call = tree.find(Role::Button, "Start call").unwrap().id;
+assert!(ui.perform(call, Action::Activate));              // what a double tap does
+```
+
+`accessibility_issues()` reports a control with nothing to call it, a touch target under 48 x 48 dp, two controls side by side with the same label, and text under 4.5:1 against a solid background (3:1 from 24 dp, or 18.66 dp bold). Where a design itself breaks a rule and its pixels are not yours to change, list the finding and allow it in the test with its reason, as `examples/callready/tests/accessibility.rs` does. To see a screen as a reader will, render it with its nodes outlined and numbered in reading order:
+
+```sh
+cargo run -p callready --example screenshot -- out/ 02 --phone --semantics   # out/02-home.semantics.png
+```
+
+Nothing of this is built while no screen reader is running. Not there yet: the system's font size is not followed, and nothing has been tried with TalkBack or VoiceOver.
+
 ## Pitfalls
 
 Each of these produces a wrong picture, not an error.
@@ -716,6 +774,7 @@ Each of these produces a wrong picture, not an error.
 - **A font family that was not added falls back silently.** Check with `setup.has_font_family("Inter")`.
 - **Arabic and other right-to-left text**: shaped and ordered correctly, but give it `.fill_width()` so it has a box to align in. Layout itself is never mirrored.
 - **A widget with `.animate(..)` or `.transition(..)` needs an `.id(..)`** that stays the same while it changes; without one its identity is its place in the tree, and a sibling appearing before it makes it "a different widget".
+- **A control that is only a picture needs `.label("..")`**, or a screen reader says just "button". `ui.accessibility_issues()` finds them; see "Accessibility" above.
 - **The system's bars** (clock, battery, the gesture handle) are drawn over your screen. Their icons are dark over a light theme background and light over a dark one, by themselves. A screen whose top or bottom is not the theme's background says so: `fn system_bars(&self) -> Option<SystemBars>` on the `Application`, returning `Some(SystemBars::LIGHT_CONTENT)` (light icons, for a dark screen), `Some(SystemBars::DARK_CONTENT)`, or a `SystemBars { status, navigation }` of its own, and `None` everywhere else. `examples/fundidesk` does it for its green splash.
 - **Not available yet**: keyframes and springs; overscroll bounce; horizontal scrolling, ellipsis, per-corner radii, per-side borders (use a `Divider`), a tap target inside a sentence.
 

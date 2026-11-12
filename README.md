@@ -14,6 +14,7 @@ One Rust codebase. A custom UI engine and renderer owned by Morningstar. Thin na
 - **Text input** with the system keyboard on Android: focus, caret, keyboard types, Next/Done, keyboard avoidance.
 - **Selection and the clipboard** in every text field, drawn by the framework: double tap and long press, two handles, a Cut · Copy · Paste · Select all menu, caret keys and shortcuts of a hardware keyboard, undo. Host-tested; not yet tried on a device.
 - **System bars and motion follow the app and the user**: light or dark status and navigation icons from the theme (or per screen), and animations off when the system's "reduce motion" is on. Host-tested; not yet tried on a device.
+- **Screen readers can read and operate it**: every frame can be described as a tree of semantic nodes (buttons, text, fields, lists, with labels, values, states and actions) derived from the widgets, mirrored to TalkBack as a virtual view hierarchy and to VoiceOver as accessibility elements, built only while one is running. `ui.semantics()`, `ui.perform(..)` and `ui.accessibility_issues()` make it testable. Host-tested ([ADR 0032](docs/architecture/0032-accessibility.md)); not yet tried with TalkBack, and the iOS half is uncompiled.
 - **A runtime** that handles app lifecycle, surface loss and recreation, frame pacing and frame statistics.
 - **Touch input** delivered from both platforms to shared Rust code.
 - **Thin hosts** for Android (Java) and iOS (Swift) that contain no application logic.
