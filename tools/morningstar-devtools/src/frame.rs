@@ -46,3 +46,82 @@ pub fn screenshot_frame(app: &mut dyn App, info: &FrameInfo) -> Result<Vec<u8>, 
         &pixels,
     ))
 }
+
+/// Renders one frame of `app` over nothing instead of over its background
+/// colour, and returns it as an image with straight alpha: whatever the
+/// app does not draw is transparent, and an anti-aliased edge keeps its
+/// partial coverage.
+///
+/// For producing artwork from an app's own drawing, such as the foreground
+/// of its launcher icon (ADR 0020). The app's background colour is the
+/// frame's clear colour, which this replaces; an app that paints a
+/// background of its own covers the whole picture as usual.
+pub fn screenshot_transparent(
+    app: &mut dyn App,
+    info: &FrameInfo,
+) -> Result<crate::Image, GpuError> {
+    let mut frame = Frame::for_app(app);
+    frame.begin();
+    app.frame(info, &mut frame);
+    let mut clear = frame.clear;
+    (clear.r, clear.g, clear.b, clear.a) = (0.0, 0.0, 0.0, 0.0);
+
+    let mut pixels =
+        render_offscreen_with_images(info.size, clear, &frame.list, frame.atlas(), frame.images())?;
+    // The renderer's pixels are linear light multiplied by their alpha; an
+    // image file holds sRGB-encoded colour beside its alpha.
+    for pixel in pixels.chunks_exact_mut(4) {
+        let alpha = f32::from(pixel[3]);
+        for channel in &mut pixel[..3] {
+            *channel = if alpha > 0.0 {
+                crate::image::linear_to_srgb(f32::from(*channel) / alpha)
+            } else {
+                0
+            };
+        }
+    }
+    Ok(crate::Image::new(info.size.width, info.size.height, pixels))
+}
+
+#[cfg(test)]
+mod tests {
+    use morningstar_runtime::{Color, Rect, SurfaceSize};
+
+    use super::*;
+
+    /// An opaque square and a half-transparent white one, on a red
+    /// background the transparent screenshot must not show.
+    struct Squares;
+
+    impl App for Squares {
+        fn frame(&mut self, _info: &FrameInfo, frame: &mut Frame) {
+            frame.clear = Color::rgb(1.0, 0.0, 0.0);
+            frame
+                .list
+                .fill_rect(Rect::new(0.0, 0.0, 4.0, 4.0), Color::rgb(0.0, 0.0, 1.0));
+            frame.list.fill_rect(
+                Rect::new(4.0, 0.0, 4.0, 4.0),
+                Color::rgba(1.0, 1.0, 1.0, 0.5),
+            );
+        }
+    }
+
+    #[test]
+    fn a_transparent_screenshot_keeps_alpha_and_drops_the_background() {
+        let info = FrameInfo::new(SurfaceSize::new(8, 8));
+        let image = screenshot_transparent(&mut Squares, &info).unwrap();
+        assert_eq!((image.width(), image.height()), (8, 8));
+        assert_eq!(image.pixel(1, 1), [0, 0, 255, 255]);
+        // Straight alpha: the colour is still white, not half of it.
+        let [r, g, b, a] = image.pixel(5, 1);
+        assert!(r >= 254 && g >= 254 && b >= 254, "{r} {g} {b}");
+        assert!((127..=128).contains(&a), "{a}");
+        // Nothing drawn: nothing there, and none of the red.
+        assert_eq!(image.pixel(1, 6), [0, 0, 0, 0]);
+        assert_eq!(image.pixel(6, 6), [0, 0, 0, 0]);
+
+        // The ordinary screenshot of the same app does show its background.
+        let opaque = crate::Image::from_png(&screenshot_frame(&mut Squares, &info).unwrap());
+        assert_eq!(opaque.unwrap().pixel(1, 6), [255, 0, 0, 255]);
+    }
+}

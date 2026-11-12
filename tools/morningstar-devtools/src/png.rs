@@ -45,6 +45,44 @@ pub fn encode(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Encodes tightly packed RGBA8 pixels as a compressed sRGB PNG with no
+/// alpha channel at all: the alpha bytes are dropped, not blended, so
+/// flatten the picture first. For the one consumer that refuses a PNG with
+/// an alpha channel however opaque: an iOS app icon (ADR 0020).
+///
+/// # Panics
+/// As [`encode`].
+pub(crate) fn encode_opaque(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    assert_eq!(
+        rgba.len() as u64,
+        u64::from(width) * u64::from(height) * 4,
+        "pixel buffer does not match {width}x{height}"
+    );
+    assert!(
+        width > 0 && height > 0,
+        "a PNG cannot be empty ({width}x{height})"
+    );
+    let rgb: Vec<u8> = rgba
+        .chunks_exact(4)
+        .flat_map(|pixel| [pixel[0], pixel[1], pixel[2]])
+        .collect();
+
+    let mut out = Vec::with_capacity(rgb.len() / 8 + 256);
+    let mut encoder = ::png::Encoder::new(&mut out, width, height);
+    encoder.set_color(::png::ColorType::Rgb);
+    encoder.set_depth(::png::BitDepth::Eight);
+    encoder.set_compression(::png::Compression::Fast);
+    encoder.set_source_srgb(::png::SrgbRenderingIntent::Perceptual);
+    let mut writer = encoder
+        .write_header()
+        .expect("PNG header for a non-empty RGB8 image");
+    writer
+        .write_image_data(&rgb)
+        .expect("PNG data of the declared size");
+    writer.finish().expect("PNG trailer");
+    out
+}
+
 /// Decodes a PNG into straight-alpha RGBA8.
 ///
 /// Every bit depth, colour type and interlacing mode is accepted; 16-bit
