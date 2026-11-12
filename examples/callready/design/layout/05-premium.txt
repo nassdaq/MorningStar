@@ -1,0 +1,55 @@
+div layout x=0 y=0 w=390 h=844 font=Outfit 16px/normal 400
+  a layout x=322 y=52 w=44 h=44 font=Outfit 16px/normal 400 aria="Close"
+    svg bounds x=344 y=63 w=22 h=22 font=Outfit 16px/normal 400
+  div layout x=24 y=100 w=342 h=130 font=Outfit 16px/normal 400
+    h1 layout x=24 y=100 w=342 h=44 font=Outfit 40px/44px 700
+      text "CallReady" line-boxes(untransformed only if no ancestor is transformed) [x=24 y=96.5 w=187.66 h=50.5]
+    div layout x=174 y=144 w=182 h=68 font=Outfit 16px/normal 400
+      span layout x=174 y=144 w=56 h=68 transform=matrix(0.994522, -0.104528, 0.104528, 0.994522, 0, 0) transformed-bounds x=170.6 y=141.24 w=63.24 h=73.53 font="Archivo Black" 56px/56px 400
+        text "P" line-boxes(untransformed only if no ancestor is transformed) [x=178.92 y=145.55 w=46.59 h=64.89]
+      span layout x=233 y=146 w=62 h=66 transform=matrix(0.996195, 0.0871557, -0.0871557, 0.996195, 0.697246, -7.96956) transformed-bounds x=231.38 y=135.44 w=67.91 h=71.19 font="Abril Fatface" 62px/62px 400
+        text "R" line-boxes(untransformed only if no ancestor is transformed) [x=239.6 y=127.26 w=51.51 h=87.05]
+      span layout x=299 y=148 w=57 h=64 transform=matrix(0.99863, -0.052336, 0.052336, 0.99863, 0, 0) transformed-bounds x=297.2 y=146.54 w=60.59 h=66.91 font="Archivo Black" 52px/52px 400
+        text "O" line-boxes(untransformed only if no ancestor is transformed) [x=304.37 y=150.41 w=46.22 h=58.69]
+    span layout x=30 y=164 w=24 h=43 transform=matrix(0.992546, -0.121869, 0.121869, 0.992546, 0, 0) transformed-bounds x=27.5 y=162.67 w=29.48 h=45.17 font=Caveat 34px/normal 400
+      text "go" line-boxes(untransformed only if no ancestor is transformed) [x=27.5 y=162.67 w=29.48 h=45.17]
+  p layout x=24 y=236 w=342 h=25 font=Outfit 18px/25.2px 400
+    text "Practise the real job before your first shift." line-boxes(untransformed only if no ancestor is transformed) [x=24 y=237 w=333.35 h=22.5]
+  ul layout x=24 y=283 w=342 h=166 font=Outfit 17px/normal 400
+    li layout x=24 y=283 w=342 h=22 font=Outfit 17px/normal 400
+      svg bounds x=24 y=283.2 w=22 h=22 font=Outfit 17px/normal 400
+      text "100 minutes of AI call practice a month" line-boxes(untransformed only if no ancestor is transformed) [x=58 y=283.45 w=289.66 h=21.5]
+    li layout x=24 y=319 w=342 h=22 font=Outfit 17px/normal 400
+      svg bounds x=24 y=319.2 w=22 h=22 font=Outfit 17px/normal 400
+      text "Every customer scenario" line-boxes(untransformed only if no ancestor is transformed) [x=58 y=319.45 w=184.66 h=21.5]
+    li layout x=24 y=355 w=342 h=22 font=Outfit 17px/normal 400
+      svg bounds x=24 y=355.2 w=22 h=22 font=Outfit 17px/normal 400
+      text "Detailed feedback after each call" line-boxes(untransformed only if no ancestor is transformed) [x=58 y=355.45 w=249.63 h=21.5]
+    li layout x=24 y=391 w=342 h=22 font=Outfit 17px/normal 400
+      svg bounds x=24 y=391.2 w=22 h=22 font=Outfit 17px/normal 400
+      text "Interview preparation" line-boxes(untransformed only if no ancestor is transformed) [x=58 y=391.45 w=163.91 h=21.5]
+    li layout x=24 y=427 w=342 h=22 font=Outfit 17px/normal 400
+      svg bounds x=24 y=427.2 w=22 h=22 font=Outfit 17px/normal 400
+      text "Your full improvement history" line-boxes(untransformed only if no ancestor is transformed) [x=58 y=427.45 w=220.07 h=21.5]
+  div layout x=24 y=475 w=342 h=111 font=Outfit 16px/normal 400
+    a layout x=24 y=475 w=166 h=111 transform=matrix(0.999657, -0.0261769, 0.0261769, 0.999657, 0, 0) transformed-bounds x=22.58 y=473.04 w=168.84 h=114.81 font=Outfit 16px/normal 400
+      span layout x=101 y=465 w=77 h=21 font=Outfit 12px/normal 700
+        text "SELECTED" line-boxes(untransformed only if no ancestor is transformed) [x=107.82 y=466.57 w=60.92 h=16.58]
+      span layout x=40 y=491 w=134 h=19 font=Outfit 15px/normal 400
+        text "Premium" line-boxes(untransformed only if no ancestor is transformed) [x=39 y=491.4 w=60.14 h=20.56]
+      span layout x=40 y=514 w=134 h=38 font=Outfit 30px/normal 700
+        text "$4.99" line-boxes(untransformed only if no ancestor is transformed) [x=39.6 y=513.92 w=78.61 h=40.02]
+      span layout x=40 y=552 w=134 h=18 font=Outfit 14px/normal 400
+        text "per month" line-boxes(untransformed only if no ancestor is transformed) [x=40.59 y=552.25 w=65.15 h=19.19]
+    a layout x=200 y=475 w=166 h=111 transform=matrix(0.999848, 0.0174524, -0.0174524, 0.999848, 0, 0) transformed-bounds x=199.05 y=473.76 w=167.9 h=113.38 font=Outfit 16px/normal 400
+      span layout x=216 y=491 w=134 h=19 font=Outfit 15px/normal 400
+        text "Free" line-boxes(untransformed only if no ancestor is transformed) [x=216.36 y=490.03 w=30.7 h=19.53]
+      span layout x=216 y=514 w=134 h=38 font=Outfit 30px/normal 700
+        text "$0" line-boxes(untransformed only if no ancestor is transformed) [x=215.63 y=513.03 w=38.72 h=38.66]
+      span layout x=216 y=552 w=134 h=18 font=Outfit 14px/normal 400
+        text "3 intro calls" line-boxes(untransformed only if no ancestor is transformed) [x=215.33 y=551.02 w=69.86 h=18.71]
+  div layout x=24 y=723 w=342 h=94 font=Outfit 16px/normal 400
+    a layout x=24 y=723 w=342 h=64 font=Outfit 20px/normal 700
+      text "Start Premium" line-boxes(untransformed only if no ancestor is transformed) [x=127.79 y=742 w=134.42 h=25]
+    p layout x=24 y=799 w=342 h=18 font=Outfit 14px/normal 400
+      text "Billed through Google Play · Cancel anytime" line-boxes(untransformed only if no ancestor is transformed) [x=61.21 y=798.5 w=267.57 h=17.5]

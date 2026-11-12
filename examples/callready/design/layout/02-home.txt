@@ -1,0 +1,64 @@
+div layout x=0 y=0 w=390 h=844 font=Outfit 16px/normal 400
+  div layout x=24 y=52 w=342 h=46 font=Outfit 16px/normal 400
+    a layout x=24 y=52 w=143 h=46 font=Outfit 16px/normal 400
+      span layout x=24 y=52 w=46 h=46 font=Outfit 15px/normal 700
+        text "GM" line-boxes(untransformed only if no ancestor is transformed) [x=34.68 y=65.5 w=24.64 h=19]
+      span layout x=80 y=61 w=61 h=28 font=Outfit 22px/normal 600
+        text "Grace" line-boxes(untransformed only if no ancestor is transformed) [x=80 y=61.25 w=61.38 h=27.5]
+      svg bounds x=151.38 y=67 w=16 h=16 font=Outfit 16px/normal 400
+    button layout x=322 y=53 w=44 h=44 font=Arial 13.3333px/normal 400 aria="Notifications"
+      svg bounds x=332 y=63 w=24 h=24 font=Arial 13.3333px/normal 400
+      span layout x=348 y=61 w=9 h=9 font=Arial 13.3333px/normal 400
+  p layout x=24 y=116 w=342 h=19 font=Outfit 15px/normal 400
+    text "Today’s practice call" line-boxes(untransformed only if no ancestor is transformed) [x=24 y=116 w=133.55 h=19]
+  div layout x=0 y=143 w=390 h=250 font=Outfit 16px/normal 400
+    svg bounds x=0 y=149 w=64 h=220 font=Outfit 16px/normal 400
+    svg bounds x=326 y=149 w=64 h=220 font=Outfit 16px/normal 400
+    svg bounds x=70 y=143 w=250 h=250 font=Outfit 16px/normal 400
+  div layout x=24 y=401 w=342 h=60 font=Outfit 16px/normal 400
+    div layout x=48 y=403 w=215 h=57 font=Outfit 16px/normal 400
+      div layout x=48 y=403 w=215 h=33 font=Outfit 30px/33px 600
+        text "Missing delivery" line-boxes(untransformed only if no ancestor is transformed) [x=48.34 y=400 w=215.33 h=38]
+      div layout x=48 y=440 w=215 h=20 font=Outfit 16px/normal 400
+        text "Customer · US accent · 4 min" line-boxes(untransformed only if no ancestor is transformed) [x=57.58 y=439.5 w=196.84 h=20]
+    a layout x=282 y=401 w=60 h=60 font=Outfit 16px/normal 400 aria="Start practice call"
+      svg bounds x=298.66 y=418 w=26 h=26 font=Outfit 16px/normal 400
+  div layout x=24 y=485 w=342 h=44 font=Outfit 16px/normal 400
+    h2 layout x=24 y=491 w=117 h=33 font=Outfit 26px/normal 700
+      text "Scenarios" line-boxes(untransformed only if no ancestor is transformed) [x=24 y=490.5 w=116.94 h=33]
+    button layout x=322 y=485 w=44 h=44 font=Arial 13.3333px/normal 400 aria="Scenario settings"
+      svg bounds x=332 y=495 w=24 h=24 font=Arial 13.3333px/normal 400
+  div layout x=24 y=535 w=342 h=138 font=Outfit 16px/normal 400
+    a layout x=26 y=535 w=105 h=138 font=Outfit 16px/normal 400
+      span layout x=26 y=535 w=105 h=138 transform=matrix(0.999391, -0.0348995, 0.0348995, 0.999391, 0, 0) transformed-bounds x=23.62 y=533.22 w=109.42 h=141.57 font=Outfit 16px/normal 400
+      span layout x=28 y=537 w=105 h=138 transform=matrix(0.999781, 0.0209424, -0.0209424, 0.999781, 0, 0) transformed-bounds x=26.57 y=535.92 w=107.53 h=140.16 font=Outfit 16px/normal 400
+      span layout x=38 y=547 w=85 h=38 font=Outfit 16px/19.2px 600
+        text "Angry customer" line-boxes(untransformed only if no ancestor is transformed) [x=38 y=546.5 w=44.7 h=20] [x=38 y=565.7 w=68.02 h=20]
+      span layout x=105 y=595 w=12 h=70 transform=matrix(0.997564, 0.0697565, -0.0697565, 0.997564, 0, 0) transformed-bounds x=102.24 y=594.67 w=16.85 h=70.67 font=Outfit 16px/normal 400
+      span layout x=86 y=599 w=26 h=80 transform=matrix(0.99863, 0.052336, -0.052336, 0.99863, 0, 0) transformed-bounds x=84.14 y=598.36 w=30.6 h=81.27 font=Anton 80px/80px 400
+        text "1" line-boxes(untransformed only if no ancestor is transformed) [x=83.1 y=577.89 w=32.72 h=121.72]
+    a layout x=143 y=535 w=105 h=138 font=Outfit 16px/normal 400
+      span layout x=143 y=535 w=105 h=138 transform=matrix(0.999903, 0.0139622, -0.0139622, 0.999903, 0, 0) transformed-bounds x=141.71 y=534.28 w=106.58 h=139.45 font=Outfit 16px/normal 400
+      span layout x=142 y=538 w=105 h=138 transform=matrix(0.999848, -0.0174524, 0.0174524, 0.999848, 0, 0) transformed-bounds x=140.47 y=537.1 w=107.06 h=139.81 font=Outfit 16px/normal 400
+      span layout x=155 y=547 w=85 h=38 font=Outfit 16px/19.2px 600
+        text "Refund request" line-boxes(untransformed only if no ancestor is transformed) [x=154.66 y=546.5 w=51.82 h=20] [x=154.66 y=565.7 w=54.91 h=20]
+      span layout x=198 y=601 w=40 h=66 transform=matrix(0.99863, -0.052336, 0.052336, 0.99863, 0, 0) transformed-bounds x=195.63 y=600 w=43.4 h=68 font=Outfit 16px/normal 400
+      span layout x=195 y=601 w=35 h=70 transform=matrix(0.99863, -0.052336, 0.052336, 0.99863, 0, 0) transformed-bounds x=192.93 y=600.14 w=38.21 h=71.71 font=Anton 70px/70px 400
+        text "2" line-boxes(untransformed only if no ancestor is transformed) [x=191.98 y=582.17 w=40.07 h=107.17]
+    a layout x=259 y=535 w=105 h=138 font=Outfit 16px/normal 400
+      span layout x=259 y=535 w=105 h=138 transform=matrix(0.999391, 0.0348995, -0.0348995, 0.999391, 0, 0) transformed-bounds x=256.95 y=533.22 w=109.42 h=141.57 font=Outfit 16px/normal 400
+      span layout x=257 y=533 w=105 h=138 transform=matrix(0.999903, -0.0139622, 0.0139622, 0.999903, 0, 0) transformed-bounds x=256.37 y=532.28 w=106.58 h=139.45 font=Outfit 16px/normal 400
+      span layout x=271 y=547 w=85 h=38 font=Outfit 16px/19.2px 600
+        text "Billing problem" line-boxes(untransformed only if no ancestor is transformed) [x=271.33 y=546.5 w=44.16 h=20] [x=271.33 y=565.7 w=60.82 h=20]
+      span layout x=296 y=623 w=46 h=46 transform=matrix(0.994522, -0.104528, 0.104528, 0.994522, 0, 0) transformed-bounds x=293.71 y=620.72 w=50.56 h=50.56 font=Outfit 16px/normal 400
+      span layout x=311 y=599 w=41 h=82 transform=matrix(0.996195, -0.0871557, 0.0871557, 0.996195, 0, 0) transformed-bounds x=307.97 y=597.39 w=47.52 h=85.22 font=Anton 82px/82px 400
+        text "3" line-boxes(untransformed only if no ancestor is transformed) [x=306.14 y=576.47 w=51.13 h=126.56]
+  nav layout x=24 y=758 w=342 h=66 font=Outfit 16px/normal 400 aria="Main"
+    a layout x=24 y=763 w=86 h=56 font=Outfit 16px/normal 400 aria="Home"
+      svg bounds x=53.75 y=778 w=26 h=26 font=Outfit 16px/normal 400
+    a layout x=110 y=763 w=86 h=56 font=Outfit 16px/normal 400 aria="Progress"
+      svg bounds x=139.25 y=778 w=26 h=26 font=Outfit 16px/normal 400
+    a layout x=195 y=763 w=86 h=56 font=Outfit 16px/normal 400 aria="Call history"
+      svg bounds x=224.75 y=778 w=26 h=26 font=Outfit 16px/normal 400
+    a layout x=281 y=763 w=86 h=56 font=Outfit 16px/normal 400 aria="More"
+      svg bounds x=310.25 y=778 w=26 h=26 font=Outfit 16px/normal 400

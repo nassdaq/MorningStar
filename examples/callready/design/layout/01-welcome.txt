@@ -1,0 +1,44 @@
+div layout x=0 y=0 w=390 h=844 font=Outfit 16px/normal 400
+  h1 layout x=28 y=84 w=334 h=95 font=Outfit 44px/47.52px 700
+    text "Get job-ready with" line-boxes(untransformed only if no ancestor is transformed) [x=28 y=80 w=280.41 h=55.5] [x=28 y=127.52 w=86.38 h=55.5]
+  div layout x=28 y=183 w=334 h=150 font=Outfit 16px/normal 400
+    span layout x=146 y=183 w=59 h=58 transform=matrix(0.990268, -0.139173, 0.139173, 0.990268, 0, 0) transformed-bounds x=142.25 y=179.24 w=66.06 h=65.59 font=Caveat 46px/normal 400
+      text "real" line-boxes(untransformed only if no ancestor is transformed) [x=142.25 y=179.24 w=66.06 h=65.59]
+    svg bounds x=224 y=177.03 w=34 h=34 font=Outfit 16px/normal 400
+    div layout x=98 y=237 w=280 h=74 font=Outfit 16px/normal 400
+      span layout x=98 y=237 w=64 h=74 transform=matrix(0.990268, -0.139173, 0.139173, 0.990268, 0, 0) transformed-bounds x=93.16 y=232.92 w=73.92 h=82.22 font="Archivo Black" 62px/62px 400
+        text "C" line-boxes(untransformed only if no ancestor is transformed) [x=101.5 y=237.01 w=57.17 h=73.56]
+      span layout x=164 y=245 w=56 h=66 transform=matrix(0.996195, 0.0871557, -0.0871557, 0.996195, 0.697246, -7.96956) transformed-bounds x=162.17 y=234.74 w=61.8 h=70.65 font="Abril Fatface" 58px/58px 400
+        text "A" line-boxes(untransformed only if no ancestor is transformed) [x=169.62 y=228.96 w=46.95 h=81.71]
+      span layout x=223 y=243 w=51 h=68 transform=matrix(0.99863, -0.052336, 0.052336, 0.99863, 0.314016, 5.99178) transformed-bounds x=221.07 y=247.73 w=54.85 h=70.59 font="Archivo Black" 56px/56px 400
+        text "L" line-boxes(untransformed only if no ancestor is transformed) [x=228.24 y=251.59 w=40.5 h=62.87]
+      span layout x=276 y=241 w=55 h=70 transform=matrix(0.992546, 0.121869, -0.121869, 0.992546, 1.46243, -11.9106) transformed-bounds x=273.26 y=226.03 w=63.07 h=76.18 font="Abril Fatface" 62px/62px 400
+        text "L" line-boxes(untransformed only if no ancestor is transformed) [x=281.4 y=220.18 w=46.85 h=87.38]
+      span layout x=333 y=253 w=45 h=58 transform=matrix(0.994522, -0.104528, 0.104528, 0.994522, 0, 0) transformed-bounds x=329.91 y=250.83 w=51.03 h=62.41 font="Archivo Black" 46px/46px 400
+        text "S" line-boxes(untransformed only if no ancestor is transformed) [x=336.29 y=255.43 w=38.26 h=53.2]
+    svg bounds x=4 y=275.03 w=120 h=44 font=Outfit 16px/normal 400
+  div layout x=28 y=341 w=334 h=407 font=Outfit 17px/25.5px 400
+    p layout x=22 y=341 w=300 h=51 font=Outfit 17px/25.5px 400
+      text "“I ordered this two weeks ago and it’s still not here!”" line-boxes(untransformed only if no ancestor is transformed) [x=22 y=343.03 w=277.23 h=21.5] [x=22 y=368.53 w=102.7 h=21.5]
+    svg bounds x=98 y=391.03 w=140 h=10 font=Outfit 17px/25.5px 400
+    p layout x=58 y=419 w=300 h=71 font=Outfit 17px/25.5px 400
+      text "“Can I speak to your manager, please?”" line-boxes(untransformed only if no ancestor is transformed) [x=58 y=421.03 w=295.61 h=21.5]
+      span layout x=64 y=448 w=13 h=38 font=Caveat 30px/45px 400
+        text "!!" line-boxes(untransformed only if no ancestor is transformed) [x=64 y=448.03 w=12.6 h=38]
+    p layout x=131 y=473 w=235 h=45 font="Abril Fatface" 30px/45px 400
+      text "ANGRY CALLER" line-boxes(untransformed only if no ancestor is transformed) [x=130.8 y=475.53 w=235.2 h=40]
+    p layout x=22 y=527 w=330 h=26 font=Outfit 17px/25.5px 400
+      text "“You charged me" line-boxes(untransformed only if no ancestor is transformed) [x=22 y=529.03 w=131.7 h=21.5]
+      span layout x=154 y=526 w=59 h=29 font=Outfit 17px/25.5px 400
+        text "twice" line-boxes(untransformed only if no ancestor is transformed) [x=163.2 y=529.03 w=39.93 h=21.5]
+      text "for the same bill.”" line-boxes(untransformed only if no ancestor is transformed) [x=212.63 y=529.03 w=134.57 h=21.5]
+    p layout x=106 y=587 w=260 h=26 font=Outfit 17px/25.5px 400 italic
+      text "“Sorry, could you say that slower?”" line-boxes(untransformed only if no ancestor is transformed) [x=106.77 y=589.03 w=259.23 h=21.5]
+    svg bounds x=110 y=593.03 w=22 h=22 font=Outfit 17px/25.5px 400
+    p layout x=22 y=647 w=123 h=39 font="Archivo Black" 26px/39px 400
+      text "REFUND" line-boxes(untransformed only if no ancestor is transformed) [x=22 y=652.03 w=122.89 h=28.5]
+    p layout x=140 y=655 w=230 h=26 font=Outfit 17px/25.5px 400
+      text "“I just want my money back.”" line-boxes(untransformed only if no ancestor is transformed) [x=140 y=657.03 w=214.84 h=21.5]
+  a layout x=28 y=748 w=334 h=64 font=Outfit 20px/normal 700
+    text "Let’s go" line-boxes(untransformed only if no ancestor is transformed) [x=159.72 y=767.5 w=70.56 h=25]
+  svg bounds x=312 y=22 w=60 h=60 font=Outfit 16px/normal 400

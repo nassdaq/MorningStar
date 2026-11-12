@@ -1,0 +1,54 @@
+div layout x=0 y=0 w=390 h=844 font=Outfit 16px/normal 400
+  div layout x=0 y=0 w=390 h=96 font=Outfit 16px/normal 400
+    a layout x=24 y=52 w=44 h=44 font=Outfit 16px/normal 400 aria="Back"
+      svg bounds x=24 y=62 w=24 h=24 font=Outfit 16px/normal 400
+    div layout x=80 y=70 w=235 h=8 font=Outfit 16px/normal 400
+      div layout x=80 y=70 w=75 h=8 font=Outfit 16px/normal 400
+    span layout x=327 y=65 w=39 h=19 font=Outfit 15px/normal 400
+      text "02:14" line-boxes(untransformed only if no ancestor is transformed) [x=326.54 y=64.5 w=39.46 h=19]
+  div layout x=0 y=96 w=390 h=125 font=Outfit 16px/normal 400
+    p layout x=24 y=118 w=342 h=22 font=Outfit 17px/normal 400
+      text "Call №1 · Angry customer" line-boxes(untransformed only if no ancestor is transformed) [x=24 y=118 w=186.98 h=21.5]
+    h1 layout x=24 y=150 w=342 h=72 font=Outfit 32px/35.84px 700
+      text "Calm the caller and solve the problem" line-boxes(untransformed only if no ancestor is transformed) [x=24 y=147 w=283.19 h=40.5] [x=24 y=182.84 w=259.94 h=40.5]
+  div layout x=0 y=221 w=390 h=483 font=Outfit 16px/normal 400
+    div layout x=24 y=247 w=342 h=62 font=Outfit 16px/normal 400
+      p layout x=24 y=247 w=286 h=62 font=Outfit 24px/31.2px 400
+        text "Hi, my parcel was due last Monday" line-boxes(untransformed only if no ancestor is transformed) [x=24 y=247.67 w=273.02 h=30] [x=24 y=278.87 w=87.13 h=30]
+        span layout x=111 y=279 w=26 h=30 font=Outfit 24px/31.2px 400
+          text "✓" line-boxes(untransformed only if no ancestor is transformed) [x=111.13 y=278.87 w=25.84 h=30]
+      button layout x=322 y=247 w=44 h=44 font=Arial 13.3333px/normal 400 aria="Replay line"
+        svg bounds x=333 y=258.17 w=22 h=22 font=Arial 13.3333px/normal 400
+    div layout x=24 y=332 w=342 h=93 font=Outfit 16px/normal 400
+      p layout x=24 y=332 w=342 h=17 font=Outfit 13px/normal 600
+        text "CUSTOMER" line-boxes(untransformed only if no ancestor is transformed) [x=24 y=331.56 w=79.73 h=16.5]
+      p layout x=24 y=354 w=342 h=70 font=Outfit 27px/35.1px 500
+        span layout x=24 y=355 w=128 h=34 font=Outfit 27px/35.1px 500
+          text "Two weeks" line-boxes(untransformed only if no ancestor is transformed) [x=24 y=354.56 w=128.06 h=34]
+        text "and still nothing. This is ridiculous!" line-boxes(untransformed only if no ancestor is transformed) [x=152.06 y=354.56 w=202.4 h=34] [x=24 y=389.66 w=198.75 h=34]
+    div layout x=24 y=446 w=342 h=196 font=Outfit 16px/normal 400
+      p layout x=24 y=465 w=342 h=17 font=Outfit 13px/normal 600
+        text "YOU · SPEAKING" line-boxes(untransformed only if no ancestor is transformed) [x=24 y=465.25 w=115.81 h=16.5]
+      p layout x=24 y=488 w=342 h=65 font=Outfit 24px/32.4px 400
+        text "I completely understand, and I’m sorry for the" line-boxes(untransformed only if no ancestor is transformed) [x=24 y=488.75 w=306.72 h=30] [x=24 y=521.15 w=174.27 h=30]
+        span layout x=198 y=543 w=110 h=2 font=Outfit 24px/32.4px 400
+      div layout x=24 y=567 w=342 h=76 font=Outfit 16px/normal 400
+        span layout x=24 y=567 w=52 h=34 transform=matrix(0.99863, -0.052336, 0.052336, 0.99863, 0, 0) transformed-bounds x=23.15 y=565.22 w=53.29 h=36.65 font=Caveat 24px/normal 400
+          text "tip →" line-boxes(untransformed only if no ancestor is transformed) [x=23.15 y=565.22 w=53.08 h=32.66]
+        span layout x=84 y=567 w=181 h=34 font=Outfit 15px/normal 400
+          text "Acknowledge the delay" line-boxes(untransformed only if no ancestor is transformed) [x=97.08 y=574.05 w=153.64 h=19]
+        span layout x=24 y=609 w=195 h=34 font=Outfit 15px/normal 400
+          text "Ask for the order number" line-boxes(untransformed only if no ancestor is transformed) [x=37.5 y=616.05 w=168.04 h=19]
+  div layout x=0 y=704 w=390 h=4 font=Outfit 16px/normal 400
+    div layout x=0 y=704 w=86 h=4 font=Outfit 16px/normal 400
+  div layout x=0 y=708 w=390 h=136 font=Outfit 16px/normal 400
+    svg bounds x=24 y=743 w=54 h=54 font=Outfit 16px/normal 400
+    div layout x=92 y=726 w=142 h=88 font=Outfit 16px/normal 400
+      div layout x=92 y=726 w=142 h=48 font=Outfit 19px/normal 600
+        text "Mark · Missing delivery" line-boxes(untransformed only if no ancestor is transformed) [x=92 y=726 w=119.88 h=24] [x=92 y=750 w=68.58 h=24]
+      div layout x=92 y=776 w=142 h=38 font=Outfit 15px/normal 400
+        text "AI customer · US accent" line-boxes(untransformed only if no ancestor is transformed) [x=92 y=776 w=106.31 h=19] [x=92 y=795 w=44.8 h=19]
+    button layout x=248 y=744 w=52 h=52 font=Arial 13.3333px/normal 400 aria="Mute microphone"
+      svg bounds x=263 y=759 w=22 h=22 font=Arial 13.3333px/normal 400
+    a layout x=314 y=744 w=52 h=52 font=Outfit 16px/normal 400 aria="End call"
+      svg bounds x=323.03 y=753.03 w=33.94 h=33.94 transform=matrix(-0.707107, 0.707107, -0.707107, -0.707107, 0, 0) transformed-bounds x=323.03 y=753.03 w=33.94 h=33.94 font=Outfit 16px/normal 400

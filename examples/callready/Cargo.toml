@@ -1,0 +1,26 @@
+[package]
+name = "callready"
+description = "CallReady: a call-practice app. Five illustrated screens reproduced from a design (the test of Morningstar's transforms and vector pictures) and seven of its own, working end to end."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The home-screen icon and name (ADR 0020). The pictures are drawn by
+# `cargo run -p callready --example icon`.
+[package.metadata.morningstar]
+name = "CallReady"
+icon = "assets/icon.png"
+icon_foreground = "assets/icon-foreground.png"
+icon_background = "#0E0E0E"
+
+[lib]
+# cdylib for Android; tools/build-ios.sh requests the static library itself.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+morningstar.workspace = true
+
+[dev-dependencies]
+morningstar-devtools.workspace = true
