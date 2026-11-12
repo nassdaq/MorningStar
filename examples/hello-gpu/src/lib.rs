@@ -893,6 +893,8 @@ mod tests {
             .map(|x| green(x as f32, 10.0))
             .max()
             .unwrap();
-        assert!(under_bar < 40, "content under the status bar: {under_bar}");
+        // Bytes as a screen shows them (ADR 0023): the background's value
+        // of 0.05 is at most byte 63.
+        assert!(under_bar < 70, "content under the status bar: {under_bar}");
     }
 }

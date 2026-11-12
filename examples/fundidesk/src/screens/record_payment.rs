@@ -157,7 +157,7 @@ pub fn view(state: &State) -> Element<Message> {
     let footer = col![
         Action::primary(format!("Save payment of TZS {}", state.amount_text))
             .on_press(Message::Save),
-        Spacer::fixed(10.0 - NOTE_LIFT),
+        Spacer::fixed(10.0),
         // `text-align: center; font-size: 12px; line-height: 18px`.
         inter(
             "Saved payments cannot be edited. Mistakes are corrected with a reversal.",
@@ -167,7 +167,6 @@ pub fn view(state: &State) -> Element<Message> {
         .color(MUTED)
         .centered()
         .fill_width(),
-        Spacer::fixed(NOTE_LIFT),
     ]
     .fill_width();
 
@@ -181,10 +180,6 @@ pub fn view(state: &State) -> Element<Message> {
     .into()
 }
 
-/// How far the note under the button is raised: the browser rounds the
-/// 1.75 dp of leading above a 12/18 line down to whole device pixels.
-const NOTE_LIFT: f32 = 0.5;
-
 /// The header: `display: flex; align-items: center; gap: 8px; padding: 36px
 /// 20px 12px 10px; border-bottom: 1px solid #E3E8E4` around a 44 dp back
 /// chevron and the title in Space Grotesk 20/26 over a 12 dp line (`gap:
@@ -197,15 +192,12 @@ fn top_bar(title: &'static str, subtitle: &'static str) -> Container<Message> {
     col![
         row![
             icon_button(icons::CHEVRON_LEFT, 24.0, INK).on_press(Message::Back),
-            col![
-                Spacer::fixed(0.5),
-                grotesk(title, 20.0).line_height_dp(26.0),
-                Spacer::fixed(2.25),
-                meta(subtitle),
-            ]
-            .fill_width(),
+            col![grotesk(title, 20.0).line_height_dp(26.0), meta(subtitle)]
+                .gap(2.0)
+                .fill_width(),
         ]
         .gap(8.0)
+        .cross_align(CrossAlign::Center)
         .fill_width()
         .padding_ltrb(10.0, 36.0, space::PAGE_MARGIN, 12.0)
         .safe_area(SafeEdges::TOP),

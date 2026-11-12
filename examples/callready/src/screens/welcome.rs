@@ -161,36 +161,31 @@ fn hero() -> Container<Message> {
             cutout(
                 archivo_black("C", 62.0),
                 RED,
-                (64.236, 74.0),
+                (8.0, 6.0),
                 Transform::rotate(-8.0)
             ),
             cutout(
                 abril_fatface("A", 58.0),
                 WHITE,
-                (56.252, 66.0),
+                (8.0, 4.0),
                 Transform::rotate(5.0).and_translate(0.0, -8.0),
             ),
             cutout(
                 archivo_black("L", 56.0),
                 PURPLE,
-                (51.352, 68.0),
+                (7.0, 6.0),
                 Transform::rotate(-3.0).and_translate(0.0, 6.0),
             ),
             cutout(
-                // Chrome floors the negative half-leading of `line-height: 1`
-                // (-21.5 px here) where the text engine rounds the
-                // baseline to the nearest pixel: half a dp higher.
-                abril_fatface("L", 62.0).offset(0.0, -0.5),
+                abril_fatface("L", 62.0),
                 YELLOW,
-                (54.952, 70.0),
+                (9.0, 4.0),
                 Transform::rotate(7.0).and_translate(0.0, -12.0),
             ),
             cutout(
-                // The plate starts at a fraction of a pixel (x = 332.79 dp) and
-                // the glyph is drawn at a whole one: half a pixel right.
-                archivo_black("S", 46.0).offset(0.25, 0.0),
+                archivo_black("S", 46.0),
                 TEAL,
-                (45.212, 58.0),
+                (6.0, 6.0),
                 Transform::rotate(-6.0)
             ),
         ]
@@ -209,25 +204,19 @@ fn hero() -> Container<Message> {
 
 /// How far the row of letters reaches past the right edge of its block:
 /// `left: 70px` plus the row's 280.004 dp, less the block's 334 dp at the
-/// design's width, and a hair more so that it lands on the design's pixel.
-const LETTERS_OVERHANG: f32 = 16.006;
+/// design's width.
+const LETTERS_OVERHANG: f32 = 16.004;
 
 /// One cut-out letter: `display: inline-block; color: #0E0E0E;
-/// line-height: 1` on a coloured plate, turned and moved by `transform`.
-///
-/// `size` is the plate's: the letter's advance and its font size, plus the
-/// design's `padding` (C `6px 8px`, A `4px 8px`, L `6px 7px`, L `4px 9px`,
-/// S `6px 6px`). The widths are written out to the fraction a browser
-/// keeps (C is 48.236 + 16) because a hugging text is measured in whole
-/// pixels, which moved each later plate half a dp further right, 1 dp in
-/// all by the S.
+/// line-height: 1` on a coloured plate that hugs it with the design's
+/// `padding` (across, down), turned and moved by `transform`.
 fn cutout(
     letter: Text,
     color: Color,
-    size: (f32, f32),
+    padding: (f32, f32),
     transform: Transform,
 ) -> Container<Message> {
-    plate(letter.line_height(1.0), size.0, size.1, color).transform(transform)
+    plate(letter.line_height(1.0), padding.0, padding.1, color).transform(transform)
 }
 
 /// A caller's line: `font-size: 17px; line-height: 1.5; color: #C7C7CC`.
@@ -334,8 +323,8 @@ fn charged_twice() -> (Text, Container<Message>, Text) {
 }
 
 /// The width Chrome measured for "“You charged me ", trailing space
-/// included; hugging, it is rounded up to a whole pixel and the rest of
-/// the line starts half a dp late.
+/// included. The three pieces are placed by offsets, which a view cannot
+/// compute from a text it has not measured (no inline boxes yet).
 const CHARGED_WIDTH: f32 = 131.7;
 
 /// `display: flex; align-items: center; justify-content: center; height:

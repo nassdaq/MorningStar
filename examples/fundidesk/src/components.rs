@@ -552,8 +552,8 @@ fn selectable<M>(text: Label, size: f32, selected: bool) -> Container<M> {
 
 /// A chip that hugs its label: `height: 44px; padding: 0 14px;
 /// border-radius: 999px; font-size: 13px`. Conditions and accessories on
-/// the new-repair screen. The layout engine has no wrapping row: lay chips
-/// out in explicit `row!`s.
+/// the new-repair screen, in a row that wraps
+/// (`Row::new().gap(8.0).line_gap(8.0).wrap()`).
 pub fn chip<M>(text: impl Into<Label>, selected: bool) -> Container<M> {
     // The padding starts inside the border: a selected chip is 1 dp wider.
     let border = if selected { 1.5 } else { 1.0 };

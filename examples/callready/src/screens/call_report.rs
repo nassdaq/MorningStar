@@ -120,20 +120,13 @@ fn details(report: &Report) -> Container<Message> {
 /// `display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
 /// gap: 10px`: what went well and what to try, each card turned a little.
 ///
-/// The body is `font-size: 15px; line-height: 1.35`. The design's wraps to
-/// three lines, which are written out because the first of them fills its
-/// 138 dp to within half a dp; any other report's wraps by itself.
+/// The body is `font-size: 15px; line-height: 1.35`.
 fn feedback(report: &Report) -> Container<Message> {
-    let lines = |lines: [&'static str; 3]| -> Vec<Text> {
-        lines
-            .into_iter()
-            .map(|line| outfit(line, 15.0).line_height_dp(20.25))
-            .collect()
-    };
     let (did_well, try_next) = if report.designed {
+        let line = |line: &'static str| vec![outfit(line, 15.0).line_height_dp(20.25).fill_width()];
         (
-            lines(["You apologised early", "and kept a calm", "tone."]),
-            lines(["Ask for the order", "number before", "explaining."]),
+            line("You apologised early and kept a calm tone."),
+            line("Ask for the order number before explaining."),
         )
     } else {
         (

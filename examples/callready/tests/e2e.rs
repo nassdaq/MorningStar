@@ -190,28 +190,9 @@ impl Device {
         self.offset() - before
     }
 
-    /// Where the widget is, scrolling to find it if need be: a widget
-    /// scrolled wholly out of its scroll view is not laid out for
-    /// `rect_of`, so the page is searched from the top down, as a person
-    /// looking for a control would.
+    /// Where the widget was laid out, also when it is scrolled wholly out
+    /// of its scroll view.
     fn locate(&mut self, id: impl Hash + Copy) -> Option<Rect> {
-        if let Some(rect) = self.ui.rect_of(id) {
-            return Some(rect);
-        }
-        let page = self.viewport().height / self.scale() * 0.5;
-        for _ in 0..40 {
-            if self.drag(-page) == 0.0 {
-                break;
-            }
-        }
-        for _ in 0..40 {
-            if let Some(rect) = self.ui.rect_of(id) {
-                return Some(rect);
-            }
-            if self.drag(page) == 0.0 {
-                break;
-            }
-        }
         self.ui.rect_of(id)
     }
 
@@ -915,7 +896,9 @@ fn tall_screens() -> Vec<(Screen, Vec<Probe>, Probe)> {
 
 /// On both phones every screen scrolls by a drag when it does not fit,
 /// its bars stay where they are, and the end of the content comes wholly
-/// into view. On the owner's phone the live call is one that does not fit.
+/// into view. On the small phone the live call is one that does not fit.
+/// (On the owner's it did while its tips were written out as two rows;
+/// they wrap now, and a call's first two tips share a line there.)
 #[test]
 fn tall_screens_scroll_between_their_fixed_bars() {
     for (phone, info) in phones() {
@@ -980,13 +963,10 @@ fn tall_screens_scroll_between_their_fixed_bars() {
             "{phone}: scroll: {:?}",
             scrolled.iter().map(|s| s.name()).collect::<Vec<_>>()
         );
-        assert!(
-            scrolled.contains(&Screen::LiveCall),
-            "{phone}: the live call fits?"
-        );
         if phone == "360x640" {
             for screen in [
                 Screen::Home,
+                Screen::LiveCall,
                 Screen::CallReport,
                 Screen::Premium,
                 Screen::Profile,
@@ -1015,7 +995,7 @@ fn tall_screens_scroll_between_their_fixed_bars() {
 /// A drag that starts on a control scrolls and does not tap it.
 #[test]
 fn a_drag_over_a_control_is_not_a_tap() {
-    let mut device = Device::home(galaxy_a27());
+    let mut device = Device::home(small());
     device.tap("home-start-call");
     assert!(device.max_offset() > 0.0);
     let before = device.snapshot();

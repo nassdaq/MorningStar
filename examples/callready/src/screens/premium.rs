@@ -69,25 +69,10 @@ pub fn view(selected: Plan, active: bool) -> Element<Message> {
     )
 }
 
-/// A cut-out letter of "PRO": `line-height: 1` and a padding on a coloured
-/// plate, `width` by `height` as Chrome laid it out (the letter's advance
-/// plus the padding, worked back from the turned text boxes in the layout
-/// dump). `lift` is how much higher the letter sits in Chrome's line box
-/// than in this one, measured from the reference.
-fn letter(
-    letter: Text,
-    size: f32,
-    lift: f32,
-    width: f32,
-    height: f32,
-    color: Color,
-) -> Container<Message> {
-    plate(
-        letter.line_height_dp(size).offset(0.0, -lift),
-        width,
-        height,
-        color,
-    )
+/// A cut-out letter of "PRO": `line-height: 1` and a padding (across,
+/// down) on a coloured plate.
+fn letter(letter: Text, size: f32, padding: (f32, f32), color: Color) -> Container<Message> {
+    plate(letter.line_height_dp(size), padding.0, padding.1, color)
 }
 
 /// `position: relative; height: 130px`: the name, "PRO" at
@@ -95,34 +80,28 @@ fn letter(
 fn hero() -> Container<Message> {
     stack![
         // `font-size: 40px; font-weight: 700; line-height: 1.1`.
-        // Chrome put the line at y = 96.5, a quarter dp above its
-        // half-leading.
-        outfit("CallReady", 40.0)
-            .bold()
-            .line_height_dp(44.0)
-            .offset(0.0, -0.5),
+        outfit("CallReady", 40.0).bold().line_height_dp(44.0),
         // `display: flex; align-items: flex-end; gap: 3px`.
         row![
             // `background: #9B5DE5; font-family: 'Archivo Black';
             // font-size: 56px; padding: 6px 8px; transform: rotate(-6deg)`.
-            letter(archivo_black("P", 56.0), 56.0, 0.0, 56.43, 68.0, PURPLE).rotate(-6.0),
+            letter(archivo_black("P", 56.0), 56.0, (8.0, 6.0), PURPLE).rotate(-6.0),
             // `background: #F6C445; font-family: 'Abril Fatface';
             // font-size: 62px; padding: 2px 9px;
             // transform: rotate(5deg) translateY(-8px)`.
-            letter(abril_fatface("R", 62.0), 62.0, 1.0, 62.4, 66.0, YELLOW)
+            letter(abril_fatface("R", 62.0), 62.0, (9.0, 2.0), YELLOW)
                 .transform(Transform::rotate(5.0).and_translate(0.0, -8.0)),
             // `background: #E63946; font-family: 'Archivo Black';
             // font-size: 52px; padding: 6px 7px; transform: rotate(-3deg)`.
-            letter(archivo_black("O", 52.0), 52.0, 1.0, 57.32, 64.0, RED).rotate(-3.0),
+            letter(archivo_black("O", 52.0), 52.0, (7.0, 6.0), RED).rotate(-3.0),
         ]
         .gap(3.0)
         .cross_align(CrossAlign::End)
         // The row is 182.15 dp wide and the block 342 at the design's
         // width, so `left: 150px` is 9.85 dp short of the block's right
-        // edge; pinned there (a hair less, to land on the design's pixel),
-        // the letters stay on a narrower screen.
+        // edge; pinned there, the letters stay on a narrower screen.
         .place(Alignment::TOP_RIGHT)
-        .offset(-9.848, 44.0),
+        .offset(-9.85, 44.0),
         // `font-family: 'Caveat'; font-size: 34px; color: #F6C445;
         // transform: rotate(-7deg)`.
         caveat("go", 34.0)
@@ -145,18 +124,10 @@ fn benefits() -> Container<Message> {
             .fill_width()
     };
     col![
-        // This line is half a dp wider here than in Chrome, the drift
-        // gathering after "of"; setting it in two parts keeps every word
-        // within a pixel of the design. The second part takes the room
-        // left and wraps on a narrow phone.
         benefit(
-            row![
-                outfit("100 minutes of", 17.0),
-                outfit("AI call practice a month", 17.0).fill_width(),
-            ]
-            .gap(2.5)
-            .fill_width()
-            .into()
+            outfit("100 minutes of AI call practice a month", 17.0)
+                .fill_width()
+                .into()
         ),
         benefit(outfit("Every customer scenario", 17.0).fill_width().into()),
         benefit(

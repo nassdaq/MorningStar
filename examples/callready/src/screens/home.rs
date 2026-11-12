@@ -41,66 +41,8 @@ pub enum Message {
 
 // ---------------------------------------------------------- illustrations
 
-/// The opaque colour a browser shows for `color` at `opacity` over the
-/// app's black background.
-///
-/// A browser blends the encoded sRGB values; the renderer blends in linear
-/// light, where a translucent stroke over black comes out much brighter
-/// (yellow at 0.25 is `#7E6423` instead of the reference's `#433719`). Every
-/// translucent line of this screen lies on the black background, so each is
-/// drawn opaque in the colour the browser arrives at. Where such a line
-/// crosses something of its own colour the design shows the full colour;
-/// those lines are painted *under* that thing (see [`DISC`] and [`card`]).
-const fn on_black(color: Color, opacity: f64) -> Color {
-    const fn channel(over: f32, under: f32, opacity: f64) -> u8 {
-        let blended = opacity * encoded(over) + (1.0 - opacity) * encoded(under);
-        (blended * 255.0 + 0.5) as u8
-    }
-    rgb8(
-        channel(color.r, BLACK.r, opacity),
-        channel(color.g, BLACK.g, opacity),
-        channel(color.b, BLACK.b, opacity),
-    )
-}
-
-/// The sRGB encoding of a linear component: `1.055 x^(1/2.4) - 0.055`.
-/// `powf` is not available in constants, so `x^(5/12)` is the fifth power
-/// of the square root of the square root of the cube root, each by Newton's
-/// method from above.
-const fn encoded(linear: f32) -> f64 {
-    let x = linear as f64;
-    if x <= 0.003_130_8 {
-        return x * 12.92;
-    }
-    let mut cube_root = 1.0_f64;
-    let mut twelfth = 1.0_f64;
-    let mut step = 0;
-    while step < 64 {
-        cube_root = (2.0 * cube_root + x / (cube_root * cube_root)) / 3.0;
-        step += 1;
-    }
-    // The fourth root of the cube root.
-    step = 0;
-    while step < 64 {
-        let cube = twelfth * twelfth * twelfth;
-        twelfth = (3.0 * twelfth + cube_root / cube) / 4.0;
-        step += 1;
-    }
-    let fifth_power = twelfth * twelfth * twelfth * twelfth * twelfth;
-    1.055 * fifth_power - 0.055
-}
-
-/// `border: 1.5px solid #FFFFFF; opacity: 0.55`, the second frame of the
-/// second card, which crosses a blue frame as well as the background. White
-/// over black is grey, so one opacity in linear light gives the browser's
-/// colour on the background exactly; over the blue it is within 20 of 255.
-const FROST: Color = with_alpha(
-    WHITE,
-    (on_black(WHITE, 0.55).r - BLACK.r) / (WHITE.r - BLACK.r),
-);
-
 /// `stroke="#F6C445" stroke-opacity="0.55" stroke-width="1"`: a groove.
-const GROOVE: Color = on_black(YELLOW, 0.55);
+const GROOVE: Color = with_alpha(YELLOW, 0.55);
 
 /// A groove of the disc at radius `r`.
 const fn groove(r: f32) -> Layer {
@@ -126,19 +68,21 @@ const fn headset(layer: Layer) -> Layer {
 /// An outer ring, the disc, a band turned by -18 degrees and clipped to the
 /// disc (`<clipPath id="discClip"><circle cx="140" cy="140" r="122"/>`),
 /// ten grooves, five black rings, the cream label and the headset.
-/// The translucent strokes are opaque here: see [`on_black`].
 ///
 /// Public because it is also the app's launcher icon (`examples/icon.rs`).
 pub const DISC: VectorPicture = VectorPicture::new(
     280.0,
     280.0,
     &[
-        Layer::circle(140.0, 140.0, 138.0).stroke(on_black(YELLOW, 0.25), 2.0),
+        // `stroke-opacity="0.25"`.
+        Layer::circle(140.0, 140.0, 138.0).stroke(with_alpha(YELLOW, 0.25), 2.0),
         Layer::circle(140.0, 140.0, 122.0)
             .fill(BLACK)
             .stroke(YELLOW, 1.5),
-        // The grooves come after the band in the design and vanish on it
-        // (yellow over yellow); drawn opaque, they go under it instead.
+        Layer::rect(-40.0, 114.0, 360.0, 52.0)
+            .fill(YELLOW)
+            .rotate(-18.0, 140.0, 140.0)
+            .clip_circle(140.0, 140.0, 122.0),
         groove(114.0),
         groove(108.0),
         groove(102.0),
@@ -149,10 +93,6 @@ pub const DISC: VectorPicture = VectorPicture::new(
         groove(72.0),
         groove(66.0),
         groove(60.0),
-        Layer::rect(-40.0, 114.0, 360.0, 52.0)
-            .fill(YELLOW)
-            .rotate(-18.0, 140.0, 140.0)
-            .clip_circle(140.0, 140.0, 122.0),
         cut(111.0),
         cut(99.0),
         cut(87.0),
@@ -394,7 +334,7 @@ fn scenarios() -> Container<Message> {
             0,
             Outline::new(PURPLE, 2.0, -2.0, (0.0, 0.0)),
             // `inset: 2px -2px -2px 2px; .. rotate(1.2deg); opacity: 0.8`.
-            Outline::new(on_black(PURPLE, 0.8), 1.5, 1.2, (2.0, 2.0)),
+            Outline::new(with_alpha(PURPLE, 0.8), 1.5, 1.2, (2.0, 2.0)),
             // `right: 14px; bottom: 8px; width: 12px; height: 70px;
             // background: #9B5DE5; transform: rotate(4deg)`.
             Container::empty()
@@ -420,7 +360,7 @@ fn scenarios() -> Container<Message> {
             Outline::new(BLUE, 2.0, 0.8, (0.0, 0.0)),
             // `inset: 3px 1px -3px -1px; border: 1.5px solid #FFFFFF; ..
             // rotate(-1deg); opacity: 0.55`.
-            Outline::new(FROST, 1.5, -1.0, (-1.0, 3.0)).over(),
+            Outline::new(with_alpha(WHITE, 0.55), 1.5, -1.0, (-1.0, 3.0)),
             // `right: 10px; bottom: 6px; width: 40px; height: 66px;
             // background: #5AA9E6; transform: rotate(-3deg)`.
             Container::empty()
@@ -445,7 +385,7 @@ fn scenarios() -> Container<Message> {
             2,
             Outline::new(YELLOW, 2.0, 2.0, (0.0, 0.0)),
             // `inset: -2px 2px 2px -2px; .. rotate(-0.8deg); opacity: 0.7`.
-            Outline::new(on_black(YELLOW, 0.7), 1.5, -0.8, (-2.0, -2.0)),
+            Outline::new(with_alpha(YELLOW, 0.7), 1.5, -0.8, (-2.0, -2.0)),
             // `right: 22px; bottom: 4px; width: 46px; height: 46px;
             // background: repeating-linear-gradient(..); transform:
             // rotate(-6deg)`.
@@ -479,8 +419,6 @@ struct Outline {
     width: f32,
     degrees: f32,
     shift: (f32, f32),
-    /// Painted over the card's other frame, as the design orders them.
-    over: bool,
 }
 
 impl Outline {
@@ -490,13 +428,7 @@ impl Outline {
             width,
             degrees,
             shift,
-            over: false,
         }
-    }
-
-    const fn over(mut self) -> Self {
-        self.over = true;
-        self
     }
 
     fn view(&self) -> Container<Message> {
@@ -527,11 +459,9 @@ fn card(
     numeral: Text,
 ) -> Container<Message> {
     stack![
-        // The design paints the translucent frame second. A frame drawn
-        // opaque (see `on_black`) goes under the first instead, where the
-        // two cross as the design shows them when they share a colour.
-        if back.over { front.view() } else { back.view() },
-        if back.over { back.view() } else { front.view() },
+        // The design paints the translucent frame second.
+        front.view(),
+        back.view(),
         Container::new(
             outfit(Scenario::CARDS[index].title(), 16.0)
                 .semibold()

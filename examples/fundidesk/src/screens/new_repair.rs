@@ -22,13 +22,9 @@ const CONDITIONS: [&str; 5] = [
     "Water damage",
     "Does not power on",
 ];
-/// Where the design's `flex-wrap` breaks the conditions into rows.
-const CONDITION_ROWS: &[&[usize]] = &[&[0, 1], &[2, 3], &[4]];
 
 /// "Accessories received", in the design's order.
 const ACCESSORIES: [&str; 5] = ["SIM tray", "SIM card", "Memory card", "Case", "Charger"];
-/// Where the design's `flex-wrap` breaks the accessories into rows.
-const ACCESSORY_ROWS: &[&[usize]] = &[&[0, 1, 2], &[3, 4]];
 
 /// One of the form's text fields.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -118,7 +114,6 @@ pub fn view(state: &State) -> Element<Message> {
             "Condition on arrival",
             "condition",
             &CONDITIONS,
-            CONDITION_ROWS,
             &state.conditions,
             Message::ToggleCondition,
         ),
@@ -126,7 +121,6 @@ pub fn view(state: &State) -> Element<Message> {
             "Accessories received",
             "accessory",
             &ACCESSORIES,
-            ACCESSORY_ROWS,
             &state.accessories,
             Message::ToggleAccessory,
         ),
@@ -225,24 +219,28 @@ fn field(which: TextField, value: &str) -> Field<Message> {
         .id(("repair", which))
 }
 
-/// A group of chips: `display: flex; flex-wrap: wrap; gap: 8px`. There is
-/// no wrapping row, so `rows` says where the design breaks.
+/// A group of chips: `display: flex; flex-wrap: wrap; gap: 8px`. At the
+/// design's width the conditions break into rows of two, two and one, and
+/// the accessories into three and two.
 fn chips(
     title: &'static str,
     id: &'static str,
     names: &[&'static str; 5],
-    rows: &[&[usize]],
     selected: &[bool; 5],
     message: fn(usize) -> Message,
 ) -> Container<Message> {
-    let rows = rows.iter().map(|row| {
-        Row::new().gap(8.0).extend(row.iter().map(|&index| {
-            chip(names[index], selected[index])
-                .on_press(message(index))
-                .id((id, index))
-        }))
-    });
-    section(title).push(Column::new().gap(8.0).fill_width().extend(rows))
+    section(title).push(
+        Row::new()
+            .extend((0..names.len()).map(|index| {
+                chip(names[index], selected[index])
+                    .on_press(message(index))
+                    .id((id, index))
+            }))
+            .gap(8.0)
+            .line_gap(8.0)
+            .wrap()
+            .fill_width(),
+    )
 }
 
 /// "Optional": three dashed tiles, `grid-template-columns: repeat(3,

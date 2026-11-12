@@ -251,25 +251,10 @@ impl Phone {
         self.frame.begin();
         let info = self.info.with_elapsed(self.elapsed);
         self.ui.frame(&info, &mut self.frame);
-        // One box is meant to be smaller than its content: the three-line
-        // window a long reply is typed through (`live_call::reply_field`),
-        // which shows the end of the text and cuts the beginning. Nothing
-        // else may overflow.
-        let window = 3.0 * 22.95;
-        let unexpected: Vec<_> = self
-            .ui
-            .overflows()
-            .into_iter()
-            .filter(|overflow| {
-                let typing_long = self
-                    .model()
-                    .online_call()
-                    .is_some_and(|call| call.draft.chars().count() > 44);
-                !(typing_long && (overflow.rect.height - window).abs() < 0.01)
-            })
-            .collect();
+        // Nothing may overflow, in any frame: a long reply scrolls inside
+        // its three-line field (`live_call::reply_field`).
         assert_eq!(
-            unexpected,
+            self.ui.overflows(),
             [],
             "layout overflow on {}",
             self.screen().name()
@@ -307,25 +292,14 @@ impl Phone {
         self.ui.rect_of(id).is_some()
     }
 
-    /// The scroll view of the screen being shown, in pixels. An online
-    /// call's is a new one for every line the caller says.
+    /// The scroll view of the screen being shown, in pixels.
     fn viewport(&self) -> Rect {
-        let name = self.screen().scroll_id();
-        match self.model().online_call() {
-            Some(call) if self.screen() == Screen::LiveCall => self.rect((name, call.line_no)),
-            _ => self.rect(name),
-        }
+        self.rect(self.screen().scroll_id())
     }
 
     fn scroll(&self) -> (f32, f32) {
         let name = self.screen().scroll_id();
-        let (offset, max) = match self.model().online_call() {
-            Some(call) if self.screen() == Screen::LiveCall => {
-                let id = (name, call.line_no);
-                (self.ui.scroll_offset(id), self.ui.max_scroll_offset(id))
-            }
-            _ => (self.ui.scroll_offset(name), self.ui.max_scroll_offset(name)),
-        };
+        let (offset, max) = (self.ui.scroll_offset(name), self.ui.max_scroll_offset(name));
         (offset.expect("a scroll view"), max.expect("a scroll view"))
     }
 
@@ -363,21 +337,9 @@ impl Phone {
     }
 
     /// Scrolls until the widget lies wholly inside the scroll view, if it
-    /// is in it, looking for it from the top down if it is out of sight.
+    /// is in it. Where it was laid out is known even when it is out of
+    /// sight (`Ui::rect_of`), so the finger drags straight towards it.
     fn reveal(&mut self, id: impl Hash + Copy) {
-        if self.ui.rect_of(id).is_none() {
-            let page = self.viewport().height / self.scale() * 0.5;
-            for _ in 0..40 {
-                if self.drag(-page) == 0.0 {
-                    break;
-                }
-            }
-            for _ in 0..40 {
-                if self.ui.rect_of(id).is_some() || self.drag(page) == 0.0 {
-                    break;
-                }
-            }
-        }
         for _ in 0..40 {
             let rect = self.rect(id);
             let view = self.viewport();
@@ -2147,9 +2109,28 @@ fn the_call_fits_with_the_keyboard_up_and_with_long_text() {
         );
         let rect = phone.rect("reply-send");
         assert!(rect.y + rect.height <= keyboard_top + 0.5, "{name}");
+        // It has grown to its three lines and no further: the rest of the
+        // reply is scrolled inside it, the caret (at the end) in view.
+        let three_lines = 3.0 * 22.95 * info.scale;
+        let field = phone.rect("reply-input");
+        assert!(
+            (field.height - three_lines).abs() <= 1.0,
+            "{name}: the field is {} px tall, three lines are {three_lines}",
+            field.height
+        );
+        let inside = phone.ui.scroll_offset("reply-input");
+        assert!(
+            inside.is_some_and(|offset| offset > 0.0),
+            "{name}: {inside:?}"
+        );
         phone.tap("reply-send");
         phone.info = info;
         phone.draw();
+        // The page has been read down by now (reaching for the send button
+        // scrolled it). The scroll view is the same one for the whole
+        // call, so it stays there until the application asks.
+        let (offset, _) = phone.scroll();
+        assert!(offset > 100.0, "{name}: at {offset}");
         phone.reply(
             HttpMethod::Post,
             &Phone::turns_path(),

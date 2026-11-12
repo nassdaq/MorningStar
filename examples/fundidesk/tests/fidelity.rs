@@ -9,10 +9,11 @@
 //!
 //! The limits below are not a target that was chosen: each is the measured
 //! difference of the screen as built, rounded up to the next 0.05. What is
-//! left is anti-aliasing blended in linear light where the browser blends
-//! encoded values (text and thin strokes come out a little lighter) and a
-//! different glyph rasteriser; see ADR 0015. A layout change of a few
-//! pixels in any element pushes a screen well over its limit.
+//! left is a different rasteriser for glyphs and curves: text placement,
+//! blending, shadows and the weight of light text are the browser's (ADR
+//! 0022, ADR 0023), and nothing in the screens is corrected by hand. A
+//! layout change of a few pixels in any element pushes a screen well over
+//! its limit.
 //!
 //! On failure the report is printed and `<name>.actual.png` and
 //! `<name>.sbs.png` are written to `target/fidelity/`.
@@ -29,29 +30,29 @@ const SCALE: f32 = 2.0;
 /// Largest share of differing pixels, in percent, for a built screen.
 fn limit(screen: Screen) -> f32 {
     match screen {
-        // Measured 0.2868.
-        Screen::Splash => 0.30,
-        // Measured 0.1671.
+        // Measured 0.2250.
+        Screen::Splash => 0.25,
+        // Measured 0.1575.
         Screen::Login => 0.20,
-        // Measured 0.4091.
-        Screen::Dashboard => 0.45,
-        // Measured 0.3425.
-        Screen::RepairDetails => 0.35,
-        // Measured 0.3615.
-        Screen::Onboarding => 0.40,
-        // Measured 0.0953.
+        // Measured 0.3607.
+        Screen::Dashboard => 0.40,
+        // Measured 0.2724.
+        Screen::RepairDetails => 0.30,
+        // Measured 0.2113.
+        Screen::Onboarding => 0.25,
+        // Measured 0.0880.
         Screen::CreateAccount => 0.10,
-        // Measured 0.1398.
-        Screen::Verification => 0.15,
-        // Measured 0.1772.
-        Screen::ShopSetup => 0.20,
-        // Measured 0.2576.
-        Screen::RepairsList => 0.30,
-        // Measured 0.4870.
-        Screen::NewRepair => 0.50,
-        // Measured 0.2672.
-        Screen::RecordPayment => 0.30,
-        // Measured 0.2666.
+        // Measured 0.0870.
+        Screen::Verification => 0.10,
+        // Measured 0.1359.
+        Screen::ShopSetup => 0.15,
+        // Measured 0.1781.
+        Screen::RepairsList => 0.20,
+        // Measured 0.3441.
+        Screen::NewRepair => 0.35,
+        // Measured 0.2460.
+        Screen::RecordPayment => 0.25,
+        // Measured 0.2593.
         Screen::Tracking => 0.30,
     }
 }

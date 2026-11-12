@@ -122,7 +122,12 @@ fn widgets_change_the_state_they_say_they_change() {
 #[test]
 fn the_transaction_list_scrolls_and_rows_stay_tappable() {
     let mut device = Device::new(Screen::Home);
-    assert!(device.ui.rect_of(("transaction", 9_usize)).is_none());
+    assert!(
+        device
+            .ui
+            .visible_rect_of(("transaction", 9_usize))
+            .is_none()
+    );
     let travel = device.ui.max_scroll_offset("home-scroll").unwrap();
     assert!(travel > 300.0, "ten rows do not fit: {travel}");
 

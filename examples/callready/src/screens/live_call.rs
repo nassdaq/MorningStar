@@ -28,9 +28,10 @@
 //! fixed above the call bar: a text field with a send button, or, when the
 //! server has a voice, a microphone that is tapped to start recording and
 //! tapped again to send. What was said last sits dimmed above the
-//! caller's new line. Each new line starts the conversation at its top
-//! again (the scroll view is a new one per line), so the caller's line is
-//! never left below the fold. The bar in the header is the time used.
+//! caller's new line. Each new line shows the conversation from its top
+//! again (the application asks the scroll view to go there), so the
+//! caller's line is never left below the fold. The bar in the header is
+//! the time used.
 
 use morningstar::ui::prelude::*;
 
@@ -172,24 +173,22 @@ fn task(call: &Call) -> Container<Message> {
         (
             // "Call №1 · Angry customer", 186.98 wide in the design.
             row![
-                outfit("Call N", 17.0).color(SILVER),
+                // Two texts: the design's numero sign is from another font,
+                // so nothing is kerned between the space and it.
+                outfit("Call ", 17.0).color(SILVER),
+                outfit("N", 17.0).color(SILVER),
                 Spacer::new(),
-                // Chrome set the "1" one dp further right than Outfit's own
+                // Chrome set the "1" a quarter dp further right than Outfit's own
                 // spacing does (it follows a glyph of another font there).
-                outfit("1", 17.0).color(SILVER).offset(1.0, 0.0),
+                outfit("1", 17.0).color(SILVER).offset(0.25, 0.0),
                 outfit(" \u{b7} Angry customer", 17.0).color(SILVER),
             ]
             .width(186.98),
             // `margin: 10px 0 0; font-size: 32px; line-height: 1.12;
-            // font-weight: 700`. The two lines the design's width produces,
-            // written out: Chrome put the first at y = 147 and the second
-            // at 182.84, which land on device pixels 294 and 366; one
-            // wrapped text here lands its first line one pixel lower.
-            col![
-                heading_line("Calm the caller and").offset(0.0, -0.5),
-                heading_line("solve the problem").offset(0.0, -0.34),
-            ]
-            .into(),
+            // font-weight: 700`.
+            heading_line("Calm the caller and solve the problem")
+                .fill_width()
+                .into(),
         )
     } else {
         (
@@ -321,7 +320,7 @@ fn own_line(call: &Call, exchange: &Exchange) -> Container<Message> {
                 .size(110.0, 2.0)
                 .background(GREY)
                 .place(Alignment::TOP_LEFT)
-                .offset(174.27, 55.45),
+                .offset(174.27, 55.25),
         ]
         .fill_width()
         .into()
@@ -347,60 +346,52 @@ fn own_line(call: &Call, exchange: &Exchange) -> Container<Message> {
         } else {
             "YOU \u{b7} SPEAKING"
         }),
-        // `margin: 0 0 6px`; Chrome put this paragraph's lines 0.2 higher
-        // than its half-leading gives (488.75, not 488.95).
-        Spacer::fixed(5.8),
+        // `margin: 0 0 6px`.
+        Spacer::fixed(6.0),
         sentence,
-        Spacer::fixed(14.2),
+        Spacer::fixed(14.0),
         tips(call, exchange),
     ]
     .fill_width()
 }
 
-/// `display: flex; flex-wrap: wrap; gap: 8px`. Rows cannot wrap here, so
-/// the two rows the design's width produces are written out: "tip" and the
-/// first chip, then the second chip. Tapping a chip answers with it; while
-/// the learner is muted the chips are grey and do nothing.
+/// `display: flex; flex-wrap: wrap; gap: 8px`: "tip" and the two chips in
+/// a row that wraps. At the design's width that is "tip" and the first
+/// chip, then the second chip on a line of its own. Tapping a chip answers
+/// with it; while the learner is muted the chips are grey and do nothing.
 fn tips(call: &Call, exchange: &Exchange) -> Container<Message> {
-    // The widths of the design's two chips (text + 27), rounded to the
-    // half dp a browser snaps a box's edges to at 2 px per dp.
-    let widths = if call.designed {
-        [Some(180.5), Some(195.0)]
-    } else {
-        [None, None]
-    };
     let tip = |option: usize, color: Color| {
         let (ink, outline) = if call.muted {
             (GREY, QUIET)
         } else {
             (WHITE, color)
         };
-        chip(exchange.options[option].tip, widths[option], ink, outline)
+        chip(exchange.options[option].tip, None, ink, outline)
             .on_press_maybe((!call.muted).then_some(Message::Choose(option)))
             .id(("tip", option))
     };
-    col![
-        row![
-            // `font-family: 'Caveat'; font-size: 24px; color: #F6C445;
-            // transform: rotate(-3deg)`, stretched to the row's 34 dp with
-            // the text at its top. The chip after it starts at 83.5.
-            stack![
-                caveat("tip", 24.0).color(YELLOW),
-                Icon::vector(TIP_ARROW)
-                    .size(20.0)
-                    .color(YELLOW)
-                    .place(Alignment::TOP_LEFT)
-                    .offset(30.1, 4.4),
-            ]
-            .size(51.5, 34.0)
-            .rotate(-3.0),
-            tip(0, BLUE),
-        ]
-        .gap(8.0),
-        tip(1, PURPLE),
+    row![tip_label(), tip(0, BLUE), tip(1, PURPLE)]
+        .gap(8.0)
+        .line_gap(8.0)
+        .wrap()
+        .fill_width()
+}
+
+/// The handwritten "tip" and its arrow: `font-family: 'Caveat'; font-size:
+/// 24px; color: #F6C445; transform: rotate(-3deg)`, stretched to the
+/// line's 34 dp with the text at its top. The chip after it starts at
+/// 83.5.
+fn tip_label() -> Container<Message> {
+    stack![
+        caveat("tip", 24.0).color(YELLOW),
+        Icon::vector(TIP_ARROW)
+            .size(20.0)
+            .color(YELLOW)
+            .place(Alignment::TOP_LEFT)
+            .offset(30.1, 4.4),
     ]
-    .gap(8.0)
-    .fill_width()
+    .size(51.5, 34.0)
+    .rotate(-3.0)
 }
 
 /// `background: #1C1C1E; padding: 18px 24px 30px; display: flex;
@@ -463,13 +454,6 @@ fn call_bar(call: &Call) -> Container<Message> {
 
 // ------------------------------------------------- a call the server plays
 
-/// The id of an online call's scroll view while the caller's line number
-/// `line` is the current one. A new line is a new scroll view, which
-/// starts at its top: that is what keeps the newest line in view.
-pub fn online_scroll_id(line: u32) -> (&'static str, u32) {
-    (Screen::LiveCall.scroll_id(), line)
-}
-
 /// The phone is ringing: `POST /v1/calls` is out.
 fn dialing(scenario: Scenario, model: &Model) -> Element<Message> {
     col![
@@ -512,10 +496,7 @@ fn online(call: &OnlineCall) -> Element<Message> {
     let sound = if call.muted { " \u{b7} sound off" } else { "" };
     Column::new()
         .push(header(call.time_used(), call.clock()))
-        .push(
-            ScrollView::new(online_conversation(call))
-                .id((Screen::LiveCall.scroll_id(), call.line_no)),
-        )
+        .push(ScrollView::new(online_conversation(call)).id(Screen::LiveCall.scroll_id()))
         .push(hairline())
         .push_maybe(
             call.notice.as_ref().map(|notice| {
@@ -684,68 +665,33 @@ fn online_line(call: &OnlineCall) -> Container<Message> {
     .fill_width()
 }
 
-/// Whether a tip can be set on one line beside the word "tip" on the
-/// narrowest phone (212 dp of text), by a generous estimate of its width:
-/// a view cannot measure text.
-fn fits_a_chip(tip: &str) -> bool {
-    let width: f32 = tip
-        .chars()
-        .map(|character| match character {
-            'i' | 'j' | 'l' | 't' | 'f' | 'r' | ' ' | '.' | ',' | '\'' | '\u{2019}' | '!' => 5.5,
-            'm' | 'w' => 12.5,
-            'a'..='z' => 8.5,
-            'M' | 'W' => 14.0,
-            'A'..='Z' | '0'..='9' => 10.5,
-            _ if character.is_ascii() => 9.0,
-            _ => 16.0,
-        })
-        .sum();
-    width <= 212.0
-}
-
 /// The server's two tips: advice for the answer, not answers. Dashed, so
 /// that they do not look like the buttons the scripted call's tips are.
+///
+/// They follow "tip" in a row that wraps, as the scripted call's chips
+/// do: a tip sits beside what is before it while it fits, takes the next
+/// line when it does not, and wraps inside its chip only when it is wider
+/// than the screen.
 fn advice(tips: &[String]) -> Container<Message> {
     let tip = |index: usize, color: Color| {
         tips.get(index).map(|tip| {
-            let label = outfit(tip.clone(), 15.0).color(SILVER);
-            if fits_a_chip(tip) {
-                Container::<Message>::new(label)
-                    .height(34.0)
-                    .center()
-                    .padding_xy(13.5, 0.0)
-                    .radius(999.0)
-                    .border_dashed(1.5, color)
-            } else {
-                // Wide letters: the tip takes the row and wraps in it.
-                Container::<Message>::new(label.fill_width())
-                    .fill_width()
-                    .padding_xy(13.5, 7.5)
-                    .radius(17.0)
-                    .border_dashed(1.5, color)
-            }
+            // 34 dp tall with one line of text, as a chip is; taller,
+            // with the same corners, when the text wraps.
+            Container::<Message>::new(outfit(tip.clone(), 15.0).color(SILVER))
+                .min_height(34.0)
+                .content_align(Alignment::CENTER_LEFT)
+                .padding_xy(13.5, 7.0)
+                .radius(17.0)
+                .border_dashed(1.5, color)
         })
     };
-    Column::new()
-        .push(
-            Row::new()
-                .push(
-                    stack![
-                        caveat("tip", 24.0).color(YELLOW),
-                        Icon::vector(TIP_ARROW)
-                            .size(20.0)
-                            .color(YELLOW)
-                            .place(Alignment::TOP_LEFT)
-                            .offset(30.1, 4.4),
-                    ]
-                    .size(51.5, 34.0)
-                    .rotate(-3.0),
-                )
-                .push_maybe(tip(0, BLUE))
-                .gap(8.0),
-        )
+    Row::new()
+        .push(tip_label())
+        .push_maybe(tip(0, BLUE))
         .push_maybe(tip(1, PURPLE))
         .gap(8.0)
+        .line_gap(8.0)
+        .wrap()
         .fill_width()
 }
 
@@ -813,8 +759,10 @@ fn answer(call: &OnlineCall) -> Container<Message> {
         .padding_ltrb(MARGIN, 10.0, MARGIN, 10.0)
 }
 
-/// The reply as text: a field that grows with what is typed, and a send
-/// button. In a spoken call a small microphone leads back to speaking.
+/// The reply as text: a field that grows with what is typed, up to three
+/// lines, and then scrolls inside itself with the caret in view; and a
+/// send button. In a spoken call a small microphone leads back to
+/// speaking.
 fn reply_field(call: &OnlineCall) -> Container<Message> {
     let editable = call.can_type();
     let mut input = TextInput::new(&call.draft)
@@ -825,6 +773,7 @@ fn reply_field(call: &OnlineCall) -> Container<Message> {
         )
         .placeholder("Type what you would say")
         .multiline()
+        .max_lines(3)
         .max_length(REPLY_LIMIT)
         .capitalization(Capitalization::Sentences)
         .action(ImeAction::Send)
@@ -835,22 +784,7 @@ fn reply_field(call: &OnlineCall) -> Container<Message> {
         // the caller, what was typed is held as it was sent.
         input = input.on_input(Message::Draft);
     }
-    // The field grows with what is typed. A view cannot measure text, so
-    // a reply that is clearly more than three lines is shown through a
-    // window of three with its end in view (where the caret is while
-    // typing), rather than growing until the bar leaves the screen.
     let narrow = call.voice && !call.mic_denied;
-    let long = call.draft.chars().count() > if narrow { 44 } else { 66 }
-        || call.draft.matches('\n').count() >= 3;
-    let field: Element<Message> = if long {
-        stack![input.place(Alignment::BOTTOM_LEFT)]
-            .fill_width()
-            .height(3.0 * 22.95)
-            .clip()
-            .into()
-    } else {
-        input.into()
-    };
     let ready = call.can_send();
     let (plate, ink) = if ready {
         (YELLOW, BLACK)
@@ -869,7 +803,7 @@ fn reply_field(call: &OnlineCall) -> Container<Message> {
         }))
         .push(
             Row::new()
-                .push(field)
+                .push(input)
                 .fill_width()
                 .min_height(48.0)
                 .cross_align(CrossAlign::Center)

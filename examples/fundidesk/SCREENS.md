@@ -105,11 +105,12 @@ Work in this order; it is the order in which errors hide each other.
 
 ## The bar
 
-The four built screens differ from their references in **0.17% to 0.41%** of pixels (mean error 0.05 to 0.14) with the default comparison. A new screen is done when:
+The twelve screens differ from their references in **0.09% to 0.36%** of pixels (mean error 0.02 to 0.08) with the default comparison. A new screen is done when:
 
 - every block is within one pixel of the reference in position and size, over the whole height;
-- no region in the report is a missing, extra or miscoloured element: what remains is text, icons and curved edges of the right extent (the browser blends anti-aliased edges differently and its text is a little heavier; ADR 0015);
-- the differing share is **under 0.5%**; text-heavy screens sit near 0.4%, sparse ones near 0.2%. If you are above 0.5%, something structural is still wrong;
+- no region in the report is a missing, extra or miscoloured element: what remains is text, icons and curved edges of the right extent (a different rasteriser; blending, shadows and text weight are the browser's since ADR 0023);
+- the differing share is **under 0.4%**; text-heavy screens sit near 0.3 to 0.4%, sparse ones near 0.1 to 0.2%. If you are above that, something structural is still wrong;
+- nothing is corrected by hand: no fraction-of-a-dp nudge on a text, no pinned width on a box that hugs one, no alpha other than the design's (ADR 0022, ADR 0023). If a text sits wrong, a height above it is wrong;
 - the limit in `tests/fidelity.rs` is your measured value rounded up to the next 0.05. **Never raise a limit to make a test pass**; find what moved;
 - `ui.overflows()` is empty at the phone size (the test checks four scales).
 
@@ -118,7 +119,7 @@ Report, for your screen: the diff percentage, mean and maximum error; the three 
 ## Known approximations to apply consistently
 
 - **Inputs are real.** A `Field` is the design's frame around a `TextInput`; unfocused it renders exactly as the design's field does (the fidelity numbers did not move when the look-alikes were replaced). With focus it takes the design's focused border, `1.5px solid #1E8416`, and shows a green caret; that state is not in any reference image.
-- **`flex-wrap` chips (09)**: write the rows out as `row![..].gap(8.0)` in a `col![..].gap(8.0)`, breaking where the reference breaks.
+- **`flex-wrap` chips (09)**: a row that wraps, `Row::new().extend(chips).gap(8.0).line_gap(8.0).wrap().fill_width()`. It breaks where the reference breaks because the chips are as wide as the reference's; if a break differs, a chip's width does, and that is what to look at.
 - **A link inside a sentence (04, 05)**: `inter_rich` for the text; make the whole line tappable.
 - **Percent widths (02)**: compute from the parent's inner width.
 - **`border-top` / `border-bottom`**: `hairline()` as the first or last child.

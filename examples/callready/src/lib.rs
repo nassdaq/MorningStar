@@ -357,6 +357,8 @@ enum Ask {
     StartRecording(u32),
     StopRecording(u32, u32),
     Store(&'static str, String),
+    /// A scroll view is asked to move.
+    Scroll(ScrollTo),
 }
 
 /// Which [`Net`] message an HTTP answer becomes.
@@ -402,9 +404,8 @@ impl Reply {
 /// everything it remembers.
 #[derive(Default)]
 pub struct CallReady {
-    screen: Screen,
-    /// The screens Back returns to, the nearest last.
-    stack: Vec<Screen>,
+    /// The screen being shown, on top of the screens Back returns to.
+    screens: Navigator<Screen>,
     model: Model,
     /// The plan whose card is selected on the offer.
     offer: Plan,
@@ -441,7 +442,7 @@ impl CallReady {
     /// in, with nothing behind it.
     pub fn on(screen: Screen) -> Self {
         Self {
-            screen,
+            screens: Navigator::new(screen),
             ..Self::default()
         }
     }
@@ -461,12 +462,13 @@ impl CallReady {
 
     /// The screen being shown.
     pub fn screen(&self) -> Screen {
-        self.screen
+        *self.screens.current()
     }
 
     /// The screens Back returns to, the nearest last.
     pub fn stack(&self) -> &[Screen] {
-        &self.stack
+        let all = self.screens.stack();
+        &all[..all.len() - 1]
     }
 
     /// Everything the application remembers.
@@ -491,23 +493,20 @@ impl CallReady {
     /// on first launch): the host should leave the app. This is the
     /// application's [`Application::back`].
     pub fn go_back(&mut self) -> bool {
-        let from = self.screen;
+        let from = self.screen();
         match from {
             Screen::LiveCall => self.leave_call(),
             Screen::Profile => self.commit_name(),
             _ => {}
         }
-        let handled = match self.stack.pop() {
-            Some(screen) => {
-                self.screen = screen;
-                true
-            }
+        let handled = if self.screens.back() {
+            true
+        } else if !matches!(self.screen(), Screen::Home | Screen::Welcome) {
             // A screen shown directly, with nothing behind it.
-            None if !matches!(self.screen, Screen::Home | Screen::Welcome) => {
-                self.screen = Screen::Home;
-                true
-            }
-            None => false,
+            self.screens.reset(Screen::Home);
+            true
+        } else {
+            false
         };
         self.arrived(from);
         handled
@@ -517,7 +516,7 @@ impl CallReady {
     /// second; `None` when nothing in the app moves by itself. This is the
     /// application's [`Application::tick`].
     pub fn tick(&self) -> Option<(Duration, Message)> {
-        let call_runs = self.screen == Screen::LiveCall
+        let call_runs = self.screen() == Screen::LiveCall
             && match &self.model.live {
                 Some(Live::Active(_)) => true,
                 Some(Live::Dialing(_)) => false,
@@ -529,9 +528,8 @@ impl CallReady {
 
     /// Shows `screen` over the current one.
     fn push(&mut self, screen: Screen) {
-        if screen != self.screen {
-            self.stack.push(self.screen);
-            self.screen = screen;
+        if screen != self.screen() {
+            self.screens.push(screen);
         }
     }
 
@@ -539,20 +537,20 @@ impl CallReady {
     /// Tapping the tab that is showing changes nothing.
     fn show_tab(&mut self, tab: Tab) {
         let screen = tab.screen();
-        if screen == self.screen {
+        if screen == self.screen() {
             return;
         }
-        self.stack.clear();
-        if screen != Screen::Home {
-            self.stack.push(Screen::Home);
+        if screen == Screen::Home {
+            self.screens.reset(Screen::Home);
+        } else {
+            self.screens.set([Screen::Home, screen]);
         }
-        self.screen = screen;
     }
 
     /// After a change of screen: back on Home after the server failed, it
     /// is asked again.
     fn arrived(&mut self, from: Screen) {
-        if self.screen == Screen::Home
+        if self.screen() == Screen::Home
             && from != Screen::Home
             && matches!(self.model.link, Link::Offline(_))
         {
@@ -698,8 +696,8 @@ impl CallReady {
         } else {
             self.start_scripted(scenario);
         }
-        if self.screen == Screen::CallReport {
-            self.screen = Screen::LiveCall;
+        if self.screen() == Screen::CallReport {
+            self.screens.replace(Screen::LiveCall);
         } else {
             self.push(Screen::LiveCall);
         }
@@ -718,7 +716,7 @@ impl CallReady {
     /// Back from the report does not return into a call that is over.
     fn end_call(&mut self) {
         self.model.finish_call();
-        self.screen = Screen::CallReport;
+        self.screens.replace(Screen::CallReport);
     }
 
     /// Leaves the call on the line without ending it: whatever it was
@@ -779,7 +777,7 @@ impl CallReady {
                 Command::Lost(message) => {
                     self.model.live = None;
                     self.call += 1;
-                    if self.screen == Screen::LiveCall {
+                    if self.screen() == Screen::LiveCall {
                         self.go_back();
                     }
                     self.model.say(message);
@@ -802,8 +800,8 @@ impl CallReady {
         self.model.take_report(report);
         self.model.live = None;
         self.call += 1;
-        if self.screen == Screen::LiveCall {
-            self.screen = Screen::CallReport;
+        if self.screen() == Screen::LiveCall {
+            self.screens.replace(Screen::CallReport);
         }
         let Some(score) = scored else {
             return;
@@ -1100,7 +1098,7 @@ impl Application for CallReady {
 
     fn view(&self) -> Element<Message> {
         let model = &self.model;
-        let screen = match self.screen {
+        let screen = match self.screen() {
             Screen::Welcome => welcome::view().map(Message::Welcome),
             Screen::Home => home::view(model).map(Message::Home),
             Screen::LiveCall => live_call::view(model).map(Message::LiveCall),
@@ -1125,8 +1123,17 @@ impl Application for CallReady {
     }
 
     fn update(&mut self, message: Message) {
-        let from = self.screen;
+        let from = self.screen();
+        let line = self.model.online_call().map(|call| call.line_no);
         self.handle(message);
+        // The caller has said something new. It is at the top of the
+        // conversation, and that is where the conversation is shown from,
+        // wherever the learner had scrolled to.
+        let said = self.model.online_call().map(|call| call.line_no);
+        if said.is_some() && said != line {
+            self.out
+                .push(Ask::Scroll(ScrollTo::top(Screen::LiveCall.scroll_id())));
+        }
         self.arrived(from);
     }
 
@@ -1147,6 +1154,7 @@ impl Application for CallReady {
                     out.stop_recording(move |result| Message::Net(Net::Recorded(call, seq, result)))
                 }
                 Ask::Store(key, value) => out.store(key, value),
+                Ask::Scroll(to) => out.scroll(to),
             }
         }
     }
@@ -1159,8 +1167,7 @@ impl CallReady {
             // "Let's go": Home becomes the root. Welcome is not behind it,
             // so it is seen once per launch.
             Message::Welcome(welcome::Message::Start) => {
-                self.stack.clear();
-                self.screen = Screen::Home;
+                self.screens.reset(Screen::Home);
             }
 
             Message::Home(message) => match message {
@@ -1334,7 +1341,7 @@ impl CallReady {
                         self.model.notice = None;
                     }
                 }
-                if self.screen == Screen::LiveCall {
+                if self.screen() == Screen::LiveCall {
                     match &self.model.live {
                         Some(Live::Active(_)) => self.in_call(None, OnlineCall::tick),
                         Some(Live::Dialing(_)) => {}

@@ -38,10 +38,10 @@ reference exactly and are not expected to.
 
 ## What a reference is not
 
-- It is a browser's rendering, blended and anti-aliased the browser's way.
-  The app blends in linear light and rasterises glyphs with a different
-  engine, so text and thin strokes never match to the pixel
-  (`docs/architecture/0015-fonts-icons-and-design-fidelity.md`).
+- It is a browser's rendering. The app composites as a browser does
+  (`docs/architecture/0023-compositing-space.md`) but rasterises glyphs and
+  curves with a different engine, so text and thin strokes do not match to
+  the pixel.
 - It was rendered at 2 px per dp. Chrome rounds font metrics to device
   pixels, so a text without a `line-height` is a multiple of half a dp tall.
   `src/theme.rs` reproduces that rounding.

@@ -12,6 +12,7 @@ use crate::theme::{
     GREEN, GREEN_SOFT, GREEN_TINT, INK, MUTED, OUTLINE, PANEL, WHITE, grotesk, inter, inter_rich,
     page_title, radius,
 };
+use crate::theme::{SHADOW_CARD, SHADOW_GREEN};
 use crate::{Nav, Screen};
 
 /// This screen is built from the design.
@@ -29,18 +30,6 @@ pub enum Message {
     /// The round arrow button.
     Continue,
 }
-
-/// `box-shadow: 0 12px 28px rgba(20, 32, 26, 0.14)` under the floating card.
-///
-/// The alpha is 0.28, not the design's 0.14: the renderer blends a shadow
-/// in linear light, where 0.14 of ink over white comes out half as dark as
-/// a browser's blend of the encoded values. 0.28 gives the browser's
-/// shades over the whole fade (within two levels of 255).
-const CARD_SHADOW: Shadow = Shadow::new(0.0, 12.0, 28.0, with_alpha(INK, 0.28));
-
-/// `box-shadow: 0 10px 22px rgba(30, 132, 22, 0.3)` under the green tile,
-/// with the alpha raised from 0.3 for the same reason as [`CARD_SHADOW`].
-const TILE_SHADOW: Shadow = Shadow::new(0.0, 10.0, 22.0, with_alpha(GREEN, 0.45));
 
 /// `padding: 28px 24px 32px; background: #FFFFFF`, one column.
 pub fn view(_state: &State) -> Element<Message> {
@@ -176,7 +165,7 @@ fn repair_card() -> Container<Message> {
     .radius(radius::CARD)
     .background(WHITE)
     .border(1.0, OUTLINE)
-    .shadow(CARD_SHADOW)
+    .shadow(SHADOW_CARD)
 }
 
 /// The floating tile: `width: 56px; height: 56px; border-radius: 18px;
@@ -193,7 +182,7 @@ fn wrench_tile() -> Container<Message> {
     .center()
     .radius(18.0)
     .background(GREEN)
-    .shadow(TILE_SHADOW)
+    .shadow(SHADOW_GREEN)
 }
 
 /// `display: flex; flex-direction: column; gap: 12px`: the title and the
@@ -201,12 +190,7 @@ fn wrench_tile() -> Container<Message> {
 /// "delayed" in `color: #1E8416; font-weight: 600`).
 fn pitch() -> Container<Message> {
     col![
-        // After the comma stand a thin space and a hair space instead of a
-        // space. Space Grotesk kerns a comma and a space together by 30 of
-        // 1000 units, which a browser applies and the shaper here, working
-        // word by word, does not; the pair is as wide as the kerned space
-        // to within a quarter of a dp, and a line may still break there.
-        page_title("Every phone in your workshop,\u{2009}\u{200a}accounted for").fill_width(),
+        page_title("Every phone in your workshop, accounted for").fill_width(),
         inter_rich(
             [
                 span("Log each device the moment it comes in. See what is "),

@@ -70,52 +70,37 @@ pub fn progress_bar<M>(share: f32, height: f32, radius: f32, color: Color) -> Co
         .background(TRACK)
 }
 
-/// A cut-out letter: a black letter centred on a coloured plate of the
-/// size Chrome laid it out at (the letter's advance plus the design's
-/// padding). The caller gives the letter its `line-height` and any nudge,
-/// and turns the plate.
-pub fn plate<M>(letter: Text, width: f32, height: f32, color: Color) -> Container<M> {
+/// A cut-out letter: a black letter on a coloured plate that hugs it with
+/// the design's padding (across, down). The caller gives the letter its
+/// `line-height` and turns the plate.
+pub fn plate<M>(letter: Text, across: f32, down: f32, color: Color) -> Container<M> {
     Container::new(letter.color(BLACK))
-        .size(width, height)
-        .center()
+        .padding_xy(across, down)
         .background(color)
 }
 
 /// A score as two cut-out digits and "/100":
 /// `display: flex; align-items: flex-end; gap: 3px`.
-///
-/// The plates of the design's "8" and "2" are the size Chrome laid them
-/// out at (63.99 and 58.7 wide, 76 tall); any other digit hugs its glyph
-/// with the same padding.
 pub fn score_plates<M: 'static>(score: u8) -> Container<M> {
     let score = score.min(99);
     let (tens, units) = (score / 10, score % 10);
     // `background: #F6C445; font-family: 'Abril Fatface'; font-size: 72px;
-    // line-height: 1; padding: 2px 10px; transform: rotate(-5deg)`. The
-    // digit sits half a dp higher in Chrome's line box than in this one.
-    let first = abril_fatface(tens.to_string(), 72.0)
-        .line_height_dp(72.0)
-        .offset(0.0, -0.5);
-    let first: Container<M> = if tens == 8 {
-        plate(first, 63.99, 76.0, YELLOW)
-    } else {
-        Container::new(first.color(BLACK))
-            .padding_xy(10.0, 2.0)
-            .background(YELLOW)
-    };
+    // line-height: 1; padding: 2px 10px; transform: rotate(-5deg)`.
+    let first: Container<M> = plate(
+        abril_fatface(tens.to_string(), 72.0).line_height_dp(72.0),
+        10.0,
+        2.0,
+        YELLOW,
+    );
     // `background: #FFFFFF; font-family: 'Archivo Black'; font-size: 64px;
     // line-height: 1; padding: 6px 8px; transform: rotate(4deg)
-    // translateY(-6px)`. The digit sits three quarters of a dp higher.
-    let second = archivo_black(units.to_string(), 64.0)
-        .line_height_dp(64.0)
-        .offset(0.0, -0.75);
-    let second: Container<M> = if units == 2 {
-        plate(second, 58.7, 76.0, WHITE)
-    } else {
-        Container::new(second.color(BLACK))
-            .padding_xy(8.0, 6.0)
-            .background(WHITE)
-    };
+    // translateY(-6px)`.
+    let second: Container<M> = plate(
+        archivo_black(units.to_string(), 64.0).line_height_dp(64.0),
+        8.0,
+        6.0,
+        WHITE,
+    );
     row![
         first.rotate(-5.0),
         second.transform(Transform::rotate(4.0).and_translate(0.0, -6.0)),
