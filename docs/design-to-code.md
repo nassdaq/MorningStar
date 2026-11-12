@@ -158,6 +158,19 @@ If the shapes differ by more than a pixel of rounding, the report says `aspect: 
 - Loosen the gate rather than fight noise: once the remaining regions are text rendering or edge anti-aliasing, the screen is as close as this loop can prove. Say what remains rather than tuning the code to the tool.
 - Look at the side-by-side before declaring success. A number cannot tell you that the screen looks right, only that it looks like the reference.
 
+## Vector artwork: load the SVG, and look at it first
+
+An illustration or icon in the design is an SVG file, and an app loads it as it is (`SvgAsset`, `Picture::svg`, `Icon::svg`; `docs/building-screens.md`, "An illustration or an icon from an SVG file"). Before wiring one in, render it alone with the same loader:
+
+```sh
+cargo run -q -p morningstar-devtools --bin morningstar-svg -- design/disc.svg out/disc.png --scale 2
+```
+
+- `--scale` is pixels per unit of the file's size (2 for a design reference at 2x); `--size 96` or `--size 200x120` fits it into that many pixels instead. `--background checker` (or `#RRGGBB`) shows white or transparent artwork; `--color #RRGGBB` sets `currentColor`.
+- It prints the file's size and whether it is *single-ink* (an icon that takes any colour from one mask).
+- A file outside the supported subset is refused with `file:line:column: what` and exit status 1, exactly as the app's `check()` would report it. `--lenient` draws what can be drawn and lists what was left out; use it to see what must be changed in the drawing program (text to outlines, `use` expanded, classes to inline attributes), not to ship.
+- To compare one picture with the design, crop the design image to it and run `morningstar-diff` on the two PNGs like any screenshot.
+
 ## From Rust
 
 The CLI is a thin wrapper over the library:

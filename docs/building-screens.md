@@ -86,7 +86,7 @@ Work top-down. Every region of the picture is one of these:
 | Status bar / home indicator margins | `SafeArea::new(screen)`; for a bar whose background runs under the system bar: `.safe_area(SafeEdges::TOP)` or `BOTTOM` on the bar |
 | Photo, illustration, logo | `Picture::new(image)` with `.size(..)`, `.radius(..)`, `.fit(ImageFit::Cover)`; register in `setup` with `setup.add_image_png(include_bytes!(..))` and keep the handle in the state |
 | Profile picture | `Avatar::new("Amina Juma").image_maybe(self.photo)` (initials when there is no image) |
-| Icon | `Icon::vector(ICON).size(20.0).color(c)`, with `const ICON: VectorIcon = VectorIcon::svg(r#"<svg viewBox=..>..</svg>"#)` pasted from the design; `Icon::new("+")` as a stand-in |
+| Icon | From a file: `Icon::svg(ICON.get()).size(20.0).color(c)`, with `static ICON: SvgAsset = SvgAsset::new(include_str!("../assets/svg/icon.svg"))`. Pasted into the source: `Icon::vector(ICON)` with `const ICON: VectorIcon = VectorIcon::svg(r#"<svg viewBox=..>..</svg>"#)`. `Icon::new("+")` as a stand-in |
 | A second typeface | `.family("Space Grotesk")` on a text; the defaults per role in `Theme { fonts: Fonts::new(body, heading), .. }` |
 | Letter spacing, capitals | `.letter_spacing(0.6)` (dp), `.uppercase()` |
 | Line height as a length | `.line_height_dp(22.0)` |
@@ -245,7 +245,14 @@ What to know:
 - **Code boxes**: one `TextInput` per box with `.max_length(1).digits_only().auto_advance().align(TextAlign::Center)`, each in a `Container::new(input).center().input_frame()`. Typing moves on, backspace moves back.
 - **Focus** comes from a tap and goes when the user taps anything else, presses the keyboard's Done, or dismisses the keyboard. The application cannot set it.
 - **Testing a form**: drive `Ui` as the engine does. `ui.pointer(..)` a tap on `ui.rect_of(id)`, then `ui.text_input(&TextInputEvent::Commit("a".into()))` per key, a `ui.frame(..)` after each, and assert on your state. `examples/fundidesk/tests/input.rs` is the model.
-- **Not there**: selection, copy and paste, moving the caret with arrow keys, autofill, composition on iOS. See [ADR 0016](architecture/0016-text-input.md).
+- **Selection and the clipboard come with the field** ([ADR 0025](architecture/0025-text-selection-and-clipboard.md)). A double tap or a long press selects a word and shows two handles and a menu (Cut · Copy · Paste · Select all, only what applies); a third tap selects everything; dragging a handle extends the selection and scrolls the field, or the `ScrollView` around it, at the edges; typing replaces the selection. A hardware keyboard's arrows, Home, End, Shift, Ctrl+arrows and Ctrl/Cmd+A, C, X, V, Z work. Your application writes nothing for any of this and still receives only the new string. What to know:
+  - **Secure fields** can be pasted into and never copied or cut from.
+  - **Pasted text passes the field's rules**: `.digits_only()` and `.max_length(n)` apply, and line breaks become spaces in a single-line field.
+  - **Without `on_input`** a field can be selected and copied from, not cut from or pasted into.
+  - **The highlight and handles are the theme's primary colour**; the menu is the theme's surface, text and divider colours. The menu's labels are English.
+  - **Your own copy button**: `out.set_clipboard(text)` in `effects`; `out.clipboard(Message::Pasted)` reads it (ask only when the user chose to paste: Android and iOS tell the user about every read).
+  - **Testing**: `Ui::testing(app)` has a clipboard of its own (`ui.clipboard()`, `ui.set_clipboard("...")`). `ui.select("field-id", 0..4)` selects, `ui.selection()` reads it, `ui.selection_menu()` and `ui.selection_handles()` say where the menu's items and the handles were drawn so a test can tap and drag them, and keys are `ui.text_input(&TextInputEvent::Move { to: CaretMove::WordRight, extend: true })`, `TextInputEvent::Paste` and so on. A paste arrives with the next frame. A double tap is two taps within 400 ms of *frame* time, so let 600 ms pass between taps that are meant to be separate. `crates/morningstar-ui/tests/selection.rs` is the model.
+- **Not there**: a magnifier, a draggable caret handle, autofill, composition on iOS. See [ADR 0016](architecture/0016-text-input.md) and [ADR 0025](architecture/0025-text-selection-and-clipboard.md).
 
 ## Screens, Back, and time
 
@@ -438,8 +445,8 @@ stack![
 `Transition::fade()`, `::slide(x, y)` (from that many of its own widths and heights away) and `::scale(from)`, with `.with_fade()`, `.exit_slide(x, y)`, `.duration(..)` and `.easing(..)`. The widget enters in the first frame it is in the view and leaves in the first frame it is not: you just stop returning it, and it is still drawn, over the screen where it was, until it is gone. While leaving it takes no room and no taps.
 
 - **CSS**: `transition: transform .16s ease-out, background .16s` is `.animate(Duration::from_millis(160), Easing::EaseOut)`. There are no keyframes, delays or springs.
-- **`.opacity(x)` fades each thing drawn**, so shapes that overlap inside a faded box show through one another. For a fade in or out that is right; do not use it to hold a busy group at half strength.
-- **Reduce motion**: `ui.set_reduce_motion(true)` makes all of this instant, and `viewport.reduce_motion` tells a view. (The hosts do not pass the system setting on yet.)
+- **`.opacity(x)` is a group opacity**, as CSS `opacity` is: a card held at half strength is half of the finished card, and its label does not let its background show through ([ADR 0028](architecture/0028-group-opacity-layers.md)). A widget whose parts overlap (a background with something on it, a box on its shadow, a `stack!`) is drawn through an offscreen layer while it is below 1, which costs two render passes and a surface-sized target; one that does not overlap itself (a text, a picture, a plain box, a row of those) costs nothing extra. So fade the smallest thing that needs fading, and for a single-coloured box prefer the colour's own alpha.
+- **Reduce motion**: when the user has switched animations off in the system's settings (Android's "remove animations", iOS's "reduce motion") all of this is instant, without the application doing anything; the hosts report the setting ([ADR 0026](architecture/0026-system-bars-and-reduce-motion.md)). `viewport.reduce_motion` tells a view, and `ui.set_reduce_motion(true)` forces it on for an app with a switch of its own, or for a test.
 - **Testing**: build frames at chosen times and assert on `ui.rect_of(id)` or on the display list. `frame.redraw_requested()` is true while something moves and false on the frame that shows the end. `crates/morningstar-ui/tests/adaptive.rs` is the model, including a pixel test of intermediate frames (`screenshot_frame(&mut ui, &info.with_elapsed(..))`).
 - **Screenshots of a screen with a transition**: a widget with one fades or slides in on the first frame it is seen. Build a frame, then build the one you capture a second later (`info.with_elapsed(Duration::from_secs(1))`).
 
@@ -705,11 +712,12 @@ Each of these produces a wrong picture, not an error.
 - **`Message` must be `Clone`** (`#[derive(Clone)]`).
 - **The macro is `col!`**, not `column!` (that name belongs to the standard library).
 - **Dynamic strings are `String`s**: `text(format!("{count} items"))`. A borrowed `&str` from state does not compile; literals do.
-- **Icons are not in the font.** Use `Icon::vector`. Only a small subset of SVG is accepted (`path`, `circle`, `rect`, `line`; one colour; no groups, transforms or opacity) and an icon outside it draws nothing: put the icon set in one file and test every icon with `VectorIcon::check()`.
+- **Icons are not in the font.** Load the icon's SVG file with `SvgAsset` and draw it with `Icon::svg`, or paste one-colour markup into a `VectorIcon` for `Icon::vector` (a smaller subset: `path`, `circle`, `rect`, `line`; no groups, transforms or opacity). Either way an icon that does not load draws nothing: put the icon set in one file and test every icon with `check()`.
 - **A font family that was not added falls back silently.** Check with `setup.has_font_family("Inter")`.
 - **Arabic and other right-to-left text**: shaped and ordered correctly, but give it `.fill_width()` so it has a box to align in. Layout itself is never mirrored.
 - **A widget with `.animate(..)` or `.transition(..)` needs an `.id(..)`** that stays the same while it changes; without one its identity is its place in the tree, and a sibling appearing before it makes it "a different widget".
-- **Not available yet**: text selection, copy and paste; keyframes, springs and group opacity; overscroll bounce; horizontal scrolling, ellipsis, per-corner radii, per-side borders (use a `Divider`), a tap target inside a sentence.
+- **The system's bars** (clock, battery, the gesture handle) are drawn over your screen. Their icons are dark over a light theme background and light over a dark one, by themselves. A screen whose top or bottom is not the theme's background says so: `fn system_bars(&self) -> Option<SystemBars>` on the `Application`, returning `Some(SystemBars::LIGHT_CONTENT)` (light icons, for a dark screen), `Some(SystemBars::DARK_CONTENT)`, or a `SystemBars { status, navigation }` of its own, and `None` everywhere else. `examples/fundidesk` does it for its green splash.
+- **Not available yet**: keyframes and springs; overscroll bounce; horizontal scrolling, ellipsis, per-corner radii, per-side borders (use a `Divider`), a tap target inside a sentence.
 
 ## From HTML/CSS or a design tool's inspector
 
@@ -744,7 +752,8 @@ Learned reproducing a real twelve-screen design (`examples/fundidesk`, [ADR 0015
 | `text-align: center` | `.centered().fill_width()` |
 | `color: ..` on a parent | pass the colour to each text and icon; nothing is inherited |
 | `<span style="font-weight: 600">` inside a paragraph | `Text::rich([span(".."), span("..").semibold()])` |
-| `<svg viewBox=.. stroke="currentColor" ..>` | a `VectorIcon::svg(..)` constant; `Icon::vector(X).size(w).color(c)`; another `stroke-width` on the same drawing: `.stroke_width(2.4)` |
+| `<svg viewBox=.. stroke="currentColor" ..>` | the file as an `SvgAsset`, `Icon::svg(X.get()).size(w).color(c)`; or a `VectorIcon::svg(..)` constant with `Icon::vector(X)`, which can also redraw the same outline with another width: `.stroke_width(2.4)` |
+| `<svg>` with several colours, groups, gradients, a `clip-path` | the file as an `SvgAsset`, `Picture::svg(X.get())` (below) |
 | an `<svg>` with two colours | a `VectorPicture` constant and `Picture::vector(X)` (see "Turned things, illustrations and text effects" below); for a plate with a mark on it, a box with an icon over it is still simpler |
 | `transform: rotate(-8deg)` | `.rotate(-8.0)` on the widget |
 | `transform: rotate(5deg) translateY(-8px)` | `.transform(Transform::rotate(5.0).and_translate(0.0, -8.0))` |
@@ -753,6 +762,7 @@ Learned reproducing a real twelve-screen design (`examples/fundidesk`, [ADR 0015
 | `-webkit-text-stroke: 1.5px #FFF` | `.outline(1.5, hex(0xFFFFFF))` |
 | `font-variant-numeric: tabular-nums` | `.tabular_nums()` |
 | `opacity: 0.8` on a box with one colour | the colour with that alpha: `with_alpha(c, 0.8)` |
+| `opacity: 0.8` on a box with children | `.opacity(0.8)` on the container: the group fades as one, as in CSS |
 | `<input>`, `<textarea>` | a `Container` around a `TextInput` (see "A form") |
 | `<a href>`, `<button>` | `.on_press(Message::..)` on the box |
 
@@ -836,7 +846,7 @@ What to know:
 - **It may overlap and may be clipped.** A turned tile sticks out of its room by up to half its diagonal. Inside a `.clip()` box or a scroll view it is cut at that box's edge, as `overflow: hidden` would; leave padding if the design shows the corners.
 - **A box that clips can itself be turned** (`.clip().rotate(..)`): its children are cut to the turned, rounded shape. One such clip is exact at a time; do not nest clipping boxes inside a turned clipping box.
 - **Do not put a `ScrollView` inside a turned widget.** A turned widget inside a scroll view is fine.
-- **Turned text and pictures are slightly softer** than upright ones (they are resampled). It does not show at the few degrees designs use.
+- **Turned text is as sharp as upright text**: its glyphs are rasterised for the angle ([ADR 0029](architecture/0029-turned-text.md)). While a rotation or scale is *animating* it is drawn the cheaper way, a little softer, and sharpens one frame after it stops. **Turned icons and pictures are slightly softer** than upright ones (they are resampled); it does not show at the few degrees designs use, and a picture can be turned sharply by rotating its layers, or the SVG's own `transform`, instead of the widget.
 - A transform that only moves (`Transform::translate`) is the same as `.offset(x, y)`.
 
 ### Italic
@@ -850,9 +860,31 @@ text("\u{201c}Sorry, could you say that slower?\u{201d}").italic().align(TextAli
 Text::rich([span("could you say that "), span("slower").italic(), span("?")])
 ```
 
-### An illustration in several colours, from inline SVG
+### An illustration or an icon from an SVG file
 
-A `VectorIcon` is one colour. For anything else, transcribe the SVG into a `VectorPicture`: a view box and a list of `Layer`s painted in order. It is a constant; every method is `const`.
+**Load the SVG.** Save the designer's file (or the inline `<svg>` of the design's HTML, with `xmlns` added) under the app's `assets/svg`, and name it once in a `static` ([ADR 0027](architecture/0027-svg-loading.md)):
+
+```rust
+/// `<svg width="250" height="250" viewBox="0 0 280 280">`: the vinyl disc.
+pub static DISC: SvgAsset = SvgAsset::new(include_str!("../../assets/svg/disc.svg"));
+static BELL: SvgAsset = SvgAsset::new(include_str!("../../assets/svg/bell.svg"));
+
+// In the view. With no size, a picture is as many dp as the file's
+// `width` and `height` say (its view box where they are absent).
+Picture::svg(DISC.get()).size(250.0, 250.0)
+// One-colour files are icons: any colour, any size, in text's draw call.
+Icon::svg(BELL.get()).size(26.0).color(GREY)
+```
+
+- The file is parsed the first time `get()` is called and kept; never call `SvgPicture::parse` from a view. A file that arrives at run time (from a server) is parsed once, where it arrives, and the `SvgPicture` kept in the app's state; it is a cheap handle to clone.
+- **Test every asset**: `assert!(DISC.check().is_ok(), "{:?}", DISC.check())`. A file that does not load draws nothing; `check()` says what is wrong and where (`SVG line 3, column 5: <text> is not supported`).
+- **Look at a file before it is in the app**: `cargo run -q -p morningstar-devtools --bin morningstar-svg -- assets/svg/disc.svg out/disc.png --scale 3 --background checker`. It prints whether the file is single-ink, and refuses with `file:line:column` what the loader refuses; `--lenient` draws the rest and lists what was left out, to see how far a file is from loading.
+- What loads: `path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, `polygon`, groups with inherited attributes, `transform`, `opacity` (of the group as a whole), `clipPath`, linear and radial gradients, dashes, `style="..."` attributes, hex, `rgb()` and named colours. What does not, and is an error rather than a gap: `text` (convert it to outlines in the drawing program), `use` (expand it), `mask`, `filter`, `image`, `pattern`, `<style>` blocks and classes (export with presentation attributes or inline styles), units other than `px`. The whole list is on `SvgPicture`.
+- **A design export may not be SVG as written.** The CallReady export spells `viewBox` as `sc-camel-view-box` and puts the page's CSS (`position`, a CSS `transform`) in a `style` on the root: fix those in the file you save (`viewBox`; drop the root's `style` and apply a CSS transform with `.rotate(..)` on the widget). The loader does not guess.
+- `currentColor` in a file is the colour of `picture.with_current_color(c)` (black unless set), or of `Icon::svg(..).color(c)`. A file painted in one colour throughout, literal or `currentColor`, is *single-ink*: `Icon::svg` draws it in the icon's colour from one mask, like a `VectorIcon`. A file with several colours keeps them in `Icon::svg`, with only `currentColor` following the icon's colour, and costs a picture. `Picture::svg(..)` always keeps the file's colours; `.tint(..)` multiplies them.
+- Costs are a picture's (below): an image per distinct picture and pixel size, usually its own draw call. Single-ink icons through `Icon::svg` cost what glyphs cost.
+
+**The manual route remains** for a drawing that is easier to write than to draw (a ring, stripes, an ellipse outline; see "Things that are pictures" below), for one computed from constants, and as the fallback for a file the loader refuses: transcribe the SVG into a `VectorPicture`, a view box and a list of `Layer`s painted in order. It is a constant; every method is `const`. `VectorIcon::svg` likewise remains for one-colour markup pasted into the source.
 
 ```rust
 // <svg width="250" height="250" viewBox="0 0 280 280">
@@ -917,7 +949,8 @@ Picture::vector(DISC).size(250.0, 250.0)
 | `clip-path="url(#id)"` on the element or its `<g>` | `.clip(Shape::..)`, `.clip_circle(cx, cy, r)` or `.clip_rect(x, y, w, h)` with the `<clipPath>`'s shape. The clip is in view-box coordinates and is **not** moved by the layer's own transform, which is what a clip on an enclosing `<g>` means |
 | attributes on a `<g>` or on the `<svg>` | repeat them on each layer inside; nothing is inherited |
 | `currentColor` | the colour it stands for; a picture has no "current colour" (use `.tint(..)` on the `Picture` to multiply the whole picture by a colour) |
-| gradients, `<mask>`, `<pattern>`, dashes, `<text>` | not available |
+| gradients, dashes | not in a `VectorPicture`: load the file with `SvgPicture` instead |
+| `<mask>`, `<pattern>`, `<text>` | not available |
 
 Things that are pictures although the design draws them with CSS:
 
@@ -928,7 +961,7 @@ Things that are pictures although the design draws them with CSS:
 
 What to know:
 
-- Run `PICTURE.check()` over every picture in a unit test. A layer whose path does not parse is skipped silently otherwise.
+- Run `PICTURE.check()` (and `ASSET.check()` for a loaded file) over every picture in a unit test. A layer whose path does not parse is skipped silently otherwise.
 - A picture is rasterised once for the pixel size it is drawn at and cached; each *distinct* picture on screen is an image of `4 * width * height` bytes in pixels (2 MB for a 250 dp disc on a 2.8x phone) and usually its own draw call. That is fine for a handful of illustrations per screen. **Do not use a picture where a box will do** (a circle, a pill, a bordered tile, a one-colour icon): boxes and icons cost nothing extra.
 - A picture always shows its whole view box, centred in its box; make the box the view box's shape. `.radius(..)`, `.tint(..)`, `.rotate(..)` work as on any picture. To turn a picture by a fixed angle and keep it sharp, `.rotate` its layers instead of the widget.
 - Layers are `'static` data: a drawing that depends on state (a progress ring) cannot be one picture. Draw the changing part with boxes, or keep one constant per state.

@@ -104,6 +104,7 @@ Dependency direction is one-way: `core` ← `gpu`, `text`, `layout` ← `runtime
 cargo test --workspace                 # host tests, including pixel tests on the real GPU
 cargo run -p hello-gpu --example screenshot out/   # render the app to PNGs; look at them
 cargo run -q -p morningstar-devtools --bin morningstar-diff -- design.png out/idle.png --out heat.png
+cargo run -q -p morningstar-devtools --bin morningstar-svg -- art.svg out/art.png --scale 3   # an SVG file as an app would draw it
 cargo clippy --workspace --all-targets
 cargo ndk -t arm64-v8a clippy -p hello-gpu   # type-check and lint the Android code
 tools/build-android.sh [--install]     # APK (MORNINGSTAR_APP=showcase, MORNINGSTAR_ABIS=arm64-v8a)

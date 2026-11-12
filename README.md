@@ -12,6 +12,8 @@ One Rust codebase. A custom UI engine and renderer owned by Morningstar. Thin na
 - **Text** with proper shaping, word wrapping, alignment, font families and weights, mixed styles in one sentence, letter spacing, and right-to-left scripts such as Arabic, using fonts the app bundles.
 - **Vector icons** from SVG path data, crisp at any size and colour.
 - **Text input** with the system keyboard on Android: focus, caret, keyboard types, Next/Done, keyboard avoidance.
+- **Selection and the clipboard** in every text field, drawn by the framework: double tap and long press, two handles, a Cut · Copy · Paste · Select all menu, caret keys and shortcuts of a hardware keyboard, undo. Host-tested; not yet tried on a device.
+- **System bars and motion follow the app and the user**: light or dark status and navigation icons from the theme (or per screen), and animations off when the system's "reduce motion" is on. Host-tested; not yet tried on a device.
 - **A runtime** that handles app lifecycle, surface loss and recreation, frame pacing and frame statistics.
 - **Touch input** delivered from both platforms to shared Rust code.
 - **Thin hosts** for Android (Java) and iOS (Swift) that contain no application logic.
@@ -150,7 +152,7 @@ open templates/ios/MorningstarHost.xcodeproj     # select a device, set a signin
 ## Next steps
 
 1. **Run it on iOS.** The Swift host has never been compiled.
-2. **Text selection, copy and paste**, and composition on iOS. Typing itself works on Android.
+2. **Try text selection on a phone.** Selection handles, the Cut · Copy · Paste · Select all menu, the clipboard, caret keys and undo are built and tested on the host ([ADR 0025](docs/architecture/0025-text-selection-and-clipboard.md)), as are light or dark system-bar icons and the platform's "reduce motion" setting ([ADR 0026](docs/architecture/0026-system-bars-and-reduce-motion.md)); none of it has been touched by a finger yet. Then composition on iOS, a magnifier, and translated menu labels.
 3. **Match browser anti-aliasing and shadows**, the main remaining gap between a render and a design.
 4. **Measure on the phone again** with the full shader and images: frame times, memory, and scrolling by hand.
 5. **Accessibility tree, animation API, list virtualisation, right-to-left layout.**
