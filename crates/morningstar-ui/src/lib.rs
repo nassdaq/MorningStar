@@ -235,6 +235,32 @@
 //! ("the server replies this"). ADR 0019; `docs/building-screens.md` has a
 //! complete example.
 //!
+//! # Accessibility
+//!
+//! When TalkBack or VoiceOver is running (the host says so), each frame is
+//! also described as a tree of semantic nodes derived from its widgets,
+//! and the host mirrors it to the platform (ADR 0032). The defaults need
+//! nothing: a [`Text`] is text, a [`Button`] a button with its label, a
+//! [`TextInput`] an edit box with its placeholder as hint (a secure
+//! field's value is bullets, never its characters), a [`ScrollView`] a
+//! list, and any box with `on_press` is one stop that reads the texts
+//! inside it in order. Icons, pictures and shapes say nothing.
+//!
+//! What the defaults cannot know is said with modifiers every widget has:
+//! `label` (required for a control with no text inside it), `hint`,
+//! `value`, `role`, `heading`, `selected`, `checked`, `expanded`,
+//! `disabled`, `live`, `exclude_semantics`, `merge_semantics` and
+//! `semantics_group`; on [`Text`] and [`TextInput`], where `label` and
+//! `role` mean the text style, they are `semantic_label` and
+//! `semantic_role`. [`Effects::announce`] has the reader say something
+//! that is not on the screen.
+//!
+//! In a test, [`Ui::set_accessibility`] turns the description on,
+//! [`Ui::semantics`] is the tree, [`Ui::perform`] does what a screen
+//! reader's user can do, and [`Ui::accessibility_issues`] lists missing
+//! labels, small touch targets, twins and low contrast. While nothing asks
+//! for it, none of this is built.
+//!
 //! # Touch
 //!
 //! A tap is a finger going down and coming up on the same pressable. If
@@ -268,6 +294,7 @@ mod element;
 mod motion;
 mod navigator;
 mod scroll;
+mod semantics;
 mod theme;
 mod ui;
 mod viewport;
@@ -282,10 +309,12 @@ pub use element::{
 pub use motion::{Animation, Easing, Transition};
 pub use navigator::{Navigation, Navigator};
 pub use scroll::ScrollTo;
+pub use semantics::{AccessibilityIssue, IssueKind};
 pub use theme::{Colors, Fonts, Radii, Spacing, TextRole, TextSpec, Theme, TypeScale};
 pub use ui::{Application, Overflow, Ui};
 pub use viewport::Viewport;
 
+pub use morningstar_core::{Action, Actions, Live, Role, SemanticsNode, SemanticsTree, States};
 pub use morningstar_core::{
     AudioClip, AudioError, HostState, HttpError, HttpMethod, HttpRequest, HttpResponse, Recording,
     ServiceCall, ServiceId, ServiceRequest, ServiceResult,
@@ -302,6 +331,7 @@ pub use morningstar_runtime::{
 
 /// Everything a screen is written with: `use morningstar::ui::prelude::*;`.
 pub mod prelude {
+    pub use crate::{Action, Live, Role};
     pub use crate::{
         Align, Alignment, Application, Avatar, Button, Capitalization, Color, ColorRef, Colors,
         Column, Container, CrossAlign, Divider, Element, FontFamily, Fonts, Gradient, Icon, Image,

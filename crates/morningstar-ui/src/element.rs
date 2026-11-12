@@ -16,7 +16,9 @@ use morningstar_runtime::{
 use crate::color::{ColorRef, ThemeColor};
 use crate::edit::{self, EditConfig};
 use crate::motion::{Animation, Easing, Motion, Transition};
+use crate::semantics::{SemFlags, Semantics};
 use crate::theme::TextRole;
+use morningstar_core::Role;
 
 /// Hashes an explicit widget id. Deterministic across runs and platforms.
 pub(crate) fn key_hash(id: impl Hash) -> u64 {
@@ -272,6 +274,141 @@ macro_rules! motion_methods {
     };
 }
 
+/// Accessibility methods shared by every widget (ADR 0032). Expects the
+/// type to have a `sem: Semantics` field.
+macro_rules! semantics_methods {
+    () => {
+        /// What a screen reader calls this widget, instead of the text
+        /// inside it. The same as `label(..)` on the widgets that have
+        /// it; this name exists because on [`Text`] and [`TextInput`]
+        /// `label` and `role` already mean the text style.
+        pub fn semantic_label(mut self, label: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+            self.sem.text_mut().label = Some(label.into());
+            self
+        }
+
+        /// What the widget is to a screen reader, when the default (a
+        /// tappable box is a button, a text is text) is not right:
+        /// `Role::Tab`, `Role::Switch`, `Role::Progress`.
+        pub fn semantic_role(mut self, role: morningstar_core::Role) -> Self {
+            self.sem.flags.role = Some(role);
+            self
+        }
+
+        /// Marks the widget as a heading, which a screen reader's user
+        /// can jump between. Short for `semantic_role(Role::Heading)`.
+        pub fn heading(self) -> Self {
+            self.semantic_role(morningstar_core::Role::Heading)
+        }
+
+        /// What the widget is for, spoken after its label and a pause:
+        /// "Opens the report".
+        pub fn hint(mut self, hint: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+            self.sem.text_mut().hint = Some(hint.into());
+            self
+        }
+
+        /// What the widget shows now, spoken after its label: a progress
+        /// bar's "72 percent", a score's "81 out of 100".
+        pub fn value(mut self, value: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+            self.sem.text_mut().value = Some(value.into());
+            self
+        }
+
+        /// Says whether this is the chosen one among its siblings: the
+        /// current tab, the picked chip or plan. Spoken as "selected".
+        pub fn selected(mut self, selected: bool) -> Self {
+            self.sem.flags.set(SemFlags::SELECTABLE, true);
+            self.sem.flags.set(SemFlags::SELECTED, selected);
+            self
+        }
+
+        /// Says that this can be ticked and whether it is: a checkbox, a
+        /// switch. Spoken as "checked" or "not checked". Without a role
+        /// of its own the widget becomes a [`Role::Checkbox`](morningstar_core::Role::Checkbox).
+        pub fn checked(mut self, checked: bool) -> Self {
+            self.sem.flags.set(SemFlags::CHECKABLE, true);
+            self.sem.flags.set(SemFlags::CHECKED, checked);
+            self
+        }
+
+        /// Says that this opens and closes and which it is now. Spoken as
+        /// "expanded" or "collapsed".
+        pub fn expanded(mut self, expanded: bool) -> Self {
+            self.sem.flags.set(SemFlags::EXPANDABLE, true);
+            self.sem.flags.set(SemFlags::EXPANDED, expanded);
+            self
+        }
+
+        /// Says that this cannot be operated now. A [`Button`] without
+        /// `on_press` says so by itself; this is for a control built
+        /// from a box that is drawn greyed out.
+        pub fn disabled(mut self, disabled: bool) -> Self {
+            self.sem.flags.set(SemFlags::DISABLED, disabled);
+            self
+        }
+
+        /// Has a screen reader announce what this widget says whenever it
+        /// changes, without the user going to it: the caller's new line,
+        /// "Recording…", an error under a field.
+        pub fn live(mut self, live: morningstar_core::Live) -> Self {
+            self.sem.flags.set(
+                SemFlags::LIVE_POLITE,
+                live == morningstar_core::Live::Polite,
+            );
+            self.sem.flags.set(
+                SemFlags::LIVE_ASSERTIVE,
+                live == morningstar_core::Live::Assertive,
+            );
+            self
+        }
+
+        /// Hides the widget, and everything inside it, from screen
+        /// readers: for decoration that would only be noise.
+        pub fn exclude_semantics(mut self) -> Self {
+            self.sem.flags.set(SemFlags::EXCLUDE, true);
+            self
+        }
+
+        /// Makes the widget one stop for a screen reader: the texts inside
+        /// it are read together as its label, in order. A tappable box
+        /// does this by itself; this is for a card or a row of facts that
+        /// is not tappable ("Calls, 12").
+        pub fn merge_semantics(mut self) -> Self {
+            self.sem.flags.set(SemFlags::MERGE, true);
+            self
+        }
+
+        /// Makes the widget a container for a screen reader, keeping what
+        /// is inside it as separate stops: a named region, a group of
+        /// radio buttons. With a label it is announced when the reader
+        /// enters it.
+        pub fn semantics_group(mut self) -> Self {
+            self.sem.flags.set(SemFlags::GROUP, true);
+            self
+        }
+    };
+}
+
+/// `label` and `role` for the widgets on which those names are free.
+macro_rules! semantics_short_methods {
+    () => {
+        /// What a screen reader calls this widget. Required for a control
+        /// with no text inside it (an icon button): "Back", "Close",
+        /// "Notifications". On a box with text inside it, replaces that
+        /// text.
+        pub fn label(self, label: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+            self.semantic_label(label)
+        }
+
+        /// What the widget is to a screen reader: see
+        /// [`semantic_role`](Self::semantic_role).
+        pub fn role(self, role: morningstar_core::Role) -> Self {
+            self.semantic_role(role)
+        }
+    };
+}
+
 /// `size(width, height)` for widgets where "size" means the box (on
 /// [`Text`] it means the font size).
 macro_rules! box_size_method {
@@ -293,6 +430,8 @@ pub struct Element<M> {
     pub(crate) key: Option<u64>,
     /// In dp, about the element's centre.
     pub(crate) transform: Option<Transform>,
+    /// What the element means to assistive technology (ADR 0032).
+    pub(crate) sem: Semantics,
     pub(crate) motion: Motion,
     pub(crate) kind: Kind<M>,
 }
@@ -312,6 +451,8 @@ impl<M> Element<M> {
     layout_methods!();
     box_size_method!();
     motion_methods!();
+    semantics_methods!();
+    semantics_short_methods!();
 
     /// Converts the messages this subtree produces, so a view written for
     /// one message type can be embedded in a parent with another:
@@ -330,6 +471,7 @@ impl<M> Element<M> {
             layout: self.layout,
             key: self.key,
             transform: self.transform,
+            sem: self.sem,
             motion: self.motion,
             kind: match self.kind {
                 Kind::Text(text) => Kind::Text(text),
@@ -348,6 +490,7 @@ impl<M> Element<M> {
                         Arc::new(move |value| convert(handler(value)))
                     }),
                     on_submit: input.on_submit.map(convert),
+                    hint: input.hint,
                 }),
                 Kind::Box(node) => Kind::Box(BoxNode {
                     axis: node.axis,
@@ -371,6 +514,12 @@ impl<M> Element<M> {
                     field: node.field,
                     focused_border: node.focused_border,
                     focused_fill: node.focused_fill,
+                    adjust: node.adjust.map(|adjust| {
+                        Box::new(Adjust {
+                            increment: adjust.increment.map(convert),
+                            decrement: adjust.decrement.map(convert),
+                        })
+                    }),
                 }),
             },
         }
@@ -426,6 +575,15 @@ pub(crate) struct BoxNode<M> {
     /// Border and background while that input has focus.
     pub focused_border: Option<(f32, ColorRef)>,
     pub focused_fill: Option<ColorRef>,
+    /// The messages of the accessibility actions "increment" and
+    /// "decrement". Boxed: almost no box has them.
+    pub adjust: Option<Box<Adjust<M>>>,
+}
+
+/// What raising and lowering a value sends.
+pub(crate) struct Adjust<M> {
+    pub increment: Option<M>,
+    pub decrement: Option<M>,
 }
 
 impl<M> BoxNode<M> {
@@ -448,6 +606,7 @@ impl<M> BoxNode<M> {
             field: false,
             focused_border: None,
             focused_fill: None,
+            adjust: None,
         }
     }
 }
@@ -494,6 +653,9 @@ pub(crate) struct InputNode<M> {
     pub caret_color: ColorRef,
     pub on_input: Option<InputHandler<M>>,
     pub on_submit: Option<M>,
+    /// The placeholder, while the field is not empty (while it is,
+    /// `text` shows it): what a screen reader gives as the field's hint.
+    pub hint: Cow<'static, str>,
 }
 
 /// A line height as designs give it: a multiple of the font size, or a
@@ -731,6 +893,7 @@ pub struct Container<M> {
     layout: Style,
     key: Option<u64>,
     transform: Option<Transform>,
+    sem: Semantics,
     motion: Motion,
     node: BoxNode<M>,
 }
@@ -741,6 +904,7 @@ impl<M> Container<M> {
             layout: Style::new(),
             key: None,
             transform: None,
+            sem: Semantics::NONE,
             motion: Motion::PLAIN,
             node: BoxNode::new(axis),
         }
@@ -762,6 +926,40 @@ impl<M> Container<M> {
     layout_methods!();
     box_size_method!();
     motion_methods!();
+    semantics_methods!();
+    semantics_short_methods!();
+
+    /// What the accessibility action "increment" sends: for a value that
+    /// is raised and lowered (a stepper, a slider). The box then offers
+    /// the action to assistive technology; give it `Role::Slider` and a
+    /// [`value`](Self::value).
+    pub fn on_increment(mut self, message: M) -> Self {
+        self.node
+            .adjust
+            .get_or_insert_with(|| {
+                Box::new(Adjust {
+                    increment: None,
+                    decrement: None,
+                })
+            })
+            .increment = Some(message);
+        self
+    }
+
+    /// What the accessibility action "decrement" sends. See
+    /// [`on_increment`](Self::on_increment).
+    pub fn on_decrement(mut self, message: M) -> Self {
+        self.node
+            .adjust
+            .get_or_insert_with(|| {
+                Box::new(Adjust {
+                    increment: None,
+                    decrement: None,
+                })
+            })
+            .decrement = Some(message);
+        self
+    }
 
     /// Adds a child after the existing ones.
     pub fn push(mut self, child: impl Into<Element<M>>) -> Self {
@@ -1018,6 +1216,7 @@ impl<M> From<Container<M>> for Element<M> {
             layout: container.layout,
             key: container.key,
             transform: container.transform,
+            sem: container.sem,
             motion: container.motion,
             kind: Kind::Box(container.node),
         }
@@ -1184,6 +1383,7 @@ pub struct Text {
     layout: Style,
     key: Option<u64>,
     transform: Option<Transform>,
+    sem: Semantics,
     pub(crate) node: TextNode,
 }
 
@@ -1194,6 +1394,7 @@ impl Text {
             layout: Style::new(),
             key: None,
             transform: None,
+            sem: Semantics::NONE,
             node: TextNode {
                 content: content.into(),
                 spans: Vec::new(),
@@ -1237,6 +1438,7 @@ impl Text {
     }
 
     layout_methods!();
+    semantics_methods!();
 
     /// Uses a step of the theme's type scale (size, weight and line
     /// height). Calls to `size`, `weight` and `line_height` override parts
@@ -1427,6 +1629,7 @@ impl<M> From<Text> for Element<M> {
             layout: text.layout,
             key: text.key,
             transform: text.transform,
+            sem: text.sem,
             motion: Motion::PLAIN,
             kind: Kind::Text(text.node),
         }
@@ -1538,6 +1741,7 @@ pub struct TextInput<M> {
     layout: Style,
     key: Option<u64>,
     transform: Option<Transform>,
+    sem: Semantics,
     value: String,
     placeholder: Cow<'static, str>,
     placeholder_color: ColorRef,
@@ -1561,6 +1765,7 @@ impl<M> TextInput<M> {
             layout: Style::new().width(Sizing::FILL),
             key: None,
             transform: None,
+            sem: Semantics::NONE,
             value: value.into(),
             placeholder: Cow::Borrowed(""),
             placeholder_color: ColorRef::Token(ThemeColor::TextMuted),
@@ -1580,6 +1785,7 @@ impl<M> TextInput<M> {
     }
 
     layout_methods!();
+    semantics_methods!();
 
     /// Shown, in the [`placeholder_color`](Self::placeholder_color), while
     /// the value is empty.
@@ -1784,11 +1990,13 @@ impl<M> From<TextInput<M>> for Element<M> {
     fn from(input: TextInput<M>) -> Self {
         let empty = input.value.is_empty();
         let mut text = input.style;
+        let mut hint = Cow::Borrowed("");
         if empty {
             text.content = input.placeholder;
             text.color = input.placeholder_color;
         } else {
             text.content = Cow::Owned(edit::display(&input.value, input.secure).into_owned());
+            hint = input.placeholder;
         }
         let mut traits = input.traits;
         traits.secure = input.secure;
@@ -1800,6 +2008,7 @@ impl<M> From<TextInput<M>> for Element<M> {
             layout: input.layout,
             key: input.key,
             transform: input.transform,
+            sem: input.sem,
             motion: Motion::PLAIN,
             kind: Kind::Input(InputNode {
                 text,
@@ -1812,6 +2021,7 @@ impl<M> From<TextInput<M>> for Element<M> {
                 caret_color: input.caret_color,
                 on_input: input.on_input,
                 on_submit: input.on_submit,
+                hint,
             }),
         }
     }
@@ -1846,6 +2056,7 @@ pub struct Button<M> {
     layout: Style,
     key: Option<u64>,
     transform: Option<Transform>,
+    sem: Semantics,
     label: Cow<'static, str>,
     on_press: Option<M>,
     kind: ButtonKind,
@@ -1862,6 +2073,7 @@ impl<M> Button<M> {
                 .content_align(Alignment::CENTER),
             key: None,
             transform: None,
+            sem: Semantics::NONE,
             label: label.into(),
             on_press: None,
             kind: ButtonKind::Primary,
@@ -1870,6 +2082,8 @@ impl<M> Button<M> {
     }
 
     layout_methods!();
+    semantics_methods!();
+    semantics_short_methods!();
     box_size_method!();
 
     /// The message a tap delivers.
@@ -1950,10 +2164,17 @@ impl<M> From<Button<M>> for Element<M> {
         node.border = border.map(|color| (1.0, color));
         node.radius = button.radius;
         node.on_press = button.on_press;
+        // A button says it is one even when it can do nothing.
+        let mut sem = button.sem;
+        sem.flags.role.get_or_insert(Role::Button);
+        if !enabled {
+            sem.flags.bits |= SemFlags::DISABLED;
+        }
         Self {
             layout: button.layout,
             key: button.key,
             transform: button.transform,
+            sem,
             motion: Motion::PLAIN,
             kind: Kind::Box(node),
         }
@@ -2113,6 +2334,7 @@ pub struct Picture {
     layout: Style,
     key: Option<u64>,
     transform: Option<Transform>,
+    sem: Semantics,
     node: ImageNode,
 }
 
@@ -2123,6 +2345,7 @@ impl Picture {
             layout: Style::new(),
             key: None,
             transform: None,
+            sem: Semantics::NONE,
             node: ImageNode {
                 source: PictureSource::Image(image),
                 fit: ImageFit::Cover,
@@ -2138,6 +2361,7 @@ impl Picture {
             layout: Style::new(),
             key: None,
             transform: None,
+            sem: Semantics::NONE,
             node: ImageNode {
                 source: PictureSource::Vector(picture),
                 fit: ImageFit::Contain,
@@ -2172,6 +2396,7 @@ impl Picture {
             layout: Style::new(),
             key: None,
             transform: None,
+            sem: Semantics::NONE,
             node: ImageNode {
                 source: PictureSource::Svg(picture.clone()),
                 fit: ImageFit::Contain,
@@ -2182,6 +2407,8 @@ impl Picture {
     }
 
     layout_methods!();
+    semantics_methods!();
+    semantics_short_methods!();
     box_size_method!();
 
     /// How the image fills a box of a different shape.
@@ -2232,6 +2459,7 @@ impl<M> From<Picture> for Element<M> {
             layout,
             key: picture.key,
             transform: picture.transform,
+            sem: picture.sem,
             motion: Motion::PLAIN,
             kind: Kind::Image(picture.node),
         }
@@ -2244,6 +2472,7 @@ pub struct Avatar {
     layout: Style,
     key: Option<u64>,
     transform: Option<Transform>,
+    sem: Semantics,
     initials: String,
     image: Option<Image>,
     diameter: f32,
@@ -2264,6 +2493,7 @@ impl Avatar {
             layout: Style::new(),
             key: None,
             transform: None,
+            sem: Semantics::NONE,
             initials,
             image: None,
             diameter: 40.0,
@@ -2273,6 +2503,8 @@ impl Avatar {
     }
 
     layout_methods!();
+    semantics_methods!();
+    semantics_short_methods!();
 
     /// Diameter in dp (40 by default). The initials scale with it.
     pub fn size(mut self, dp: f32) -> Self {
@@ -2317,14 +2549,18 @@ impl<M> From<Avatar> for Element<M> {
             };
             picture.key = avatar.key;
             picture.transform = avatar.transform;
+            picture.sem = avatar.sem;
             return picture.into();
         }
         let mut tile: Container<M> = Container::new(
+            // The initials are a picture of the person, not a word: the
+            // avatar says something only if it is given a label.
             Text::new(avatar.initials)
                 .size(avatar.diameter * 0.38)
                 .line_height(1.2)
                 .semibold()
-                .color(avatar.color),
+                .color(avatar.color)
+                .exclude_semantics(),
         )
         .radius(avatar.diameter)
         .background(avatar.background);
@@ -2336,6 +2572,7 @@ impl<M> From<Avatar> for Element<M> {
         };
         tile.key = avatar.key;
         tile.transform = avatar.transform;
+        tile.sem = avatar.sem;
         tile.into()
     }
 }
@@ -2369,6 +2606,7 @@ pub struct Icon {
     layout: Style,
     key: Option<u64>,
     transform: Option<Transform>,
+    sem: Semantics,
     glyph: Cow<'static, str>,
     vector: Option<VectorIcon>,
     svg: Option<SvgPicture>,
@@ -2388,6 +2626,7 @@ impl Icon {
             layout: Style::new(),
             key: None,
             transform: None,
+            sem: Semantics::NONE,
             glyph: glyph.into(),
             vector: None,
             svg: None,
@@ -2432,6 +2671,8 @@ impl Icon {
     }
 
     layout_methods!();
+    semantics_methods!();
+    semantics_short_methods!();
 
     /// Side length in dp: of the icon itself, or of the tile when there is
     /// one (40 by default for a glyph tile, 24 for a vector icon). On a
@@ -2509,6 +2750,7 @@ impl<M> From<Icon> for Element<M> {
                         layout: sized(icon.layout, icon.side),
                         key: icon.key,
                         transform: icon.transform,
+                        sem: icon.sem,
                         motion: Motion::PLAIN,
                         kind,
                     };
@@ -2517,15 +2759,18 @@ impl<M> From<Icon> for Element<M> {
                     layout: sized(Style::new(), icon.side / 2.0),
                     key: None,
                     transform: None,
+                    sem: Semantics::NONE,
                     motion: Motion::PLAIN,
                     kind,
                 }
             }
+            // The glyph stands in for artwork: not read out.
             None => Text::new(icon.glyph)
                 .size(icon.side * 0.45)
                 .line_height(1.2)
                 .semibold()
                 .color(icon.color)
+                .exclude_semantics()
                 .into(),
         };
         let mut tile: Container<M> = Container::new(content).radius(icon.radius);
@@ -2538,6 +2783,7 @@ impl<M> From<Icon> for Element<M> {
         };
         tile.key = icon.key;
         tile.transform = icon.transform;
+        tile.sem = icon.sem;
         tile.into()
     }
 }

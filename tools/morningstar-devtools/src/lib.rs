@@ -22,6 +22,10 @@
 //!
 //! [`render_svg`] and the `morningstar-svg` binary render an SVG file to a
 //! PNG with the loader applications use (ADR 0027).
+//!
+//! [`screenshot_semantics`] renders a screen as a screen reader finds it:
+//! every node it can land on outlined and numbered in reading order, with
+//! a legend of what each says and offers (ADR 0032).
 
 mod diff;
 mod frame;
@@ -31,6 +35,7 @@ mod image;
 mod json;
 mod png;
 mod reference;
+mod semantics;
 mod svg;
 
 use std::time::Duration;
@@ -49,6 +54,7 @@ pub use png::encode as encode_png;
 pub use reference::{
     ReferenceError, ReferenceOutcome, UPDATE_ENV, assert_matches_reference, check_reference,
 };
+pub use semantics::screenshot_semantics;
 pub use svg::{SvgBackground, color_from_srgb, render_svg};
 
 /// Renders one frame of `app` at `size` and returns it as PNG bytes.

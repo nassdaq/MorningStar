@@ -16,7 +16,10 @@
 //! like everything else. The clipboard is one of those services. The
 //! last is the look of the system's bars (ADR 0026): whether their icons
 //! should be light or dark over the frame just built goes to
-//! `MorningstarNative.onSystemBars`.
+//! `MorningstarNative.onSystemBars`. And what a frame means to assistive
+//! technology (ADR 0032): when a screen reader is on, what changed in the
+//! frame's semantics goes to `MorningstarNative.onSemanticsUpdate` as one
+//! byte array, which the main thread keeps and answers TalkBack from.
 //!
 //! This is done with the JNI function tables directly rather than a binding
 //! crate (ADR 0007): seventeen functions are needed. Their positions in the
@@ -101,6 +104,10 @@ const BARS_METHOD_NAME: &CStr = c"onSystemBars";
 /// `(boolean darkStatusIcons, boolean darkNavigationIcons)`, returning void.
 const BARS_METHOD_SIGNATURE: &CStr = c"(ZZ)V";
 
+const SEMANTICS_METHOD_NAME: &CStr = c"onSemanticsUpdate";
+/// `(byte[] update)`, returning void.
+const SEMANTICS_METHOD_SIGNATURE: &CStr = c"([B)V";
+
 /// `jvalue`: one argument of a `Call...MethodA` function.
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -167,6 +174,9 @@ struct Host {
     service_method: MethodId,
     /// `onSystemBars`, or null likewise: the bars keep the host's look.
     bars_method: MethodId,
+    /// `onSemanticsUpdate`, or null likewise: the application stays one
+    /// opaque view to a screen reader.
+    semantics_method: MethodId,
 }
 
 // SAFETY: a `JavaVM*`, a global reference and a method id are valid on
@@ -260,6 +270,11 @@ pub unsafe fn init(env: JniEnv, class: JObject) {
             BARS_METHOD_SIGNATURE,
             "the system bars keep their icons' colour",
         );
+        let semantics_method = optional(
+            SEMANTICS_METHOD_NAME,
+            SEMANTICS_METHOD_SIGNATURE,
+            "screen readers see one opaque view",
+        );
         Host {
             vm,
             class,
@@ -268,6 +283,7 @@ pub unsafe fn init(env: JniEnv, class: JObject) {
             http_method,
             service_method,
             bars_method,
+            semantics_method,
         }
     };
     let _ = HOST.set(host);
@@ -537,6 +553,32 @@ impl Env {
                     ]
                 },
                 "onServiceCommand",
+            )
+        }
+    }
+
+    /// Calls `MorningstarNative.onSemanticsUpdate` on this thread with one
+    /// update of the semantics tree, in the format of
+    /// `SemanticsTree::encode_update`. The Java method copies nothing and
+    /// only posts the array to the main thread, so this returns at once.
+    /// Returns false if the host could not be given it.
+    pub fn semantics_update(&self, update: &[u8]) -> bool {
+        let Some(host) = HOST.get().filter(|host| !host.semantics_method.is_null()) else {
+            return false;
+        };
+        // SAFETY: as in `http_request`. The argument array matches the
+        // signature: one byte array. `call_with` makes that array as a
+        // copy of `update` (a new `byte[]` of exactly its length), so the
+        // Java side owns what it is given and nothing of `update` is
+        // referred to after this returns.
+        unsafe {
+            self.call_with(
+                host,
+                host.semantics_method,
+                [],
+                update,
+                |[], update| [JValue { object: update }],
+                "onSemanticsUpdate",
             )
         }
     }

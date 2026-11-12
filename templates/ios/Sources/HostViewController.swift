@@ -31,6 +31,22 @@ final class MetalView: UIView, UIKeyInput {
     /// Whether the focused field has text: UIKit asks through `hasText`.
     var fieldHasText = false
 
+    /// What VoiceOver sees of the view (ADR 0032): one element per node
+    /// of the application's semantics tree. NOT COMPILED.
+    var accessibility: HostAccessibility?
+
+    // The view itself is a container, not an element: with VoiceOver off
+    // the tree is empty and there is nothing to step through.
+    override var isAccessibilityElement: Bool {
+        get { false }
+        set {}
+    }
+
+    override var accessibilityElements: [Any]? {
+        get { accessibility?.accessibilityElements() }
+        set {}
+    }
+
     // UITextInputTraits. UIKit reads these when the view becomes first
     // responder and on reloadInputViews().
     var keyboardType: UIKeyboardType = .default
@@ -284,6 +300,9 @@ final class HostViewController: UIViewController {
     /// Dark status-bar content (over a light screen), as the application
     /// last asked (ADR 0026). NOT COMPILED.
     private var darkStatusContent = false
+    /// The application's semantics tree, for VoiceOver (ADR 0032). NOT
+    /// COMPILED; see HostAccessibility.swift.
+    private let accessibility = HostAccessibility()
 
     private var metalView: MetalView? { view as? MetalView }
 
@@ -322,6 +341,23 @@ final class HostViewController: UIViewController {
             guard let self = self else { return }
             morningstar_ios_text_move(self.engine, move, extend)
             self.syncWithEngine()
+        }
+        metalView.accessibility = accessibility
+        accessibility.view = metalView
+        accessibility.perform = { [weak self] node, action, text in
+            guard let self = self else { return false }
+            let done: Bool
+            if let text = text {
+                done = text.withCString {
+                    morningstar_ios_accessibility_action(
+                        self.engine, node, UInt32(action), $0, 0, 0)
+                }
+            } else {
+                done = morningstar_ios_accessibility_action(
+                    self.engine, node, UInt32(action), nil, 0, 0)
+            }
+            self.syncWithEngine()
+            return done
         }
         view = metalView
     }
@@ -369,6 +405,43 @@ final class HostViewController: UIViewController {
             selector: #selector(reduceMotionChanged),
             name: UIAccessibility.reduceMotionStatusDidChangeNotification,
             object: nil)
+
+        // VoiceOver and Switch Control (ADR 0032): now, and whenever
+        // either comes or goes. NOT COMPILED.
+        for name in [
+            UIAccessibility.voiceOverStatusDidChangeNotification,
+            UIAccessibility.switchControlStatusDidChangeNotification,
+        ] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(assistiveTechnologyChanged),
+                name: name,
+                object: nil)
+        }
+        assistiveTechnologyChanged()
+    }
+
+    /// Whether anything reads the screen: VoiceOver, or Switch Control.
+    /// While nothing does, the engine describes nothing. NOT COMPILED.
+    @objc private func assistiveTechnologyChanged() {
+        let enabled = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
+        if !enabled {
+            accessibility.reset()
+        }
+        morningstar_ios_set_accessibility(engine, enabled)
+        syncWithEngine()
+    }
+
+    /// Takes what changed in the meaning of the screen, if the frame last
+    /// built changed it, and tells VoiceOver. One call that answers false
+    /// while accessibility is off.
+    private func updateAccessibility() {
+        var data: UnsafePointer<UInt8>?
+        var length = 0
+        while morningstar_ios_take_semantics(engine, &data, &length) {
+            // The bytes are only valid until the next take: decoded here.
+            accessibility.apply(UnsafeBufferPointer(start: data, count: length))
+        }
     }
 
     @objc private func reduceMotionChanged() {
@@ -492,6 +565,7 @@ final class HostViewController: UIViewController {
             }
             updateKeyboard()
             updateSystemBars()
+            updateAccessibility()
             updateDisplayLink()
         } while syncAgain
         syncing = false

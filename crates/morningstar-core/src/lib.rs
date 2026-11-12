@@ -11,6 +11,7 @@ mod image;
 mod input;
 mod insets;
 mod lifecycle;
+mod semantics;
 mod services;
 
 pub use color::Color;
@@ -30,6 +31,11 @@ pub use input::{
 };
 pub use insets::Insets;
 pub use lifecycle::{Lifecycle, LifecycleEvent, SurfaceSize};
+pub use semantics::{
+    Action, Actions, CHANGED_ADDED, CHANGED_BOUNDS, CHANGED_CHILDREN, CHANGED_LABEL,
+    CHANGED_SCROLL, CHANGED_SELECTION, CHANGED_STATE, CHANGED_VALUE, Live, Role, SemanticsNode,
+    SemanticsTree, States, UPDATE_VERSION, chars_of_utf16,
+};
 pub use services::{
     AudioClip, AudioError, DEFAULT_HTTP_TIMEOUT, HostState, HttpError, HttpMethod, HttpRequest,
     HttpResponse, MAX_HTTP_RESPONSE_BYTES, MAX_RECORDING_DURATION, NO_INSTALL_ID, Recording,

@@ -222,6 +222,33 @@ impl<M> Effects<M> {
         );
     }
 
+    /// Has the screen reader say `message`, when one is running: for
+    /// something that happened and that nothing on the screen says by
+    /// itself ("Report ready", "Message sent"). It waits for what is being
+    /// said to finish. With no screen reader on, nothing happens. Prefer
+    /// [`live`](crate::Container::live) on the widget when what changed is
+    /// on the screen: this is for what is not.
+    pub fn announce(&mut self, message: impl Into<String>) {
+        self.announce_with(message, morningstar_core::Live::Polite);
+    }
+
+    /// As [`announce`](Self::announce), saying how urgent it is:
+    /// [`Live::Assertive`](morningstar_core::Live::Assertive) interrupts
+    /// what is being said, for an error or a call that dropped.
+    /// `Live::Off` says nothing.
+    pub fn announce_with(&mut self, message: impl Into<String>, live: morningstar_core::Live) {
+        if live == morningstar_core::Live::Off {
+            return;
+        }
+        self.push(
+            ServiceRequest::Announce {
+                message: message.into(),
+                assertive: live == morningstar_core::Live::Assertive,
+            },
+            None,
+        );
+    }
+
     /// Gives up on every request made before this call that has not been
     /// answered yet: their messages will never arrive. The platform may
     /// still finish the work (a request already sent reaches the server),
@@ -282,6 +309,9 @@ pub(crate) struct EffectState<M> {
     /// test driver, and with no host at all (a screenshot tool), so that
     /// what a field copies can be pasted again.
     clipboard: Option<String>,
+    /// What the application asked a screen reader to say, under the test
+    /// driver, oldest first.
+    announced: Vec<String>,
 }
 
 impl<M> EffectState<M> {
@@ -294,6 +324,7 @@ impl<M> EffectState<M> {
             ready: VecDeque::new(),
             carrier: Carrier::Host { attached: false },
             clipboard: None,
+            announced: Vec::new(),
         }
     }
 
@@ -359,6 +390,11 @@ impl<M> EffectState<M> {
         self.ready.retain(|(ready, _)| *ready != id);
     }
 
+    /// What was announced under the test driver.
+    pub(crate) fn announced(&self) -> &[String] {
+        &self.announced
+    }
+
     pub(crate) fn clipboard(&self) -> Option<&str> {
         self.clipboard.as_deref()
     }
@@ -396,6 +432,7 @@ impl<M> EffectState<M> {
                     .push_back((call.id, ServiceResult::Loaded(value)));
             }
             ServiceRequest::SetClipboard(text) => self.clipboard = Some(text.clone()),
+            ServiceRequest::Announce { message, .. } => self.announced.push(message.clone()),
             ServiceRequest::ReadClipboard => {
                 let text = self.clipboard.clone().filter(|text| !text.is_empty());
                 self.ready

@@ -387,6 +387,16 @@ pub enum ServiceRequest {
     /// asked: on Android 12 and later the system tells the user each time
     /// an application reads what another one copied.
     ReadClipboard,
+    /// Have the screen reader say `message`, if one is running (ADR 0032):
+    /// for something that happened and is not otherwise spoken ("Report
+    /// ready"). Not answered, and nothing happens when no assistive
+    /// technology is on.
+    Announce {
+        /// What to say.
+        message: String,
+        /// Say it at once, interrupting what is being said.
+        assertive: bool,
+    },
 }
 
 impl ServiceRequest {
@@ -394,7 +404,7 @@ impl ServiceRequest {
     pub fn expects_result(&self) -> bool {
         !matches!(
             self,
-            Self::StopPlayback | Self::Store { .. } | Self::SetClipboard(_)
+            Self::StopPlayback | Self::Store { .. } | Self::SetClipboard(_) | Self::Announce { .. }
         )
     }
 
@@ -409,7 +419,10 @@ impl ServiceRequest {
             Self::Play(_) => ServiceResult::Played(Err(AudioError::Unsupported)),
             Self::Load { .. } => ServiceResult::Loaded(None),
             Self::ReadClipboard => ServiceResult::Clipboard(None),
-            Self::StopPlayback | Self::Store { .. } | Self::SetClipboard(_) => return None,
+            Self::StopPlayback
+            | Self::Store { .. }
+            | Self::SetClipboard(_)
+            | Self::Announce { .. } => return None,
         })
     }
 
@@ -425,6 +438,7 @@ impl ServiceRequest {
             Self::Load { .. } => "load",
             Self::SetClipboard(_) => "set clipboard",
             Self::ReadClipboard => "read clipboard",
+            Self::Announce { .. } => "announce",
         }
     }
 }

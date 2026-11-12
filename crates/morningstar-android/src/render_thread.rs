@@ -71,6 +71,17 @@ pub enum Message {
         id: ServiceId,
         result: ServiceResult,
     },
+    /// Assistive technology came on or went off (ADR 0032).
+    Accessibility(bool),
+    /// Assistive technology asks for an action on a node: the arguments of
+    /// `Engine::accessibility_action`.
+    AccessibilityAction {
+        node: i32,
+        code: u32,
+        text: Option<String>,
+        start: usize,
+        end: usize,
+    },
 }
 
 static RENDER_THREAD: OnceLock<Sender<Message>> = OnceLock::new();
@@ -178,6 +189,9 @@ fn run(messages: Receiver<Message>, host: &HostState) {
     }
     let mut keyboard = Keyboard::default();
     let mut services = Services::default();
+    // Reused for every update of the semantics tree; empty, and never
+    // grown, while no assistive technology is on.
+    let mut semantics: Vec<u8> = Vec::new();
     // What the application asked for while it was being set up, before
     // anything else can happen to it.
     services.dispatch(&mut engine, java.as_ref());
@@ -267,6 +281,24 @@ fn run(messages: Receiver<Message>, host: &HostState) {
                     " (the host could not be told)"
                 },
             ));
+        }
+        // And what it means, if a screen reader is on and that changed:
+        // one buffer, which the host's main thread keeps and answers
+        // TalkBack from. Contents are never logged, only the size.
+        if engine.take_semantics_update(&mut semantics) {
+            let told = java
+                .as_ref()
+                .is_some_and(|java| java.semantics_update(&semantics));
+            log::info(&format!(
+                "accessibility: semantics update {} bytes{}",
+                semantics.len(),
+                if told {
+                    ""
+                } else {
+                    " (the host could not be told)"
+                },
+            ));
+            semantics.clear();
         }
         // A timer message delivered in the frame may have asked for work.
         services.dispatch(&mut engine, java.as_ref());
@@ -415,6 +447,7 @@ const SERVICE_REMOVE: i32 = 5;
 const SERVICE_LOAD: i32 = 6;
 const SERVICE_SET_CLIPBOARD: i32 = 7;
 const SERVICE_READ_CLIPBOARD: i32 = 8;
+const SERVICE_ANNOUNCE: i32 = 9;
 
 /// How many times in a row the application may answer a request that
 /// could not be made with another request before the render thread moves
@@ -505,6 +538,12 @@ fn send_to_host(java: &Env, call: &ServiceCall) -> bool {
         ServiceRequest::Load { key } => command(SERVICE_LOAD, key, "", &[]),
         ServiceRequest::SetClipboard(text) => command(SERVICE_SET_CLIPBOARD, text, "", &[]),
         ServiceRequest::ReadClipboard => command(SERVICE_READ_CLIPBOARD, "", "", &[]),
+        ServiceRequest::Announce { message, assertive } => command(
+            SERVICE_ANNOUNCE,
+            message,
+            if *assertive { "assertive" } else { "" },
+            &[],
+        ),
     }
 }
 
@@ -517,6 +556,12 @@ fn describe_request(request: &ServiceRequest) -> String {
             request.timeout.as_millis(),
         ),
         ServiceRequest::Play(clip) => format!("play {} bytes", clip.bytes.len()),
+        // Never what is said.
+        ServiceRequest::Announce { message, assertive } => format!(
+            "announce chars={}{}",
+            message.chars().count(),
+            if *assertive { " assertive" } else { "" },
+        ),
         other => other.name().to_owned(),
     }
 }
@@ -603,6 +648,31 @@ fn handle(
                 } else {
                     " (dropped: the application is not waiting for it)"
                 },
+            ));
+        }
+        Message::Accessibility(on) => {
+            if engine.set_accessibility(on) {
+                log::info(&format!(
+                    "accessibility {}",
+                    if on {
+                        "on: frames are described"
+                    } else {
+                        "off"
+                    }
+                ));
+            }
+        }
+        Message::AccessibilityAction {
+            node,
+            code,
+            text,
+            start,
+            end,
+        } => {
+            let done = engine.accessibility_action(node, code, text, start, end);
+            log::info(&format!(
+                "accessibility: action {code} on node {node}{}",
+                if done { "" } else { " (not carried out)" },
             ));
         }
         Message::Back => {

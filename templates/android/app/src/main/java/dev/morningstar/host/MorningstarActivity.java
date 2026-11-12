@@ -69,6 +69,11 @@ import android.window.OnBackInvokedDispatcher;
  * the user has switched animations off (nativeSetReduceMotion). See
  * docs/architecture/0026-system-bars-and-reduce-motion.md.
  *
+ * Accessibility: the view is a virtual view hierarchy to TalkBack, built
+ * from the semantics tree Rust sends (MorningstarAccessibility), and Rust
+ * is told whether any accessibility service is on. See
+ * docs/architecture/0032-accessibility.md.
+ *
  * Platform services (HTTP, recording, playback, stored values) are in
  * MorningstarServices; this class only tells it when the activity comes and
  * goes and passes on the answer to the microphone permission. See
@@ -161,6 +166,9 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
                     return true;
                 });
         setContentView(surfaceView);
+        // After the view is in the window: tells Rust whether a screen
+        // reader is on, and listens for it coming and going.
+        hostView.accessibility.attach();
 
         // From API 33 Back is delivered to a registered callback; the
         // manifest turns that on (enableOnBackInvokedCallback), and with
@@ -204,6 +212,9 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
 
     @Override
     protected void onDestroy() {
+        if (hostView != null) {
+            hostView.accessibility.detach();
+        }
         if (current == this) {
             current = null;
             // A microphone question this activity was showing dies with it.
@@ -784,10 +795,28 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
      * turns key events (a hardware keyboard, adb) into text commands.
      */
     private final class HostView extends SurfaceView {
+        /** What accessibility services see of the view (ADR 0032). */
+        final MorningstarAccessibility accessibility;
+
         HostView(Context context) {
             super(context);
             setFocusable(true);
             setFocusableInTouchMode(true);
+            accessibility = new MorningstarAccessibility(this);
+            setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        }
+
+        // The nodes of Rust's semantics tree, as virtual children.
+        @Override
+        public android.view.accessibility.AccessibilityNodeProvider
+                getAccessibilityNodeProvider() {
+            return accessibility;
+        }
+
+        // Explore by touch: which node the finger is over.
+        @Override
+        public boolean dispatchHoverEvent(MotionEvent event) {
+            return accessibility.dispatchHoverEvent(event) || super.dispatchHoverEvent(event);
         }
 
         @Override

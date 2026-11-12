@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
 use morningstar_core::{
-    AtlasView, Color, DisplayList, FrameStats, FrameSummary, HostState, ImagesView, Insets,
-    Lifecycle, LifecycleEvent, PointerEvent, ServiceCall, ServiceId, ServiceResult, SurfaceSize,
-    SystemBars, TextInputCommand, TextInputEvent, TextInputRequest,
+    Action, AtlasView, Color, DisplayList, FrameStats, FrameSummary, HostState, ImagesView, Insets,
+    Lifecycle, LifecycleEvent, PointerEvent, SemanticsTree, ServiceCall, ServiceId, ServiceResult,
+    SurfaceSize, SystemBars, TextInputCommand, TextInputEvent, TextInputRequest, chars_of_utf16,
 };
 use morningstar_gpu::{AdapterInfo, FrameOutcome, GpuError, NativeSurface, Renderer};
 
@@ -140,6 +140,14 @@ pub struct Engine {
     bars_host: Option<SystemBars>,
     /// The user asked the system for less motion.
     reduce_motion: bool,
+    /// Assistive technology is on: frames are built with their semantics.
+    accessibility: bool,
+    /// The semantics of the last frame built have not been compared with
+    /// what the host holds yet.
+    semantics_fresh: bool,
+    /// What the host holds; `None` when it holds nothing (it has not been
+    /// told anything since accessibility came on).
+    semantics_host: Option<SemanticsTree>,
     /// Benchmark mode: every frame asks for another.
     continuous: bool,
     /// Foreground time accumulated before the current resume.
@@ -218,6 +226,9 @@ impl Engine {
             bars_declared: None,
             bars_host: None,
             reduce_motion: false,
+            accessibility: false,
+            semantics_fresh: false,
+            semantics_host: None,
             continuous: false,
             elapsed_before_resume: Duration::ZERO,
             resumed_at: None,
@@ -350,6 +361,87 @@ impl Engine {
         true
     }
 
+    /// Tells the engine whether assistive technology (TalkBack,
+    /// VoiceOver) is on and wants the screen described (ADR 0032); see
+    /// [`FrameInfo::accessibility`]. Returns true if it changed, in which
+    /// case a frame is produced: the first one with its semantics, or the
+    /// first one without. Hosts call it at start and whenever the system
+    /// says the setting changed.
+    ///
+    /// Turning it on also forgets what the host was told before, so that
+    /// the next [`take_semantics_update`](Self::take_semantics_update) is
+    /// the whole tree. Turning it off drops the engine's copy.
+    pub fn set_accessibility(&mut self, on: bool) -> bool {
+        if on == self.accessibility {
+            return false;
+        }
+        self.accessibility = on;
+        self.semantics_host = None;
+        self.semantics_fresh = false;
+        self.redraw = true;
+        true
+    }
+
+    /// True while frames are built with their semantics.
+    pub fn accessibility(&self) -> bool {
+        self.accessibility
+    }
+
+    /// Appends to `out` what the host must be told so that the tree it
+    /// holds describes the last frame built, in the format of
+    /// [`SemanticsTree::encode_update`], and returns true; or returns
+    /// false, leaving `out` alone, when the host is up to date, which is
+    /// the usual answer and costs one comparison. Hosts call this after
+    /// every [`frame`](Self::frame) while accessibility is on. While it is
+    /// off this is one branch.
+    pub fn take_semantics_update(&mut self, out: &mut Vec<u8>) -> bool {
+        if !std::mem::take(&mut self.semantics_fresh) {
+            return false;
+        }
+        let Some(tree) = self.app.semantics() else {
+            return false;
+        };
+        if !tree.encode_update(self.semantics_host.as_ref(), out) {
+            return false;
+        }
+        match self.semantics_host.as_mut() {
+            Some(held) => held.clone_from(tree),
+            None => self.semantics_host = Some(tree.clone()),
+        }
+        true
+    }
+
+    /// Carries out what assistive technology asked for on the node the
+    /// host knows as `node` (the ids of the updates): `code`, `text`,
+    /// `start` and `end` as [`Action::from_wire`] takes them, except that
+    /// `start` and `end` are in UTF-16 code units of the node's value,
+    /// which is what hosts count in. Returns true if the application
+    /// carried it out; a frame is then scheduled, as after a touch.
+    /// Unknown nodes (the tree has moved on) and unknown codes do nothing.
+    pub fn accessibility_action(
+        &mut self,
+        node: i32,
+        code: u32,
+        text: Option<String>,
+        start: usize,
+        end: usize,
+    ) -> bool {
+        let Some(held) = self.semantics_host.as_ref() else {
+            return false;
+        };
+        let Some(id) = held.id_of_host(node) else {
+            return false;
+        };
+        let value = held.node(id).map_or("", |node| node.value.as_str());
+        let (start, end) = (chars_of_utf16(value, start), chars_of_utf16(value, end));
+        let Some(action) = Action::from_wire(code, text, start, end) else {
+            return false;
+        };
+        let done = self.app.accessibility_action(id, &action);
+        self.redraw |= done;
+        done
+    }
+
     /// The keyboard inset most recently set.
     pub fn keyboard_inset(&self) -> f32 {
         self.keyboard_inset
@@ -464,8 +556,12 @@ impl Engine {
             .with_scale(self.scale)
             .with_insets(self.insets)
             .with_keyboard_inset(self.keyboard_inset)
-            .with_reduce_motion(self.reduce_motion);
+            .with_reduce_motion(self.reduce_motion)
+            .with_accessibility(self.accessibility);
         self.app.frame(&info, &mut self.frame);
+        // What the frame means holds whether or not it reaches the
+        // display, like what it asked of the keyboard.
+        self.semantics_fresh = self.accessibility;
         let build = build_start.elapsed();
         self.redraw_at = self
             .frame
@@ -708,12 +804,16 @@ mod tests {
         results: Vec<(ServiceId, ServiceResult)>,
         /// What the app made of each accepted answer: a request to make.
         follow_up: Option<ServiceCall>,
+        /// The tree the next frame is described by, and the actions
+        /// assistive technology asked for.
+        semantics: SemanticsTree,
+        actions: Vec<(u64, Action)>,
         /// What setup saw.
         install_id: String,
         stored_device_id: Option<String>,
     }
 
-    struct ProbeApp(Arc<Mutex<Probe>>);
+    struct ProbeApp(Arc<Mutex<Probe>>, Option<SemanticsTree>);
 
     impl App for ProbeApp {
         fn setup(&mut self, setup: &mut crate::Setup<'_>) {
@@ -762,6 +862,9 @@ mod tests {
             if let Some(bars) = probe.bars {
                 frame.set_system_bars(bars);
             }
+            // The tree a frame is described by: what the test set, and
+            // only when the engine asked for one.
+            self.1 = info.accessibility.then(|| probe.semantics.clone());
         }
 
         fn text_input(&mut self, event: &TextInputEvent) {
@@ -776,6 +879,15 @@ mod tests {
             let mut probe = self.0.lock().unwrap();
             probe.backs += 1;
             probe.handles_back
+        }
+
+        fn semantics(&self) -> Option<&SemanticsTree> {
+            self.1.as_ref()
+        }
+
+        fn accessibility_action(&mut self, node: u64, action: &Action) -> bool {
+            self.0.lock().unwrap().actions.push((node, action.clone()));
+            true
         }
     }
 
@@ -839,7 +951,7 @@ mod tests {
             let probe = Arc::new(Mutex::new(Probe::default()));
             let screen = Arc::new(Mutex::new(Screen::default()));
             let engine = Engine::with_presenter(
-                Box::new(ProbeApp(probe.clone())),
+                Box::new(ProbeApp(probe.clone(), None)),
                 Box::new(FakePresenter(screen.clone())),
             );
             Self {
@@ -1557,6 +1669,109 @@ mod tests {
         assert!(!h.probe.lock().unwrap().frames.last().unwrap().reduce_motion);
     }
 
+    fn described(labels: &[&str]) -> SemanticsTree {
+        use morningstar_core::{Actions, Role, SemanticsNode};
+        let mut tree = SemanticsTree::new();
+        let root = tree.push(
+            None,
+            SemanticsNode {
+                id: 1,
+                ..SemanticsNode::default()
+            },
+        );
+        for (index, label) in labels.iter().enumerate() {
+            tree.push(
+                Some(root),
+                SemanticsNode {
+                    id: 100 + index as u64,
+                    role: Role::TextField,
+                    label: (*label).to_owned(),
+                    value: "a\u{1F600}b".to_owned(),
+                    actions: Actions::ACTIVATE | Actions::SET_SELECTION,
+                    ..SemanticsNode::default()
+                },
+            );
+        }
+        tree
+    }
+
+    #[test]
+    fn semantics_are_asked_for_only_while_accessibility_is_on() {
+        let mut h = Harness::idle();
+        h.probe.lock().unwrap().semantics = described(&["Name"]);
+        let mut out = Vec::new();
+        // Off: the frame is not asked to describe itself, nothing is sent.
+        assert!(!h.probe.lock().unwrap().frames.last().unwrap().accessibility);
+        assert!(!h.engine.take_semantics_update(&mut out));
+        assert!(out.is_empty());
+        assert!(!h.engine.accessibility_action(100, 0, None, 0, 0));
+
+        // On: one frame, and the whole tree.
+        assert!(h.engine.set_accessibility(true));
+        assert!(!h.engine.set_accessibility(true));
+        assert_eq!(h.run(), 1);
+        assert!(h.probe.lock().unwrap().frames.last().unwrap().accessibility);
+        assert!(h.engine.take_semantics_update(&mut out));
+        // Version 1, "forget what you held".
+        assert_eq!(out[..8], [1, 0, 0, 0, 1, 0, 0, 0]);
+        // Asked again without a new frame: nothing.
+        out.clear();
+        assert!(!h.engine.take_semantics_update(&mut out));
+
+        // A frame that means the same sends nothing.
+        h.touch(PointerPhase::Down);
+        h.run();
+        assert!(!h.engine.take_semantics_update(&mut out));
+        assert!(out.is_empty());
+
+        // A frame that means something else sends the difference.
+        h.probe.lock().unwrap().semantics = described(&["Name", "Phone"]);
+        h.touch(PointerPhase::Up);
+        h.run();
+        assert!(h.engine.take_semantics_update(&mut out));
+        assert_eq!(out[..8], [1, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Off again: one frame without, and the host starts from nothing
+        // the next time.
+        assert!(h.engine.set_accessibility(false));
+        assert_eq!(h.run(), 1);
+        out.clear();
+        assert!(!h.engine.take_semantics_update(&mut out));
+        assert!(h.engine.set_accessibility(true));
+        h.run();
+        assert!(h.engine.take_semantics_update(&mut out));
+        assert_eq!(out[4], 1);
+    }
+
+    #[test]
+    fn an_accessibility_action_reaches_the_app_by_identity_and_produces_a_frame() {
+        let mut h = Harness::idle();
+        h.probe.lock().unwrap().semantics = described(&["Name", "Phone"]);
+        h.engine.set_accessibility(true);
+        h.run();
+        let mut out = Vec::new();
+        assert!(h.engine.take_semantics_update(&mut out));
+        assert!(!h.engine.needs_frame());
+
+        // The host's number for the second field is its identity folded.
+        assert!(h.engine.accessibility_action(101, 0, None, 0, 0));
+        assert!(h.engine.needs_frame());
+        // A selection arrives in UTF-16 units and leaves in characters:
+        // the emoji is two units and one character.
+        assert!(h.engine.accessibility_action(100, 6, None, 1, 3));
+        // A node the host no longer has, and a code this library does not
+        // know, do nothing.
+        assert!(!h.engine.accessibility_action(555, 0, None, 0, 0));
+        assert!(!h.engine.accessibility_action(100, 99, None, 0, 0));
+        assert_eq!(
+            h.probe.lock().unwrap().actions,
+            [
+                (101, Action::Activate),
+                (100, Action::SetSelection { start: 1, end: 2 }),
+            ]
+        );
+    }
+
     #[test]
     fn focus_shows_the_keyboard_once_and_blur_hides_it() {
         let mut h = Harness::idle();
@@ -1844,7 +2059,7 @@ mod tests {
             .with_install_id("00112233445566778899aabbccddeeff")
             .with_stored("device_id", "abc");
         let _engine = Engine::with_presenter_and_host(
-            Box::new(ProbeApp(probe.clone())),
+            Box::new(ProbeApp(probe.clone(), None)),
             Box::new(FakePresenter(screen)),
             &host,
         );

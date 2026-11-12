@@ -183,6 +183,9 @@ final class HostServices: NSObject, URLSessionDataDelegate, AVAudioRecorderDeleg
             // an app reads what another app copied.
             case MORNINGSTAR_SERVICE_SET_CLIPBOARD:
                 UIPasteboard.general.string = text1
+            // Something for VoiceOver to say (ADR 0032). NOT COMPILED.
+            case MORNINGSTAR_SERVICE_ANNOUNCE:
+                HostAccessibility.announce(text1, assertive: text2 == "assertive")
             case MORNINGSTAR_SERVICE_READ_CLIPBOARD:
                 let pasted = UIPasteboard.general.string
                 answer { engine in

@@ -62,6 +62,11 @@ pub struct MorningstarHost {
     /// pointers in the host's `MorningstarServiceRequest` point into, and
     /// is kept until the next one is handed out.
     lent: Option<LentRequest>,
+    /// The update of the semantics tree most recently handed out (ADR
+    /// 0032): the memory `morningstar_ios_take_semantics` points into,
+    /// kept until the next call. Empty, and never grown, while VoiceOver
+    /// is off.
+    semantics: Vec<u8>,
 }
 
 /// Owns what a `MorningstarServiceRequest` points to.
@@ -82,6 +87,7 @@ impl MorningstarHost {
             calls: VecDeque::new(),
             scratch: Vec::new(),
             lent: None,
+            semantics: Vec::new(),
         });
         // What the application asked for while it was being set up.
         host.collect_service_requests();
@@ -595,6 +601,113 @@ pub unsafe extern "C" fn morningstar_ios_take_system_bars(
     true
 }
 
+// ----------------------------------------------------------- accessibility
+
+/// Says whether assistive technology wants the screen described
+/// (`UIAccessibility.isVoiceOverRunning`, or Switch Control; ADR 0032).
+/// While it does, every frame is described and
+/// [`morningstar_ios_take_semantics`] hands out what changed; while it
+/// does not, nothing is built. Call at start and from
+/// `UIAccessibility.voiceOverStatusDidChangeNotification`; a change
+/// produces a frame, so ask [`morningstar_ios_needs_frame`] afterwards.
+///
+/// # Safety
+/// `host` must be null or a pointer from [`morningstar_ios_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn morningstar_ios_set_accessibility(
+    host: *mut MorningstarHost,
+    enabled: bool,
+) {
+    // SAFETY: guaranteed by the caller.
+    if let Some(host) = unsafe { host.as_mut() }
+        && host.engine.set_accessibility(enabled)
+    {
+        if !enabled {
+            host.semantics = Vec::new();
+        }
+        eprintln!(
+            "morningstar: accessibility {}",
+            if enabled { "on" } else { "off" }
+        );
+    }
+}
+
+/// Points `*data` at `*len` bytes describing what changed in the meaning
+/// of the screen since the host was last told, and returns true; or
+/// returns false, leaving both alone, when nothing did, which is the usual
+/// case. Call it after every [`morningstar_ios_frame`] while accessibility
+/// is on. The format is that of `SemanticsTree::encode_update`
+/// (`crates/morningstar-core/src/semantics.rs`): little-endian, described
+/// field by field in `morningstar_ios.h`.
+///
+/// The bytes stay valid until the next call to this function,
+/// [`morningstar_ios_set_accessibility`] or [`morningstar_ios_destroy`]:
+/// decode them before returning to the run loop.
+///
+/// # Safety
+/// `host` must be null or a pointer from [`morningstar_ios_create`];
+/// `data` and `len` must be null or valid for writing one pointer and one
+/// `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn morningstar_ios_take_semantics(
+    host: *mut MorningstarHost,
+    data: *mut *const u8,
+    len: *mut usize,
+) -> bool {
+    // SAFETY: guaranteed by the caller.
+    let (Some(host), Some(data), Some(len)) =
+        (unsafe { host.as_mut() }, unsafe { data.as_mut() }, unsafe {
+            len.as_mut()
+        })
+    else {
+        return false;
+    };
+    host.semantics.clear();
+    if !host.engine.take_semantics_update(&mut host.semantics) {
+        return false;
+    }
+    // The buffer is not touched again until the next call, so the pointer
+    // stays valid for as long as the contract above says.
+    *data = host.semantics.as_ptr();
+    *len = host.semantics.len();
+    true
+}
+
+/// Does what assistive technology asked for to the node the updates call
+/// `node`: `action` is one of the `MORNINGSTAR_A11Y_*` codes (those of
+/// `Action::from_wire`); `text` (null, or NUL-terminated UTF-8, copied) is
+/// the new text of a set-text; `start` and `end` the selection of a
+/// set-selection, in UTF-16 code units of the node's value. Returns true
+/// if the application carried it out; a frame then follows, so ask
+/// [`morningstar_ios_needs_frame`], and what changed arrives through
+/// [`morningstar_ios_take_semantics`] after it.
+///
+/// # Safety
+/// `host` must be null or a pointer from [`morningstar_ios_create`]; `text`
+/// must be null or a valid NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn morningstar_ios_accessibility_action(
+    host: *mut MorningstarHost,
+    node: i32,
+    action: u32,
+    text: *const c_char,
+    start: u32,
+    end: u32,
+) -> bool {
+    // SAFETY: guaranteed by the caller.
+    let Some(host) = (unsafe { host.as_mut() }) else {
+        return false;
+    };
+    let text = (!text.is_null()).then(|| {
+        // SAFETY: not null, and NUL-terminated by the caller's contract.
+        unsafe { CStr::from_ptr(text) }
+            .to_string_lossy()
+            .into_owned()
+    });
+    host.engine
+        .accessibility_action(node, action, text, start as usize, end as usize)
+}
+
 /// A "back" gesture, as the host defines one (iOS has no system Back; an
 /// edge swipe is the usual choice). Returns `true` if the application
 /// handled it, for example by going to its previous screen; a frame then
@@ -758,7 +871,7 @@ fn c_string(text: &str) -> CString {
 /// [`morningstar_ios_take_text_input`]: requests appear only inside them.
 ///
 /// Every request whose kind is answered (all but stop-playback, store,
-/// remove and set-clipboard) must be answered exactly once with the matching
+/// remove, set-clipboard and announce) must be answered exactly once with the matching
 /// `morningstar_ios_*_result` function, on the main thread, with an error
 /// if it cannot be carried out; the application waits for it.
 ///
@@ -824,6 +937,15 @@ pub unsafe extern "C" fn morningstar_ios_take_service_request(
             (8, [text.clone(), String::new(), String::new()], no_data)
         }
         ServiceRequest::ReadClipboard => (9, Default::default(), no_data),
+        ServiceRequest::Announce { message, assertive } => (
+            10,
+            [
+                message.clone(),
+                if *assertive { "assertive" } else { "" }.to_owned(),
+                String::new(),
+            ],
+            no_data,
+        ),
     };
     let strings = texts.map(|text| c_string(&text));
     *out = MorningstarServiceRequest {

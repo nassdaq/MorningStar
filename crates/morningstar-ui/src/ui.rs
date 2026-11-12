@@ -25,8 +25,10 @@ use crate::element::{
 };
 use crate::motion::{Animation, Easing, Ghost, Motions, Props};
 use crate::scroll::{ScrollTarget, ScrollTo};
+use crate::semantics::{AccessibilityIssue, Backdrop, Collector, Entered, RawKind};
 use crate::theme::Theme;
 use crate::viewport::Viewport;
+use morningstar_core::{Action, SemanticsTree};
 
 /// A finger must travel this far (dp) before a press turns into a scroll.
 const TOUCH_SLOP: f32 = 8.0;
@@ -742,7 +744,22 @@ pub struct Ui<A: Application> {
     /// The last frame's tree, kept only while it holds a widget with a
     /// transition (which may be found to have left in the next frame).
     last_root: Option<Element<A::Message>>,
+    /// Accessibility (ADR 0032). Everything below stays empty, and costs
+    /// nothing, until a frame is asked to describe itself.
+    /// Semantics were asked for with `set_accessibility`, whatever the
+    /// host says.
+    forced_accessibility: bool,
+    /// What painting noted, and the tree built from it.
+    collector: Collector,
+    semantics: SemanticsTree,
+    /// The last frame was described.
+    described: bool,
+    /// The messages of the last frame's "increment" and "decrement".
+    adjusts: Vec<Adjusted<A::Message>>,
 }
+
+/// A widget's identity and what raising and lowering its value sends.
+type Adjusted<M> = (u64, Option<M>, Option<M>);
 
 impl<A: Application> Ui<A> {
     /// Wraps an application.
@@ -865,6 +882,11 @@ impl<A: Application> Ui<A> {
             ghosts: Vec::new(),
             ghost_roots: Vec::new(),
             last_root: None,
+            forced_accessibility: false,
+            collector: Collector::default(),
+            semantics: SemanticsTree::new(),
+            described: false,
+            adjusts: Vec::new(),
         }
     }
 
@@ -1071,6 +1093,252 @@ impl<A: Application> Ui<A> {
     pub fn set_reduce_motion(&mut self, reduce: bool) {
         self.forced_reduce = reduce;
         self.motions.reduce = reduce;
+    }
+
+    /// Has every frame from now on described for assistive technology
+    /// ([`semantics`](Self::semantics)), whatever the host says. The hosts
+    /// report whether a screen reader is running themselves
+    /// (`FrameInfo::accessibility`, ADR 0032) and nothing is built while
+    /// none is; this is for tests and tools. `false` goes back to
+    /// following the host.
+    pub fn set_accessibility(&mut self, on: bool) {
+        self.forced_accessibility = on;
+    }
+
+    /// The last frame as a screen reader finds it: the nodes it can land
+    /// on, in reading order, with their roles, labels, values, states and
+    /// actions (the crate documentation, "Accessibility", has the rules).
+    /// For accessibility tests:
+    ///
+    /// ```ignore
+    /// ui.set_accessibility(true);
+    /// ui.frame(&info, &mut frame);
+    /// let call = ui.semantics().find(Role::Button, "Start call").unwrap().id;
+    /// assert!(ui.perform(call, Action::Activate));
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If the last frame was not described: call
+    /// [`set_accessibility(true)`](Self::set_accessibility) before the
+    /// frame. An empty answer would let a test that asserts "no issues"
+    /// pass without having looked.
+    #[track_caller]
+    pub fn semantics(&self) -> &SemanticsTree {
+        assert!(
+            self.described,
+            "the last frame was not described for accessibility: call \
+             ui.set_accessibility(true) before building it"
+        );
+        &self.semantics
+    }
+
+    /// What is wrong with the last frame for someone who uses a screen
+    /// reader, sees poorly or aims poorly; empty when nothing is. Four
+    /// checks ([`IssueKind`](crate::IssueKind)): a control with nothing to
+    /// call it, a touch target smaller than 48 x 48 dp, two controls
+    /// beside each other with the same label, and text whose contrast
+    /// with the solid colour behind it is below 4.5:1 (3:1 for large
+    /// text). Contrast is judged only where both colours are known: text
+    /// over a gradient or a picture is not reported.
+    ///
+    /// A screen's test asserts that this is empty, or lists what the
+    /// design itself gets wrong.
+    ///
+    /// # Panics
+    ///
+    /// As [`semantics`](Self::semantics).
+    #[track_caller]
+    pub fn accessibility_issues(&self) -> Vec<AccessibilityIssue> {
+        self.collector.issues(self.semantics())
+    }
+
+    /// What the application has asked a screen reader to say
+    /// ([`Effects::announce`]) so far, oldest first. Kept only by a `Ui`
+    /// made with [`testing`](Self::testing) or
+    /// [`with_services`](Self::with_services).
+    pub fn announcements(&self) -> &[String] {
+        self.effects.announced()
+    }
+
+    /// Does to the node with identity `id` of
+    /// [`semantics`](Self::semantics) what assistive technology would:
+    /// the same code runs for a TalkBack double tap. Returns false, having
+    /// done nothing, if there is no such node or it does not offer the
+    /// action.
+    ///
+    /// Like a touch, it acts on the last frame: build a frame before the
+    /// next one.
+    pub fn perform(&mut self, id: u64, action: Action) -> bool {
+        if !self.described {
+            return false;
+        }
+        let Some(node) = self.semantics.node(id) else {
+            return false;
+        };
+        if !node.can(action.bit()) {
+            return false;
+        }
+        let (bounds, scroll) = (node.bounds, node.scroll);
+        let input = self.inputs.iter().position(|record| record.id == id);
+        let focused = self.focus.as_ref().is_some_and(|focus| focus.id == id);
+        match action {
+            Action::Dismiss => self.back(),
+            Action::Activate | Action::Focus => {
+                if let Some(index) = input {
+                    self.gesture = None;
+                    if !focused {
+                        self.move_focus(index);
+                    }
+                    return true;
+                }
+                let target = self.regions.iter().find_map(|region| match region.kind {
+                    RegionKind::Press(_) | RegionKind::Focus(_) | RegionKind::Menu(_)
+                        if region.id == id =>
+                    {
+                        Some(region.kind)
+                    }
+                    _ => None,
+                });
+                match target {
+                    Some(RegionKind::Press(index)) => {
+                        let Some(message) = self.messages.get(index).cloned() else {
+                            return false;
+                        };
+                        self.gesture = None;
+                        self.deliver(message);
+                        true
+                    }
+                    Some(RegionKind::Menu(action)) => {
+                        self.menu_action(action);
+                        true
+                    }
+                    Some(RegionKind::Focus(field)) => {
+                        match self.inputs.iter().position(|record| record.id == field) {
+                            Some(index) => {
+                                self.move_focus(index);
+                                true
+                            }
+                            None => false,
+                        }
+                    }
+                    _ => false,
+                }
+            }
+            Action::LongPress => {
+                let Some(index) = input else {
+                    return false;
+                };
+                if !focused {
+                    self.move_focus(index);
+                }
+                if let Some(focus) = self.focus.as_mut() {
+                    // As a finger held on the middle of the field.
+                    focus.pending = Some(Pending::Word(bounds.center()));
+                    focus.handles = true;
+                    focus.menu = true;
+                    focus.touched();
+                }
+                true
+            }
+            Action::ScrollForward | Action::ScrollBackward => {
+                let (Some((position, range)), Some(state)) = (scroll, self.scrolls.get_mut(&id))
+                else {
+                    return false;
+                };
+                // Most of a screenful, so that a line of what was seen
+                // stays in view.
+                let page = (bounds.height / self.scale.max(0.01) * 0.8).max(48.0);
+                let to = if action == Action::ScrollForward {
+                    position + page
+                } else {
+                    position - page
+                };
+                state.go(clamp_offset(to, range), false);
+                true
+            }
+            Action::SetText(text) => {
+                let Some(index) = input else {
+                    return false;
+                };
+                if !focused {
+                    self.move_focus(index);
+                }
+                self.text_event(&TextInputEvent::SelectAll);
+                if text.is_empty() {
+                    self.text_event(&TextInputEvent::DeleteBackward);
+                } else {
+                    self.text_event(&TextInputEvent::Commit(text));
+                }
+                true
+            }
+            Action::SetSelection { start, end } => {
+                let Some(index) = input else {
+                    return false;
+                };
+                if !focused {
+                    self.move_focus(index);
+                }
+                let record = &self.inputs[index];
+                let (value, secure) = (record.value.as_str(), record.traits.secure);
+                // Characters of what the field shows, to bytes of what
+                // it holds.
+                let shown = edit::display(value, secure);
+                let at = |chars: usize| {
+                    let byte = shown
+                        .char_indices()
+                        .nth(chars)
+                        .map_or(shown.len(), |(byte, _)| byte);
+                    edit::snap(value, edit::value_index(value, byte, secure))
+                };
+                let (start, end) = (at(start), at(end));
+                if let Some(focus) = self.focus.as_mut() {
+                    focus.edit.select(start, end);
+                    focus.handles = false;
+                    focus.menu = false;
+                    focus.pending = None;
+                    focus.blink_from = None;
+                    focus.history.break_run();
+                    focus.touched();
+                }
+                true
+            }
+            Action::Increment | Action::Decrement => {
+                let message = self
+                    .adjusts
+                    .iter()
+                    .find(|(widget, _, _)| *widget == id)
+                    .and_then(|(_, increment, decrement)| {
+                        if action == Action::Increment {
+                            increment.clone()
+                        } else {
+                            decrement.clone()
+                        }
+                    });
+                let Some(message) = message else {
+                    return false;
+                };
+                self.gesture = None;
+                self.deliver(message);
+                true
+            }
+        }
+    }
+
+    /// [`perform`](Self::perform)s `Action::Activate` on the first node
+    /// that can be activated and whose label is exactly `label`: "double
+    /// tap on the thing called ..". Returns false if there is none.
+    pub fn activate(&mut self, label: &str) -> bool {
+        if !self.described {
+            return false;
+        }
+        let id = self
+            .semantics
+            .nodes()
+            .iter()
+            .find(|node| node.label == label && node.can(morningstar_core::Actions::ACTIVATE))
+            .map(|node| node.id);
+        id.is_some_and(|id| self.perform(id, Action::Activate))
     }
 
     /// True if something was still animating in the last frame (an
@@ -1351,7 +1619,7 @@ impl<A: Application> Ui<A> {
     }
 
     /// The keyboard's action key.
-    fn perform(&mut self, index: usize, action: ImeAction) {
+    fn ime_action(&mut self, index: usize, action: ImeAction) {
         if action == ImeAction::Next && index + 1 < self.inputs.len() {
             self.move_focus(index + 1);
             return;
@@ -1403,9 +1671,9 @@ impl<A: Application> Ui<A> {
                 self.focus = None;
                 return;
             }
-            TextInputEvent::Action(action) => return self.perform(index, *action),
+            TextInputEvent::Action(action) => return self.ime_action(index, *action),
             TextInputEvent::Enter if !config.multiline => {
-                return self.perform(index, record.traits.action);
+                return self.ime_action(index, record.traits.action);
             }
             TextInputEvent::Move { to, extend } => {
                 // A key takes over from the finger: its selection has no
@@ -2185,6 +2453,15 @@ impl<A: Application> App for Ui<A> {
         self.keyed.clear();
         self.scroll_nodes.clear();
         let surface = Rect::new(0.0, 0.0, info.size.width as f32, info.size.height as f32);
+        // Described only for assistive technology, or a test: otherwise
+        // this is the one branch accessibility costs a frame.
+        let describe = info.accessibility || self.forced_accessibility;
+        if describe {
+            self.collector
+                .begin(scale, surface, theme.colors.background);
+            self.adjusts.clear();
+        }
+        let root_id = root.key.unwrap_or(ROOT_PATH);
         let mut painter = Painter {
             tree: &self.tree,
             records: &self.records,
@@ -2225,6 +2502,8 @@ impl<A: Application> App for Ui<A> {
             rects: Vec::new(),
             safe_top: info.insets.top,
             surface,
+            semantics: describe.then_some(&mut self.collector),
+            adjusts: &mut self.adjusts,
         };
         painter.paint(
             &root,
@@ -2267,6 +2546,16 @@ impl<A: Application> App for Ui<A> {
         painter.paint_selection_controls();
         self.overlay = painter.overlay;
         let animating = painter.animating;
+        if describe {
+            self.collector.build(&mut self.semantics, root_id);
+            self.described = true;
+        } else if self.described {
+            // Switched off: nothing stale is kept, and nothing is held.
+            self.described = false;
+            self.semantics = SemanticsTree::new();
+            self.collector = Collector::default();
+            self.adjusts = Vec::new();
+        }
         self.motions.end_frame(generation);
         // Frames keep coming only while something is on its way.
         if animating || self.motions.moving {
@@ -2341,6 +2630,14 @@ impl<A: Application> App for Ui<A> {
 
     fn back(&mut self) -> bool {
         Ui::back(self)
+    }
+
+    fn semantics(&self) -> Option<&SemanticsTree> {
+        self.described.then_some(&self.semantics)
+    }
+
+    fn accessibility_action(&mut self, node: u64, action: &Action) -> bool {
+        self.perform(node, action.clone())
     }
 }
 
@@ -2998,9 +3295,93 @@ struct Painter<'a, M> {
     safe_top: f32,
     /// The whole surface (px).
     surface: Rect,
+    /// Where what each element means is noted, when the frame is being
+    /// described for assistive technology (ADR 0032); `None` otherwise,
+    /// and then nothing below is done.
+    semantics: Option<&'a mut Collector>,
+    adjusts: &'a mut Vec<Adjusted<M>>,
 }
 
 impl<M: Clone> Painter<'_, M> {
+    /// Where a rectangle of the space being painted in is on the screen:
+    /// the bounding box of it through the transforms around it, and the
+    /// part of that its clips leave to be seen.
+    fn on_screen(&self, rect: Rect, context: &Context) -> (Rect, Rect) {
+        let seen = intersect(rect, context.clip);
+        match context.space {
+            None => (rect, seen),
+            Some(space) => match space.inverse.inverse() {
+                Some(forward) => (
+                    forward.bounding_rect(rect),
+                    if seen.is_empty() {
+                        Rect::default()
+                    } else {
+                        intersect(forward.bounding_rect(seen), space.clip)
+                    },
+                ),
+                None => (rect, Rect::default()),
+            },
+        }
+    }
+
+    /// What a text means: its words, and what its contrast is judged by.
+    fn describe_text(&self, text: &TextNode, alpha: f32) -> RawKind {
+        let spec = self.theme.text(text.role);
+        let mut colors = vec![fade(text.color.resolve(self.theme), alpha)];
+        let content = if text.spans.is_empty() {
+            text.content.to_string()
+        } else {
+            colors.extend(
+                text.spans
+                    .iter()
+                    .filter_map(|span| span.color)
+                    .map(|color| fade(color.resolve(self.theme), alpha)),
+            );
+            text.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect()
+        };
+        RawKind::Text {
+            content,
+            colors,
+            size: text.size.unwrap_or(spec.size),
+            bold: text.weight.unwrap_or(spec.weight).0 >= 700,
+            plain: text.shadow.is_none() && text.outline.is_none(),
+        }
+    }
+
+    /// What a text input means. A secure field's characters never leave
+    /// here: its value is its bullets.
+    fn describe_input(&self, input: &InputNode<M>, id: u64, alpha: f32) -> RawKind {
+        let spec = self.theme.text(input.text.role);
+        let shown = edit::display(&input.value, input.secure);
+        let focus = self.focus.as_ref().filter(|focus| focus.id == id);
+        let chars = |byte: usize| {
+            let at = edit::display_index(&input.value, byte, input.secure).min(shown.len());
+            shown.get(..at).map_or(0, |before| before.chars().count()) as u32
+        };
+        let selection = focus.map(|focus| {
+            let caret = chars(focus.edit.caret);
+            (focus.edit.anchor.map_or(caret, chars), caret)
+        });
+        RawKind::Input {
+            hint: if input.empty {
+                input.text.content.to_string()
+            } else {
+                input.hint.to_string()
+            },
+            color: fade(input.text.color.resolve(self.theme), alpha),
+            size: input.text.size.unwrap_or(spec.size),
+            bold: input.text.weight.unwrap_or(spec.weight).0 >= 700,
+            secure: input.secure,
+            multiline: input.traits.multiline,
+            focused: focus.is_some(),
+            selection,
+            value: shown.into_owned(),
+        }
+    }
+
     /// A layout rectangle (dp) as device pixels: edges snapped to the
     /// pixel grid, so neighbours that share an edge still do, then moved by
     /// the scroll translation. Anything with a size keeps at least one
@@ -3129,6 +3510,37 @@ impl<M: Clone> Painter<'_, M> {
         if let Some(opacity) = layer {
             self.frame.list.push_layer(opacity);
         }
+        // What the element means, for assistive technology. A widget
+        // that is leaving is not there for a screen reader.
+        let noted = self.semantics.is_some() && !self.inert;
+        let mut outside_layer = None;
+        if noted {
+            let (on_screen, seen) = self.on_screen(rect, &context);
+            let size = self.tree.rect(node);
+            let kind = match &element.kind {
+                Kind::Text(text) => self.describe_text(text, context.alpha),
+                Kind::Input(input) => self.describe_input(input, context.id, context.alpha),
+                Kind::Image(_) | Kind::Icon(_) => RawKind::Picture,
+                // Said by `paint_box`, which knows its fill and scroll.
+                Kind::Box(_) => RawKind::Pending,
+            };
+            if let Some(collector) = self.semantics.as_deref_mut() {
+                if let Some(opacity) = layer {
+                    outside_layer = Some(collector.layer_opacity);
+                    collector.layer_opacity *= opacity;
+                    collector.layers += 1;
+                }
+                collector.enter(Entered {
+                    id: context.id,
+                    rect: on_screen,
+                    visible: seen,
+                    size: (size.width, size.height),
+                    alpha: context.alpha,
+                    semantics: &element.sem,
+                });
+                collector.describe(kind);
+            }
+        }
         match &element.kind {
             Kind::Text(text) => {
                 let index = self.text_cursor;
@@ -3151,6 +3563,13 @@ impl<M: Clone> Painter<'_, M> {
                 self.paint_input(input, index, rect, &context);
             }
             Kind::Box(node_data) => self.paint_box(node_data, node, slot, rect, fill, context),
+        }
+        if noted && let Some(collector) = self.semantics.as_deref_mut() {
+            collector.leave();
+            if let Some(opacity) = outside_layer {
+                collector.layer_opacity = opacity;
+                collector.layers -= 1;
+            }
         }
         if layer.is_some() {
             self.frame.list.pop_layer();
@@ -3786,6 +4205,9 @@ impl<M: Clone> Painter<'_, M> {
                 ),
                 None,
             );
+            if let Some(collector) = self.semantics.as_deref_mut() {
+                collector.menu_item(id, label, item);
+            }
             self.regions.push(Region {
                 id,
                 rect: item,
@@ -4087,13 +4509,16 @@ impl<M: Clone> Painter<'_, M> {
             inner.field = field;
         }
 
+        let mut scrolled = None;
         if data.scroll {
             self.scroll_nodes.push(node);
             let offset = if self.inert {
                 self.rest_scroll(context.id)
             } else {
                 let max = scroll_max(self.tree, node, self.keyboard_top);
-                self.advance_scroll(context.id, max)
+                let offset = self.advance_scroll(context.id, max);
+                scrolled = Some((offset, max));
+                offset
             };
             inner.dy -= (offset * scale).round();
             inner.scroll = Some(context.id);
@@ -4106,6 +4531,33 @@ impl<M: Clone> Painter<'_, M> {
                     field: context.field,
                     space: context.space,
                 });
+            }
+        }
+
+        if !self.inert && self.semantics.is_some() {
+            let adjust = data.adjust.as_deref();
+            if let Some(adjust) = adjust {
+                self.adjusts.push((
+                    context.id,
+                    adjust.increment.clone(),
+                    adjust.decrement.clone(),
+                ));
+            }
+            let kind = RawKind::Box {
+                press: data.on_press.is_some(),
+                block: data.block,
+                field,
+                scroll: scrolled,
+                fill: fill.map(|fill| match fill {
+                    Fill::Solid(color) => Backdrop::Solid(fade(color.resolve(self.theme), alpha)),
+                    Fill::Gradient(_) => Backdrop::Mixed,
+                }),
+                stack: data.axis == Axis::Stack,
+                increment: adjust.is_some_and(|adjust| adjust.increment.is_some()),
+                decrement: adjust.is_some_and(|adjust| adjust.decrement.is_some()),
+            };
+            if let Some(collector) = self.semantics.as_deref_mut() {
+                collector.describe(kind);
             }
         }
 

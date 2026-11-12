@@ -3,9 +3,9 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::Duration;
 
 use morningstar_core::{
-    AtlasView, Color, DisplayList, HostState, Image, ImageError, ImageStore, ImagesView, Insets,
-    Point, PointerEvent, Rect, ServiceCall, ServiceId, ServiceResult, Size, SurfaceSize,
-    SystemBars, TextInputEvent, TextInputRequest,
+    Action, AtlasView, Color, DisplayList, HostState, Image, ImageError, ImageStore, ImagesView,
+    Insets, Point, PointerEvent, Rect, SemanticsTree, ServiceCall, ServiceId, ServiceResult, Size,
+    SurfaceSize, SystemBars, TextInputEvent, TextInputRequest,
 };
 use morningstar_text::{
     MAX_PICTURE_PIXELS, RasterPicture, SvgPicture, TextContext, TextSpan, TextStyle, VectorIcon,
@@ -89,6 +89,14 @@ pub struct FrameInfo {
     /// no time. False until a host says otherwise; a change produces a new
     /// frame.
     pub reduce_motion: bool,
+    /// Assistive technology (TalkBack, VoiceOver) is on and wants the
+    /// screen described: the frame should come with a
+    /// [`SemanticsTree`](morningstar_core::SemanticsTree), which the
+    /// engine fetches through [`App::semantics`] (ADR 0032). False until a
+    /// host says otherwise; a change produces a new frame. While false
+    /// nothing should be built: it is what makes accessibility cost
+    /// nothing when it is off.
+    pub accessibility: bool,
 }
 
 impl FrameInfo {
@@ -103,6 +111,7 @@ impl FrameInfo {
             insets: Insets::ZERO,
             keyboard_inset: 0.0,
             reduce_motion: false,
+            accessibility: false,
         }
     }
 
@@ -140,6 +149,12 @@ impl FrameInfo {
     /// Sets whether the user has asked the system for less motion.
     pub const fn with_reduce_motion(mut self, reduce: bool) -> Self {
         self.reduce_motion = reduce;
+        self
+    }
+
+    /// Sets whether assistive technology wants the screen described.
+    pub const fn with_accessibility(mut self, on: bool) -> Self {
+        self.accessibility = on;
         self
     }
 
@@ -950,6 +965,24 @@ pub trait App: Send + 'static {
     /// be ignored and `false` returned, which is what the default does.
     fn service_result(&mut self, id: ServiceId, result: ServiceResult) -> bool {
         let _ = (id, result);
+        false
+    }
+
+    /// The description of the last frame for assistive technology, if
+    /// that frame was built with [`FrameInfo::accessibility`] set (ADR
+    /// 0032). The engine asks after every such frame and tells the host
+    /// what changed. The default describes nothing: the app is then one
+    /// opaque picture to a screen reader.
+    fn semantics(&self) -> Option<&SemanticsTree> {
+        None
+    }
+
+    /// Assistive technology asks for `action` on the node with identity
+    /// `node` of the tree last returned by [`semantics`](Self::semantics).
+    /// Return `true` if it was carried out: a frame then follows, as after
+    /// a touch. The default does nothing.
+    fn accessibility_action(&mut self, node: u64, action: &Action) -> bool {
+        let _ = (node, action);
         false
     }
 }

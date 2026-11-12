@@ -222,6 +222,117 @@ typedef struct MorningstarSystemBars {
 bool morningstar_ios_take_system_bars(MorningstarHost *host,
                                       MorningstarSystemBars *out);
 
+// -------------------------------------------------------------- accessibility
+//
+// The application draws its own pixels, so VoiceOver sees one opaque view
+// unless it is described (ADR 0032). While accessibility is on, every frame
+// is described by a tree of nodes, and what changed in it is handed out
+// after the frame as one buffer. The host keeps the tree, vends one
+// UIAccessibilityElement per node from the view, and sends actions back.
+
+// UIAccessibility.isVoiceOverRunning (or Switch Control). Call at start and
+// from voiceOverStatusDidChangeNotification; then ask
+// morningstar_ios_needs_frame. While false nothing is built.
+void morningstar_ios_set_accessibility(MorningstarHost *host, bool enabled);
+
+// Points *data at *len bytes and returns true when the meaning of the
+// screen changed since the host was last told; false (the usual case)
+// otherwise. Call after every morningstar_ios_frame while accessibility is
+// on. The bytes stay valid until the next call to this function,
+// morningstar_ios_set_accessibility or morningstar_ios_destroy.
+//
+// Little-endian. Node ids are positive int32s; the root, which stands for
+// the view, is 0. A string is a uint32 byte count and that many bytes of
+// UTF-8.
+//
+//   uint32  version (MORNINGSTAR_A11Y_VERSION)
+//   uint32  flags: bit 0 = forget every node held before applying this
+//   int32   the node with the input focus, or -1
+//   uint32  count of removed nodes, then that many int32 ids
+//   uint32  count of added or changed nodes, then for each:
+//     int32   id
+//     int32   parent id (-1 for the root)
+//     uint8   role (MORNINGSTAR_ROLE_*)
+//     uint8   what changed (MORNINGSTAR_CHANGED_*)
+//     uint16  states (MORNINGSTAR_STATE_*)
+//     uint16  actions (bit n set: action code n can be performed)
+//     uint16  0
+//     float   left, top, right, bottom: bounds in pixels of the layer
+//     float   scroll position, scroll range in points (-1, -1 if not a list)
+//     int32   selection start, end in UTF-16 units of the value (-1, -1 if
+//             none)
+//     uint32  count of children, then that many int32 ids, in reading order
+//     string  label
+//     string  value (bullets for a password field, never its characters)
+//     string  hint
+bool morningstar_ios_take_semantics(MorningstarHost *host,
+                                    const uint8_t **data, size_t *len);
+
+enum { MORNINGSTAR_A11Y_VERSION = 1 };
+
+enum {
+  MORNINGSTAR_ROLE_GROUP = 0,
+  MORNINGSTAR_ROLE_TEXT = 1,
+  MORNINGSTAR_ROLE_HEADING = 2,
+  MORNINGSTAR_ROLE_BUTTON = 3,
+  MORNINGSTAR_ROLE_LINK = 4,
+  MORNINGSTAR_ROLE_IMAGE = 5,
+  MORNINGSTAR_ROLE_TEXT_FIELD = 6,
+  MORNINGSTAR_ROLE_CHECKBOX = 7,
+  MORNINGSTAR_ROLE_SWITCH = 8,
+  MORNINGSTAR_ROLE_RADIO = 9,
+  MORNINGSTAR_ROLE_TAB = 10,
+  MORNINGSTAR_ROLE_LIST = 11,
+  MORNINGSTAR_ROLE_PROGRESS = 12,
+  MORNINGSTAR_ROLE_SLIDER = 13,
+};
+
+enum {
+  MORNINGSTAR_STATE_DISABLED = 1 << 0,
+  MORNINGSTAR_STATE_SELECTED = 1 << 1,
+  MORNINGSTAR_STATE_CHECKABLE = 1 << 2,
+  MORNINGSTAR_STATE_CHECKED = 1 << 3,
+  MORNINGSTAR_STATE_FOCUSED = 1 << 4,
+  MORNINGSTAR_STATE_PASSWORD = 1 << 5,
+  MORNINGSTAR_STATE_MULTILINE = 1 << 6,
+  MORNINGSTAR_STATE_EXPANDABLE = 1 << 7,
+  MORNINGSTAR_STATE_EXPANDED = 1 << 8,
+  MORNINGSTAR_STATE_LIVE_POLITE = 1 << 9,
+  MORNINGSTAR_STATE_LIVE_ASSERTIVE = 1 << 10,
+};
+
+enum {
+  MORNINGSTAR_CHANGED_ADDED = 1 << 0,
+  MORNINGSTAR_CHANGED_BOUNDS = 1 << 1,
+  MORNINGSTAR_CHANGED_LABEL = 1 << 2,
+  MORNINGSTAR_CHANGED_VALUE = 1 << 3,
+  MORNINGSTAR_CHANGED_STATE = 1 << 4,
+  MORNINGSTAR_CHANGED_CHILDREN = 1 << 5,
+  MORNINGSTAR_CHANGED_SCROLL = 1 << 6,
+  MORNINGSTAR_CHANGED_SELECTION = 1 << 7,
+};
+
+// morningstar_ios_accessibility_action's action. A node offers the action
+// with code n when bit n of its actions is set.
+enum {
+  MORNINGSTAR_A11Y_ACTIVATE = 0,
+  MORNINGSTAR_A11Y_LONG_PRESS = 1,
+  MORNINGSTAR_A11Y_SCROLL_FORWARD = 2,
+  MORNINGSTAR_A11Y_SCROLL_BACKWARD = 3,
+  MORNINGSTAR_A11Y_FOCUS = 4,
+  MORNINGSTAR_A11Y_SET_TEXT = 5,      // text: the new text
+  MORNINGSTAR_A11Y_SET_SELECTION = 6, // start, end: UTF-16 units of the value
+  MORNINGSTAR_A11Y_INCREMENT = 7,
+  MORNINGSTAR_A11Y_DECREMENT = 8,
+  MORNINGSTAR_A11Y_DISMISS = 9,
+};
+
+// Does to a node what VoiceOver asked for. text may be NULL. Returns true
+// if the application carried it out; then ask morningstar_ios_needs_frame.
+bool morningstar_ios_accessibility_action(MorningstarHost *host, int32_t node,
+                                          uint32_t action, const char *text,
+                                          uint32_t start, uint32_t end);
+
 // ---------------------------------------------------------- platform services
 //
 // The application asks for work that takes time: an HTTP request, a
@@ -263,6 +374,10 @@ enum {
   // Answered with morningstar_ios_clipboard_result. Read the pasteboard
   // only now: iOS tells the user when an app reads what another copied.
   MORNINGSTAR_SERVICE_READ_CLIPBOARD = 9,
+  // Not answered. text1: what VoiceOver should say
+  // (UIAccessibility.post(.announcement)); text2: "assertive" to interrupt
+  // what it is saying, empty otherwise.
+  MORNINGSTAR_SERVICE_ANNOUNCE = 10,
 };
 
 // One request. Strings are NUL-terminated UTF-8 and never NULL (unused ones

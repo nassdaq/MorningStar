@@ -1,7 +1,7 @@
 //! JNI entry points for `dev.morningstar.host.MorningstarNative`.
 //!
 //! Every function here returns quickly: it only posts a message to the
-//! render thread. The one exception is `nativeSurfaceDestroyed`, which
+//! render thread (an accessibility action included: ADR 0032). The one exception is `nativeSurfaceDestroyed`, which
 //! Android requires to block until the surface is no longer in use.
 //!
 //! They are called on the Android main thread, except the four that carry
@@ -366,6 +366,57 @@ pub extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeSetRedu
     reduce: u8,
 ) {
     render_thread::send(Message::ReduceMotion(reduce != 0));
+}
+
+// ----------------------------------------------------------- accessibility
+
+/// Whether assistive technology (TalkBack, Switch Access, anything that
+/// reads the screen through the accessibility framework) is on:
+/// `AccessibilityManager.isEnabled()`. While it is, every frame is
+/// described and what changed is sent to
+/// `MorningstarNative.onSemanticsUpdate` (ADR 0032). A `jboolean`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeSetAccessibility(
+    _env: JniEnv,
+    _class: JObject,
+    enabled: u8,
+) {
+    render_thread::send(Message::Accessibility(enabled != 0));
+}
+
+/// Assistive technology asks for something to be done to a node. `node`
+/// is the id the node has in the updates; `action` uses the `A11Y_ACTION_*`
+/// constants of `MorningstarNative.java`, which are the codes of
+/// `Action::from_wire`; `text` is the new text of a set-text (null
+/// otherwise); `start` and `end` the selection of a set-selection, in
+/// UTF-16 code units of the node's value. Like a touch, it only posts.
+///
+/// # Safety
+/// Called by the JVM with a valid `JNIEnv*` and a `String` (or null).
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeAccessibilityAction(
+    env: JniEnv,
+    _class: JObject,
+    node: i32,
+    action: i32,
+    text: JObject,
+    start: i32,
+    end: i32,
+) {
+    // SAFETY: the JVM passes this thread's env and a live String reference
+    // or null; `java::string` is only called for the former.
+    let text = (!text.is_null()).then(|| unsafe { java::string(env, text) });
+    let Ok(code) = u32::try_from(action) else {
+        // A host newer than this library; ignoring is safer than guessing.
+        return;
+    };
+    render_thread::send(Message::AccessibilityAction {
+        node,
+        code,
+        text,
+        start: usize::try_from(start).unwrap_or(0),
+        end: usize::try_from(end).unwrap_or(0),
+    });
 }
 
 // ------------------------------------------------------- platform services

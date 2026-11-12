@@ -6,10 +6,11 @@ import android.view.Surface;
 
 /**
  * The complete interface between Java and Rust. The native methods are
- * implemented in crates/morningstar-android/src/jni.rs; the five methods
+ * implemented in crates/morningstar-android/src/jni.rs; the six methods
  * Rust calls (onTextInputCommand, onBackResult, onHttpRequest,
- * onServiceCommand and onSystemBars) are looked up by name and signature in
- * crates/morningstar-android/src/java.rs. Both sides must change together.
+ * onServiceCommand, onSystemBars and onSemanticsUpdate) are looked up by
+ * name and signature in crates/morningstar-android/src/java.rs. Both sides
+ * must change together.
  *
  * All native methods are called on the main thread and return immediately,
  * except nativeSurfaceDestroyed, which blocks until the renderer has let go
@@ -159,6 +160,57 @@ final class MorningstarNative {
      */
     static native void nativeSetReduceMotion(boolean reduce);
 
+    // -------------------------------------------------------- accessibility
+    //
+    // See docs/architecture/0032-accessibility.md and
+    // MorningstarAccessibility.
+
+    /**
+     * Whether anything reads the screen through the accessibility
+     * framework (AccessibilityManager.isEnabled()). While it does, Rust
+     * describes every frame and sends what changed to onSemanticsUpdate;
+     * while it does not, Rust builds nothing. Call at start and whenever
+     * it may have changed; repeating the current value is free.
+     */
+    static native void nativeSetAccessibility(boolean enabled);
+
+    // Values of nativeAccessibilityAction's action argument: the codes of
+    // Action::from_wire in crates/morningstar-core/src/semantics.rs.
+    static final int A11Y_ACTION_ACTIVATE = 0;
+    static final int A11Y_ACTION_LONG_PRESS = 1;
+    static final int A11Y_ACTION_SCROLL_FORWARD = 2;
+    static final int A11Y_ACTION_SCROLL_BACKWARD = 3;
+    static final int A11Y_ACTION_FOCUS = 4;
+    /** text: the field's new text. */
+    static final int A11Y_ACTION_SET_TEXT = 5;
+    /** start, end: the selection, in UTF-16 units of the node's value. */
+    static final int A11Y_ACTION_SET_SELECTION = 6;
+    static final int A11Y_ACTION_INCREMENT = 7;
+    static final int A11Y_ACTION_DECREMENT = 8;
+    static final int A11Y_ACTION_DISMISS = 9;
+
+    /**
+     * An accessibility service asks for something to be done to the node
+     * with this id (the ids of onSemanticsUpdate). Returns at once, like a
+     * touch; what it changes arrives as the next update. text may be null.
+     */
+    static native void nativeAccessibilityAction(
+            int node, int action, String text, int start, int end);
+
+    /**
+     * Called by Rust, on its render thread, after a frame whose meaning
+     * differs from what the host was last told: the nodes that were added,
+     * changed or removed, in the format MorningstarAccessibility reads.
+     * The array is the host's own copy. Answering the accessibility
+     * framework is main-thread work, so this only posts.
+     *
+     * Looked up by name through JNI: keep it out of any code shrinker.
+     */
+    @SuppressWarnings("unused") // Called from native code.
+    static void onSemanticsUpdate(final byte[] update) {
+        MAIN.post(() -> MorningstarAccessibility.applyUpdate(update));
+    }
+
     // Values of onTextInputCommand's arguments. Must match render_thread.rs.
     static final int TEXT_HIDE = 0;
     static final int TEXT_SHOW = 1;
@@ -298,6 +350,11 @@ final class MorningstarNative {
     static final int SERVICE_SET_CLIPBOARD = 7;
     /** Answered with nativeClipboardResult. */
     static final int SERVICE_READ_CLIPBOARD = 8;
+    /**
+     * first: what the screen reader should say; second: "assertive" to
+     * interrupt what it is saying, empty otherwise. Not answered.
+     */
+    static final int SERVICE_ANNOUNCE = 9;
 
     // Values of nativeHttpResult's error argument. Must match jni.rs.
     static final int HTTP_OK = 0;
@@ -377,7 +434,14 @@ final class MorningstarNative {
      * Looked up by name through JNI: keep it out of any code shrinker.
      */
     @SuppressWarnings("unused") // Called from native code.
-    static void onServiceCommand(int command, long id, String first, String second, byte[] data) {
+    static void onServiceCommand(
+            final int command, long id, final String first, final String second, byte[] data) {
+        if (command == SERVICE_ANNOUNCE) {
+            // Not a service with work to do off the main thread: a word
+            // to the accessibility framework, on the main thread.
+            MAIN.post(() -> MorningstarAccessibility.announce(first, "assertive".equals(second)));
+            return;
+        }
         MorningstarServices.command(command, id, first, second, data);
     }
 }
