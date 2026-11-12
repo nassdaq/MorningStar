@@ -2,6 +2,7 @@
 //! compares them with the design. No device needed.
 //!
 //!   cargo run -p fundidesk --example screenshot -- <output-dir> [screen ...] [--diff] [--phone]
+//!       [--semantics]
 //!
 //! With no screen named, every screen is rendered; name them as the design
 //! does (`07-dashboard`) or by number (`07`). For each screen it writes
@@ -11,6 +12,11 @@
 //!
 //! `--phone` also writes `<name>.phone.png`: the same screen in a
 //! 390 x 844 dp phone viewport, where tall screens scroll.
+//!
+//! `--semantics` also writes `<name>.semantics.png`: the phone viewport
+//! as a screen reader finds it, every node outlined and numbered in
+//! reading order beside a legend (ADR 0032), and prints what
+//! `Ui::accessibility_issues` finds.
 //!
 //! `--diff` compares each render with `design/reference/<name>.png`,
 //! leaving out the four corners the design tool rounded off, prints the
@@ -22,7 +28,9 @@ use std::path::{Path, PathBuf};
 use fundidesk::{DESIGN_HEIGHT, DESIGN_WIDTH, FundiDesk, Screen, corner_masks};
 use morningstar::ui::Ui;
 use morningstar::{FrameInfo, SurfaceSize};
-use morningstar_devtools::{CompareOptions, Image, Rect, compare, screenshot_frame};
+use morningstar_devtools::{
+    CompareOptions, Image, Rect, compare, screenshot_frame, screenshot_semantics,
+};
 
 /// Pixels per dp: the reference images are 2x.
 const SCALE: f32 = 2.0;
@@ -72,11 +80,12 @@ fn diff(screen: Screen, png: &[u8], directory: &Path) -> Result<(), Box<dyn std:
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut directory = None;
     let mut screens = Vec::new();
-    let (mut with_diff, mut with_phone) = (false, false);
+    let (mut with_diff, mut with_phone, mut with_semantics) = (false, false, false);
     for argument in std::env::args().skip(1) {
         match argument.as_str() {
             "--diff" => with_diff = true,
             "--phone" => with_phone = true,
+            "--semantics" => with_semantics = true,
             _ if directory.is_none() => directory = Some(PathBuf::from(argument)),
             name => {
                 let screen = Screen::ALL
@@ -102,6 +111,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let path = directory.join(format!("{}.phone.png", screen.name()));
             std::fs::write(&path, render(screen, &frame(DESIGN_WIDTH, DESIGN_HEIGHT))?)?;
             println!("{}", path.display());
+        }
+        if with_semantics {
+            // The phone viewport, as a screen reader finds it.
+            let path = directory.join(format!("{}.semantics.png", screen.name()));
+            let mut ui = Ui::new(FundiDesk::on(screen));
+            let (sheet, tree) = screenshot_semantics(&mut ui, &frame(DESIGN_WIDTH, DESIGN_HEIGHT))?;
+            sheet.save(&path)?;
+            println!(
+                "{} ({} nodes)",
+                path.display(),
+                tree.len().saturating_sub(1)
+            );
+            for issue in ui.accessibility_issues() {
+                println!("  {issue}");
+            }
         }
         if with_diff {
             if screen.is_built() {

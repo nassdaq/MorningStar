@@ -40,7 +40,11 @@ pub enum Message {
 pub fn view(_state: &State) -> Element<Message> {
     let header = TopBar::new("FD-2026-00142", meta("Received 9 Nov · Due 12 Nov"))
         .back(Message::Back)
-        .trailing(icon_button(icons::SHARE, 22.0, INK).on_press(Message::NotLinked));
+        .trailing(
+            icon_button(icons::SHARE, 22.0, INK)
+                .on_press(Message::NotLinked)
+                .label("Share"),
+        );
 
     // `display: flex; flex-direction: column; gap: 12px; padding: 16px 20px 0`.
     let body = col![summary(), history(), quotation(), intake(), tracking()]

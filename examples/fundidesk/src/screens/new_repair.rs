@@ -168,9 +168,12 @@ fn customer(state: &State) -> Container<Message> {
             // `gap: 8px`; the note is `font-size: 12px; color: #176611;
             // font-weight: 500`.
             col![
-                label("Phone number"),
+                // As `labelled` does it: the label is the field's name.
+                label("Phone number").exclude_semantics(),
                 field(TextField::Phone, &state.phone)
-                    .input(|input| input.keyboard(KeyboardType::Phone).max_length(16)),
+                    .input(|input| input.keyboard(KeyboardType::Phone).max_length(16))
+                    .build()
+                    .label("Phone number"),
                 inter("Returning customer · 2 previous repairs", 12.0)
                     .medium()
                     .color(GREEN_DARK),

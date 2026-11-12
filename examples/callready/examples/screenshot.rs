@@ -3,6 +3,7 @@
 //!
 //!   cargo run -p callready --example screenshot -- <output-dir> [screen ...]
 //!       [--diff] [--phone | --small | --tall] [--states] [--online] [--sheet]
+//!       [--semantics]
 //!
 //! With no screen named, every screen is rendered; name them as the design
 //! does (`02-home`) or by number (`02`). For each screen it writes
@@ -32,6 +33,10 @@
 //!   Server screen online. A scripted stand-in plays the server, the
 //!   microphone and the speaker (`Ui::testing`); nothing is sent anywhere.
 //! * `--sheet` writes `sheet.png`: everything rendered, side by side.
+//! * `--semantics` also writes `<name>.semantics.png` for each screen: the
+//!   screen as a screen reader finds it, every node outlined and numbered
+//!   in reading order beside a legend (ADR 0032), and prints what
+//!   `Ui::accessibility_issues` finds.
 
 use std::path::{Path, PathBuf};
 
@@ -42,7 +47,9 @@ use morningstar::ui::Ui;
 use morningstar::{
     AudioError, Frame, FrameInfo, HostState, HttpError, HttpResponse, Insets, SurfaceSize,
 };
-use morningstar_devtools::{CompareOptions, Image, compare, screenshot_frame};
+use morningstar_devtools::{
+    CompareOptions, Image, compare, screenshot_frame, screenshot_semantics,
+};
 
 /// The frame to render in.
 fn frame(kind: &str) -> FrameInfo {
@@ -407,8 +414,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut kind = "design";
     let (mut with_diff, mut with_states, mut with_sheet) = (false, false, false);
     let mut with_online = false;
+    let mut with_semantics = false;
     for argument in std::env::args().skip(1) {
         match argument.as_str() {
+            "--semantics" => with_semantics = true,
             "--diff" => with_diff = true,
             "--states" => with_states = true,
             "--sheet" => with_sheet = true,
@@ -439,6 +448,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let png = render(Ui::new(CallReady::on(screen)), &info)?;
         std::fs::write(&path, &png)?;
         println!("{}", path.display());
+        if with_semantics {
+            let path = directory.join(format!("{}.semantics.png", screen.name()));
+            let mut ui = Ui::new(CallReady::on(screen));
+            let (sheet, tree) = screenshot_semantics(&mut ui, &info)?;
+            sheet.save(&path)?;
+            println!(
+                "{} ({} nodes)",
+                path.display(),
+                tree.len().saturating_sub(1)
+            );
+            for issue in ui.accessibility_issues() {
+                println!("  {issue}");
+            }
+        }
         if with_diff {
             if screen.is_designed() && kind == "design" {
                 diff(screen, &png, &directory)?;

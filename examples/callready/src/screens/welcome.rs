@@ -110,10 +110,14 @@ pub fn view() -> Element<Message> {
                 .bold()
                 .line_height_dp(44.0 * 1.08)
                 .letter_spacing(-0.5)
-                .fill_width(),
+                .fill_width()
+                // The sentence ends in the collage below ("real", a heart
+                // and five cut-out letters): said here, whole, once.
+                .semantic_label("Get job-ready with real calls")
+                .heading(),
             // `margin-top: 4px`.
             Spacer::fixed(4.0),
-            hero(),
+            hero().exclude_semantics(),
             // `margin-top: 8px`.
             Spacer::fixed(8.0),
             quotes(),
@@ -255,6 +259,7 @@ fn quotes() -> Container<Message> {
         // down, in a line of its own 45 dp (`line-height: 1.5` of 30).
         caveat("!!", 30.0)
             .line_height_dp(45.0)
+            .exclude_semantics()
             .offset(30.0 + 6.0, 78.0 + QUOTE_LINE),
         // `right: -4px; top: 132px; font-family: 'Abril Fatface';
         // font-size: 30px; letter-spacing: 1px; color: #FFFFFF`, with the
@@ -312,15 +317,20 @@ fn quotes() -> Container<Message> {
 /// narrow screen instead of not fitting its block.
 fn charged_twice() -> (Text, Container<Message>, Text) {
     (
-        quote("\u{201c}You charged me ").width(CHARGED_WIDTH),
+        // Three pieces to the eye, one sentence to the ear: the first
+        // says it all and the other two are left out.
+        quote("\u{201c}You charged me ")
+            .width(CHARGED_WIDTH)
+            .semantic_label("\u{201c}You charged me twice for the same bill.\u{201d}"),
         stack![
             Picture::vector(RING).size(RING_WIDTH, RING_HEIGHT),
             quote("twice")
                 .place(Alignment::TOP_CENTER)
                 .offset(0.0, RING_RISE),
         ]
-        .size(RING_WIDTH, RING_HEIGHT),
-        quote(" for the same bill.\u{201d}"),
+        .size(RING_WIDTH, RING_HEIGHT)
+        .exclude_semantics(),
+        quote(" for the same bill.\u{201d}").exclude_semantics(),
     )
 }
 

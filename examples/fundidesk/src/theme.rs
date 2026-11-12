@@ -217,6 +217,7 @@ pub fn page_title(content: impl Into<Cow<'static, str>>) -> Text {
     grotesk(content, 28.0)
         .line_height_dp(34.0)
         .letter_spacing(-0.4)
+        .heading()
 }
 
 /// The paragraph under a page title: Inter 15/22 in the muted colour. It

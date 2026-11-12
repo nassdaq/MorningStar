@@ -191,10 +191,15 @@ pub fn view(state: &State) -> Element<Message> {
 fn top_bar(title: &'static str, subtitle: &'static str) -> Container<Message> {
     col![
         row![
-            icon_button(icons::CHEVRON_LEFT, 24.0, INK).on_press(Message::Back),
-            col![grotesk(title, 20.0).line_height_dp(26.0), meta(subtitle)]
-                .gap(2.0)
-                .fill_width(),
+            icon_button(icons::CHEVRON_LEFT, 24.0, INK)
+                .on_press(Message::Back)
+                .label("Back"),
+            col![
+                grotesk(title, 20.0).line_height_dp(26.0).heading(),
+                meta(subtitle)
+            ]
+            .gap(2.0)
+            .fill_width(),
         ]
         .gap(8.0)
         .cross_align(CrossAlign::Center)
@@ -272,6 +277,7 @@ fn amount_field(figure: &str) -> Container<Message> {
                 .max_length(11)
                 .no_autocorrect()
                 .on_input(Message::AmountText)
+                .semantic_label("Amount in shillings")
                 .id("payment-amount")
                 .fill_width()
         )

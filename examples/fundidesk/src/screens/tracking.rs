@@ -59,7 +59,8 @@ pub fn view(_state: &State) -> Element<Message> {
 fn header() -> Container<Message> {
     // `width: 40px; height: 40px; border-radius: 12px; background:
     // #1E8416; color: #FFFFFF; font: 700 16px 'Space Grotesk'`.
-    let initials = Container::new(grotesk("KP", 16.0).color(WHITE))
+    // The shop's name follows; its initials are its picture.
+    let initials = Container::new(grotesk("KP", 16.0).color(WHITE).exclude_semantics())
         .size(40.0, 40.0)
         .center()
         .radius(radius::FIELD)
@@ -117,7 +118,10 @@ fn status() -> Container<Message> {
         .gap(6.0)
         .fill_width(),
         col![
-            progress_segments(&segments),
+            progress_segments(&segments)
+                .role(Role::Progress)
+                .label("Repair progress")
+                .value("In repair, step 5 of 7"),
             row![meta("Received 9 Nov"), meta("Next: Ready for collection")]
                 .space_between()
                 .fill_width(),

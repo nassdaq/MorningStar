@@ -248,6 +248,17 @@ impl Tab {
     /// Every tab, in the bar's order.
     pub const ALL: [Self; 4] = [Self::Home, Self::Progress, Self::History, Self::More];
 
+    /// What the tab is called. The bar shows icons alone; this is what a
+    /// screen reader says.
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Home => "Home",
+            Self::Progress => "Progress",
+            Self::History => "History",
+            Self::More => "More",
+        }
+    }
+
     /// The screen the tab shows.
     pub const fn screen(self) -> Screen {
         match self {

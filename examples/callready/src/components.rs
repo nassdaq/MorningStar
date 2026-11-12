@@ -39,6 +39,7 @@ pub fn back_button<M>(message: M) -> Container<M> {
         .cross_align(CrossAlign::Center)
         .on_press(message)
         .pressed_background(BLACK)
+        .label("Back")
         .id("back")
 }
 
@@ -110,6 +111,8 @@ pub fn score_plates<M: 'static>(score: u8) -> Container<M> {
     ]
     .gap(3.0)
     .cross_align(CrossAlign::End)
+    // Two turned plates and a suffix are one number to a screen reader.
+    .label(format!("{score} out of 100"))
 }
 
 /// The score block of the call report: `display: flex; align-items:
@@ -129,7 +132,7 @@ pub fn score_block<M: 'static>(
 ) -> Container<M> {
     stack![
         col![
-            outfit(label, 17.0).color(SILVER),
+            outfit(label, 17.0).color(SILVER).heading(),
             // `margin-top: 10px`.
             score_plates(score),
         ]
@@ -236,6 +239,10 @@ pub fn skill_bar<M>(skill: Skill, percent: u8) -> Container<M> {
     ]
     .gap(6.0)
     .fill_width()
+    // One stop: the skill, and how far its bar is filled.
+    .role(Role::Progress)
+    .label(skill.name())
+    .value(format!("{percent} out of 100"))
 }
 
 /// The design's colour for each skill's bar.
@@ -265,7 +272,9 @@ pub fn skill_bars<M>(scores: &crate::model::Scores) -> Container<M> {
 /// border: 2px solid #F6C445; background: #2A2A2E; font-weight: 700`.
 /// Home's is 46 dp with 15 dp letters.
 pub fn avatar<M>(initials: String, size: f32, letters: f32) -> Container<M> {
-    Container::new(outfit(initials, letters).bold())
+    // The initials are a picture of the learner: whatever the avatar is
+    // part of says who it is.
+    Container::new(outfit(initials, letters).bold().exclude_semantics())
         .size(size, size)
         .center()
         .radius(size / 2.0)
@@ -286,6 +295,11 @@ pub fn tab_bar<M>(current: Tab, message: impl Fn(Tab) -> M) -> Container<M> {
             .center()
             .on_press(message(tab))
             .pressed_background(SURFACE)
+            // An icon alone: its name, that it is a tab, and whether it
+            // is the one showing.
+            .label(tab.title())
+            .role(Role::Tab)
+            .selected(tab == current)
             .id(("tab", tab))
     };
     row![
@@ -369,6 +383,7 @@ pub fn page_title(title: impl Into<Cow<'static, str>>) -> Text {
         .bold()
         .line_height_dp(35.84)
         .fill_width()
+        .heading()
 }
 
 /// A handwritten note in the accent colour, turned a little.
@@ -405,22 +420,32 @@ pub fn hairline() -> Divider {
     Divider::new().color(TRACK)
 }
 
-/// A choice among a few: a pill like the tip chip, 40 dp tall for a
-/// finger, filled in the accent colour when it is the chosen one.
+/// A choice among a few: a pill like the tip chip, 40 dp tall, filled in
+/// the accent colour when it is the chosen one. What is tapped is 48 dp
+/// tall, the pill in its middle: a finger needs that much
+/// (`Ui::accessibility_issues`), and these are the app's own, not the
+/// design's.
 pub fn option_chip<M>(label: &'static str, selected: bool, message: M) -> Container<M> {
     let (ink, fill, outline) = if selected {
         (BLACK, YELLOW, YELLOW)
     } else {
         (WHITE, BLACK, QUIET)
     };
-    Container::new(outfit(label, 15.0).medium().color(ink))
-        .height(40.0)
-        .center()
-        .padding_xy(15.0, 0.0)
-        .radius(999.0)
-        .background(fill)
-        .border(1.5, outline)
-        .on_press(message)
+    Container::new(
+        Container::new(outfit(label, 15.0).medium().color(ink))
+            .height(40.0)
+            .center()
+            .padding_xy(15.0, 0.0)
+            .radius(999.0)
+            .background(fill)
+            .border(1.5, outline),
+    )
+    .height(48.0)
+    .min_width(48.0)
+    .center()
+    .on_press(message)
+    .pressed_background(BLACK)
+    .selected(selected)
 }
 
 /// The colour a scenario wears: its card's on home, and teal for today's
@@ -467,6 +492,14 @@ pub fn call_row<M>(report: &crate::model::Report, degrees: f32, message: M) -> C
     .padding_xy(0.0, 14.0)
     .on_press(message)
     .pressed_background(BLACK)
+    // The scenario first; the number on the plate is its score.
+    .label(format!(
+        "{}, score {}, {} \u{b7} {}",
+        report.title(),
+        report.overall(),
+        report.day(),
+        report.duration()
+    ))
 }
 
 /// A paragraph of quiet body text: `font-size: 15px; line-height: 1.35;
@@ -493,7 +526,9 @@ pub fn toast<M: 'static>(message: String) -> Element<M> {
         .padding_xy(16.0, 12.0)
         .radius(14.0)
         .background(SURFACE)
-        .border(1.5, YELLOW),
+        .border(1.5, YELLOW)
+        // Gone in a few seconds: read out without being looked for.
+        .live(Live::Polite),
     )
     .padding_ltrb(MARGIN, 8.0, MARGIN, 0.0)
     .into()

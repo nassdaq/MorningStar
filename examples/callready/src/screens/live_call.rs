@@ -151,9 +151,18 @@ fn scripted(call: &Call, note: Option<&'static str>) -> Element<Message> {
 fn header(share: f32, clock: String) -> Container<Message> {
     row![
         back_button(Message::Back),
-        progress_bar(share, 8.0, 4.0, YELLOW),
+        progress_bar(share, 8.0, 4.0, YELLOW)
+            .role(Role::Progress)
+            .label("Call time used")
+            .value(format!(
+                "{} percent",
+                (share.clamp(0.0, 1.0) * 100.0).round()
+            )),
         // `font-size: 15px; font-variant-numeric: tabular-nums`.
-        outfit(clock, 15.0).tabular_nums().color(SILVER),
+        outfit(clock.clone(), 15.0)
+            .tabular_nums()
+            .color(SILVER)
+            .semantic_label(format!("Call clock {clock}")),
     ]
     .gap(12.0)
     .cross_align(CrossAlign::Center)
@@ -184,11 +193,14 @@ fn task(call: &Call) -> Container<Message> {
                 outfit("1", 17.0).color(SILVER).offset(0.25, 0.0),
                 outfit(" \u{b7} Angry customer", 17.0).color(SILVER),
             ]
-            .width(186.98),
+            .width(186.98)
+            // Four pieces and a drawn ordinal mark: one line to the ear.
+            .label("Call number 1 \u{b7} Angry customer"),
             // `margin: 10px 0 0; font-size: 32px; line-height: 1.12;
             // font-weight: 700`.
             heading_line("Calm the caller and solve the problem")
                 .fill_width()
+                .heading()
                 .into(),
         )
     } else {
@@ -202,8 +214,16 @@ fn task(call: &Call) -> Container<Message> {
                     17.0
                 )
                 .color(SILVER),
-            ],
-            heading_line(call.scenario.goal()).fill_width().into(),
+            ]
+            .label(format!(
+                "Call number {} \u{b7} {}",
+                call.number,
+                call.scenario.title()
+            )),
+            heading_line(call.scenario.goal())
+                .fill_width()
+                .heading()
+                .into(),
         )
     };
     col![stack![label, ordinal], heading]
@@ -273,6 +293,7 @@ fn said_last(call: &Call) -> Container<Message> {
             .center()
             .on_press(Message::Replay)
             .pressed_background(BLACK)
+            .label("Hear the customer again")
             .id("replay"),
     ]
     .gap(12.0)
@@ -303,6 +324,8 @@ fn customer_line(exchange: &Exchange, repeating: bool) -> Container<Message> {
     ]
     .gap(6.0)
     .fill_width()
+    // The caller's new line is what the call is: read out when it comes.
+    .live(morningstar::ui::Live::Polite)
 }
 
 /// `border-top: 1px solid #2C2C2E; padding-top: 18px`: the learner's line
@@ -324,6 +347,8 @@ fn own_line(call: &Call, exchange: &Exchange) -> Container<Message> {
                 .offset(174.27, 55.25),
         ]
         .fill_width()
+        // The drawn line is the word still to be said.
+        .label(format!("{} blank", exchange.reply))
         .into()
     } else {
         // An inline box cannot be put in a paragraph, so the blank is a
@@ -337,6 +362,7 @@ fn own_line(call: &Call, exchange: &Exchange) -> Container<Message> {
         )
         .line_height_dp(32.4)
         .fill_width()
+        .semantic_label(format!("{} blank", exchange.reply))
         .into()
     };
     col![
@@ -346,7 +372,8 @@ fn own_line(call: &Call, exchange: &Exchange) -> Container<Message> {
             "YOU \u{b7} MUTED"
         } else {
             "YOU \u{b7} SPEAKING"
-        }),
+        })
+        .live(morningstar::ui::Live::Polite),
         // `margin: 0 0 6px`.
         Spacer::fixed(6.0),
         sentence,
@@ -369,6 +396,8 @@ fn tips(call: &Call, exchange: &Exchange) -> Container<Message> {
         };
         chip(exchange.options[option].tip, None, ink, outline)
             .on_press_maybe((!call.muted).then_some(Message::Choose(option)))
+            .disabled(call.muted)
+            .hint("Answers with this")
             .id(("tip", option))
     };
     row![tip_label(), tip(0, BLUE), tip(1, PURPLE)]
@@ -436,6 +465,9 @@ fn call_bar(call: &Call) -> Container<Message> {
             .radius(26.0)
             .background(plate)
             .on_press(Message::ToggleMute)
+            .label("Mute")
+            .role(Role::Switch)
+            .checked(call.muted)
             .id("mute"),
         // The same in `#E63946`, its icon with `transform: rotate(135deg)`.
         Container::new(Icon::vector(HANDSET).size(24.0).color(WHITE).rotate(135.0))
@@ -444,6 +476,7 @@ fn call_bar(call: &Call) -> Container<Message> {
             .radius(26.0)
             .background(RED)
             .on_press(Message::EndCall)
+            .label("End call")
             .id("end-call"),
     ]
     .gap(14.0)
@@ -472,7 +505,7 @@ fn dialing(scenario: Scenario, model: &Model) -> Element<Message> {
         )
         .id(Screen::LiveCall.scroll_id()),
         hairline(),
-        Container::new(small_caps("CONNECTING\u{2026}"))
+        Container::new(small_caps("CONNECTING\u{2026}").live(morningstar::ui::Live::Polite))
             .fill_width()
             .padding_xy(MARGIN, 14.0),
         bar(
@@ -521,6 +554,7 @@ fn online(call: &OnlineCall) -> Element<Message> {
 /// "Call №4 · Angry customer": the numero sign is an "N" and a drawn
 /// ordinal mark, as in the scripted call.
 fn task_label(number: u32, title: String) -> Container<Message> {
+    let spoken = format!("Call number {number} \u{b7} {title}");
     stack![
         row![
             outfit("Call N", 17.0).color(SILVER),
@@ -538,11 +572,16 @@ fn task_label(number: u32, title: String) -> Container<Message> {
             .offset(44.5, 5.0),
     ]
     .fill_width()
+    .label(spoken)
 }
 
 /// The call's goal in the design's heading style.
 fn goal_heading(goal: String) -> Text {
-    outfit(goal, 32.0).bold().line_height_dp(35.84).fill_width()
+    outfit(goal, 32.0)
+        .bold()
+        .line_height_dp(35.84)
+        .fill_width()
+        .heading()
 }
 
 /// A line already said: `color: #6E6E73`.
@@ -607,6 +646,7 @@ fn speaker_button() -> Container<Message> {
         .center()
         .on_press(Message::Replay)
         .pressed_background(BLACK)
+        .label("Hear the customer again")
         .id("replay")
 }
 
@@ -664,6 +704,9 @@ fn online_line(call: &OnlineCall) -> Container<Message> {
     ]
     .gap(6.0)
     .fill_width()
+    // The caller's new line: read out when it arrives. With the caller's
+    // voice on it is also heard; the label above says which.
+    .live(morningstar::ui::Live::Polite)
 }
 
 /// The server's two tips: advice for the answer, not answers. Dashed, so
@@ -707,14 +750,21 @@ fn notice_row(text: String, retry: Option<Message>) -> Container<Message> {
                 .fill_width(),
         )
         .push_maybe(retry.map(|message| {
-            Container::new(outfit("Retry", 15.0).semibold().color(BLACK))
-                .height(40.0)
-                .center()
-                .padding_xy(16.0, 0.0)
-                .radius(999.0)
-                .background(YELLOW)
-                .on_press(message)
-                .id("retry")
+            // A 40 dp pill in a 48 dp target: the app's own control, so
+            // it is made as large as a finger needs.
+            Container::new(
+                Container::new(outfit("Retry", 15.0).semibold().color(BLACK))
+                    .height(40.0)
+                    .center()
+                    .padding_xy(16.0, 0.0)
+                    .radius(999.0)
+                    .background(YELLOW),
+            )
+            .height(48.0)
+            .center()
+            .on_press(message)
+            .pressed_background(BLACK)
+            .id("retry")
         }))
         .gap(12.0)
         .cross_align(CrossAlign::Center)
@@ -747,7 +797,8 @@ fn answer(call: &OnlineCall) -> Container<Message> {
         Phase::Idle => "YOU \u{b7} TYPE YOUR ANSWER".to_owned(),
     };
     Column::new()
-        .push(small_caps(status))
+        // What the call is doing now: said as it changes.
+        .push(small_caps(status).live(morningstar::ui::Live::Polite))
         .push_maybe((!call.is_over()).then(|| {
             if call.speaks() {
                 talk(call)
@@ -779,6 +830,7 @@ fn reply_field(call: &OnlineCall) -> Container<Message> {
         .capitalization(Capitalization::Sentences)
         .action(ImeAction::Send)
         .on_submit(Message::Send)
+        .semantic_label("Your answer")
         .id("reply-input");
     if editable {
         // Without `on_input` a field cannot change: while a turn is with
@@ -800,6 +852,8 @@ fn reply_field(call: &OnlineCall) -> Container<Message> {
                 .radius(24.0)
                 .background(QUIET)
                 .on_press_maybe(editable.then_some(Message::SpeakInstead))
+                .label("Speak instead")
+                .disabled(!editable)
                 .id("speak-instead")
         }))
         .push(
@@ -820,6 +874,8 @@ fn reply_field(call: &OnlineCall) -> Container<Message> {
                 .radius(24.0)
                 .background(plate)
                 .on_press_maybe(ready.then_some(Message::Send))
+                .label("Send")
+                .disabled(!ready)
                 .id("reply-send"),
         )
         .gap(10.0)
@@ -866,6 +922,12 @@ fn talk(call: &OnlineCall) -> Container<Message> {
             .radius(36.0)
             .background(plate)
             .on_press_maybe(ready.then_some(Message::Talk))
+            .label(if recording {
+                "Stop and send"
+            } else {
+                "Speak your answer"
+            })
+            .disabled(!ready)
             .id("talk"),
         col![
             outfit(headline, 19.0).semibold().max_lines(1).fill_width(),
@@ -883,6 +945,8 @@ fn talk(call: &OnlineCall) -> Container<Message> {
         .radius(24.0)
         .border(2.0, QUIET)
         .on_press_maybe(idle.then_some(Message::TypeInstead))
+        .label("Type instead")
+        .disabled(!idle)
         .id("type-instead"),
     ]
     .gap(14.0)
@@ -915,6 +979,9 @@ fn bar(caller: String, title: String, detail: String, muted: bool) -> Container<
             .radius(26.0)
             .background(plate)
             .on_press(Message::ToggleMute)
+            .label("Sound off")
+            .role(Role::Switch)
+            .checked(muted)
             .id("mute"),
         Container::new(Icon::vector(HANDSET).size(24.0).color(WHITE).rotate(135.0))
             .size(52.0, 52.0)
@@ -922,6 +989,7 @@ fn bar(caller: String, title: String, detail: String, muted: bool) -> Container<
             .radius(26.0)
             .background(RED)
             .on_press(Message::EndCall)
+            .label("End call")
             .id("end-call"),
     ]
     .gap(14.0)

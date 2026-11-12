@@ -46,6 +46,7 @@ pub fn view(selected: Plan, active: bool) -> Element<Message> {
             .align_self(CrossAlign::End)
             .on_press(Message::Close)
             .pressed_background(BLACK)
+            .label("Close")
             .id("close"),
         Spacer::fixed(4.0),
         hero(),
@@ -112,6 +113,9 @@ fn hero() -> Container<Message> {
     ]
     .fill_width()
     .height(130.0)
+    // The name, three cut-out letters and a scribble: one title.
+    .label("CallReady Pro")
+    .role(Role::Heading)
 }
 
 /// `display: flex; flex-direction: column; gap: 14px; font-size: 17px`.
@@ -208,6 +212,10 @@ fn plan(
         .fill_width()
         .rotate(degrees)
         .on_press(Message::Select(plan))
+        // The badge is how the eye knows which plan is chosen; the state
+        // is how the ear does.
+        .label(format!("{name}, {price}, {terms}"))
+        .selected(is_selected)
         .id(("plan", plan))
 }
 

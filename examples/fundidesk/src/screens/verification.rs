@@ -64,7 +64,8 @@ pub fn view(state: &State) -> Element<Message> {
         .push(
             icon_button(icons::CHEVRON_LEFT, 24.0, INK)
                 .offset(-10.0, 0.0)
-                .on_press(Message::Back),
+                .on_press(Message::Back)
+                .label("Back"),
         )
         .push(Spacer::fixed(20.0))
         .push(
@@ -115,6 +116,8 @@ fn code(state: &State) -> Container<Message> {
             code_box(digit, look, ("code", index), move |digit| {
                 Message::Digit(index, digit)
             })
+            // Six boxes with nothing written on them.
+            .label(format!("Digit {} of {}", index + 1, state.digits.len()))
         }))
         .gap(8.0)
         .fill_width()

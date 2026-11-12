@@ -225,6 +225,7 @@ fn next_button() -> Container<Message> {
         .radius(28.0)
         .background(GREEN)
         .on_press(Message::Continue)
+        .label("Next")
         .id("onboarding-continue")
 }
 

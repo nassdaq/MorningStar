@@ -97,6 +97,9 @@ fn fields(state: &State) -> Container<Message> {
                 .trailing(
                     icon_button(icons::EYE, 20.0, MUTED)
                         .on_press(Message::TogglePassword)
+                        .label("Show password")
+                        .role(Role::Switch)
+                        .checked(state.password_visible)
                         .id("login-eye"),
                 )
                 .input(|input| input.secure(masked).on_submit(Message::LogIn))
@@ -122,7 +125,8 @@ fn fingerprint() -> Container<Message> {
             .radius(34.0)
             .background(PANEL)
             .border(1.0, OUTLINE)
-            .on_press(Message::Fingerprint),
+            .on_press(Message::Fingerprint)
+            .label("Unlock with fingerprint"),
     ]
     .gap(14.0)
     .cross_align(CrossAlign::Center)

@@ -116,6 +116,31 @@ The twelve screens differ from their references in **0.09% to 0.36%** of pixels 
 
 Report, for your screen: the diff percentage, mean and maximum error; the three worst regions and what each is; everything approximated; everything you would move into the shared files.
 
+## Accessibility
+
+Every screen is described to a screen reader ([ADR 0032](../../docs/architecture/0032-accessibility.md)). `tests/accessibility.rs` holds all twelve to the framework's check in the phone viewport and on the test phone, and logs in and opens a repair with nothing but lookups by role and label and `ui.perform`. `--semantics` on the screenshot example draws a screen as a reader finds it. A new screen gets the same:
+
+- **`labelled(text, field)`** makes the label the field's name (the text above it is not read a second time). A field built without it needs `.build().label("..")` on its frame, or a `.hint(..)`.
+- **`icon_button(..)` has no words: give it `.label("..")`** (Back, Share, Show password). `TopBar` labels its own back chevron.
+- `chip`, `wide_chip`, `filter_chip`, `choice` and `tab_bar` say whether they are selected; `page_title` and a `TopBar`'s title are headings; `detail_row`, `total_row`, `fact_row` and `timeline_step` are one stop each; `page_dots` says "Page 1 of 3".
+- A bar of coloured segments, or anything else that shows a value by its picture, takes `.role(Role::Progress).label(..).value(..)`.
+
+Nothing above moves a pixel: the fidelity numbers are the same to four decimals.
+
+**Findings that are the design's own.** The check asks for touch targets of 48 x 48 dp; the design's are 44 (`space::TOUCH`) and some of its links smaller. They are left as designed, listed here, and allowed by name in the test:
+
+| Control | Size in the design | Screens |
+| --- | --- | --- |
+| Icon buttons (back, share, show password, the green plus) | 44 x 44 | 03, 05, 08, 09, 10, 11 |
+| Chips, filter tabs, quick amounts, "Call" / "WhatsApp", "View all" | 44 tall | 07, 08, 09, 10, 11 |
+| "Skip" | 37 x 41 | 02 |
+| "Resend" | 41 tall | 05 |
+| "See all" | 33 tall | 07 |
+| "Forgot password?" | 29 tall | 03 |
+| "New to FundiDesk? Create an account", "Already have an account? Log in" | 17 tall (one line of text) | 03, 04 |
+
+The design's colours pass on all twelve screens: its muted text (`#5B6660`, `#6B756F`) on white and white on its green are all at or above 4.5:1.
+
 ## Known approximations to apply consistently
 
 - **Inputs are real.** A `Field` is the design's frame around a `TextInput`; unfocused it renders exactly as the design's field does (the fidelity numbers did not move when the look-alikes were replaced). With focus it takes the design's focused border, `1.5px solid #1E8416`, and shows a green caret; that state is not in any reference image.

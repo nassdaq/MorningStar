@@ -264,6 +264,35 @@ after each, on a Galaxy A27 (1080 x 2340 px at 2.8125, insets 102 and
 | `the_clock_runs_with_the_call_and_stops_with_it` | the timer ticks once a second in a call and the app is idle outside one |
 | `nothing_overflows_at_four_sizes` | no layout overflow on any screen or journey state at four sizes |
 
+## Accessibility
+
+Every screen is described to a screen reader ([ADR 0032](../../docs/architecture/0032-accessibility.md)); `tests/accessibility.rs` holds it to the framework's check on the test phone and at the design's size, and makes the main journey (welcome, home, a call, an answer, the red button, the report) with nothing but lookups by role and label and `ui.perform`. `cargo run -p callready --example screenshot -- out/ 02 --phone --semantics` draws a screen as a reader finds it.
+
+What was added, without moving a pixel (the fidelity numbers are the same to four decimals):
+
+- **Names for the controls that are only a picture**: Back, Close, Notifications (", unread" while the dot shows), Scenario settings, Start call, Hear the customer again, Mute and Sound off (switches that say whether they are on), End call, Send, Speak instead, Type instead, the microphone ("Speak your answer" / "Stop and send"), and the four tabs (Home, Progress, History, More; tabs, the current one selected).
+- **Headings**: each page's title, "Scenarios", today's call, the call's goal, "Call report", "CallReady Pro".
+- **Collages read as what they say**: the welcome headline is "Get job-ready with real calls" (not "real", a heart and five letters); "You charged me twice for the same bill" is one sentence; the score's two turned plates are "82 out of 100"; "Call №1 · Angry customer" is "Call number 1 · Angry customer"; a scenario card is its title and "Starts a practice call", without its numeral.
+- **Values**: each skill bar is "Clarity, 88 out of 100"; the call's progress bar "Call time used, 32 percent".
+- **States**: the chosen plan card, the chosen chip of each setting and the current tab are selected; the tips are disabled while muted.
+- **Live regions**: the caller's line, the call's status line ("YOU · SPEAKING", "RECORDING · 0:07 OF 1:00", "CONNECTING…") and the toast are read out when they change.
+
+Changed in the app's own screens, which the design does not draw: the option chips of the settings and the "Retry" pill are still 40 dp tall to the eye and are now tapped through a 48 dp box around them.
+
+**Findings that are the design's own.** The check asks for touch targets of 48 x 48 dp. The design draws these smaller; enlarging them would move designed pixels, so they are left, listed here, and allowed by name in `tests/accessibility.rs`:
+
+| Control | Size in the design | Where |
+| --- | --- | --- |
+| Back arrow | 44 x 44 | live call, call report, and the app's own pushed screens, which reuse it |
+| Close | 44 x 44 | premium |
+| Bell | 44 x 44 | home |
+| Gear | 44 x 44 | home |
+| Loudspeaker ("Hear the customer again") | 44 x 44 | live call |
+| Profile link | 46 tall (`min-height: 44px`, the avatar's 46) | home |
+| Tip chips | 34 tall (`padding: 6px 12px`) | live call |
+
+The design's colours pass: no text on any of the thirteen screens is below 4.5:1 against a background the check can know (text over the illustrations is not judged).
+
 ## What the remaining difference is
 
 - **Turned text** is rasterised for its angle and placed on the pixel

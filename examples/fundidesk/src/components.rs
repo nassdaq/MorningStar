@@ -461,8 +461,18 @@ impl<M> From<Field<M>> for Element<M> {
 
 /// A label above a field (or above anything): `display: flex;
 /// flex-direction: column; gap: 8px` with the label in Inter 13 medium.
+///
+/// To a screen reader the label is the field's name, not a text of its own
+/// before it: the field's frame is given it, and the frame hands it to the
+/// input.
 pub fn labelled<M>(text: impl Into<Label>, field: impl Into<Element<M>>) -> Container<M> {
-    col![label(text), field].gap(space::LABEL_GAP).fill_width()
+    let text = text.into();
+    col![
+        label(text.clone()).exclude_semantics(),
+        field.into().semantic_label(text),
+    ]
+    .gap(space::LABEL_GAP)
+    .fill_width()
 }
 
 // ------------------------------------------------------------------ pills
@@ -547,7 +557,9 @@ fn selectable<M>(text: Label, size: f32, selected: bool) -> Container<M> {
             .background(WHITE)
             .border(1.0, OUTLINE)
     };
-    frame.center()
+    // The tint is how the eye knows which is chosen; the state is how a
+    // screen reader does.
+    frame.center().selected(selected)
 }
 
 /// A chip that hugs its label: `height: 44px; padding: 0 14px;
@@ -584,7 +596,11 @@ pub fn filter_chip<M>(text: impl Into<Label>, active: bool) -> Container<M> {
     } else {
         selectable(text.into(), 13.0, false)
     };
-    frame.height(space::TOUCH).fill_width().radius(radius::PILL)
+    frame
+        .height(space::TOUCH)
+        .fill_width()
+        .radius(radius::PILL)
+        .selected(active)
 }
 
 /// One option of a segmented choice: `height: 48px; border-radius: 12px;
@@ -615,6 +631,7 @@ pub fn choice_with_check<M>(text: impl Into<Label>) -> Container<M> {
     .radius(radius::FIELD)
     .background(GREEN_TINT)
     .border(1.5, GREEN)
+    .selected(true)
 }
 
 /// One box of a verification code: `height: 56px; border-radius: 12px;
@@ -772,6 +789,8 @@ pub fn detail_row<M>(name: impl Into<Label>, value: impl Into<Label>) -> Contain
     row![inter(name, 14.0).color(MUTED), inter(value, 14.0)]
         .space_between()
         .fill_width()
+        // A name and its value are one thing to hear.
+        .merge_semantics()
 }
 
 /// The total line of a cost breakdown: both sides Inter 14 semibold.
@@ -779,6 +798,7 @@ pub fn total_row<M>(name: impl Into<Label>, value: impl Into<Label>) -> Containe
     row![inter(name, 14.0).semibold(), inter(value, 14.0).semibold()]
         .space_between()
         .fill_width()
+        .merge_semantics()
 }
 
 /// A fact with a fixed-width muted label: `display: flex; gap: 12px` with
@@ -793,6 +813,7 @@ pub fn fact_row<M>(name: impl Into<Label>, value: impl Into<Label>) -> Container
     ]
     .gap(12.0)
     .fill_width()
+    .merge_semantics()
 }
 
 // -------------------------------------------------------------- list rows
@@ -937,7 +958,16 @@ pub fn timeline_step<M>(
         .fill_width()
         .push(title.fill_width())
         .push_maybe(detail.map(|detail| meta(detail).fill_width()));
-    row![step_dot(step), texts].gap(12.0).fill_width()
+    // One stop per step, ending with what its marker shows.
+    row![step_dot(step), texts]
+        .gap(12.0)
+        .fill_width()
+        .merge_semantics()
+        .value(match step {
+            Step::Done => "done",
+            Step::Current => "in progress",
+            Step::Pending => "not started",
+        })
 }
 
 /// A repair's status history: steps `14px` apart with a 2 dp line behind
@@ -990,6 +1020,7 @@ pub fn page_dots<M>(active: usize, count: usize) -> Container<M> {
                 .radius(3.0)
                 .background(color)
         }))
+        .label(format!("Page {} of {count}", active + 1))
 }
 
 // ------------------------------------------------------------------- bars
@@ -1051,9 +1082,11 @@ impl<M> TopBar<M> {
     /// The bar as a box. Its top padding grows by the status bar's height
     /// on a device.
     pub fn build(self) -> Container<M> {
-        let back = icon_button(icons::CHEVRON_LEFT, 24.0, INK).on_press_maybe(self.back);
+        let back = icon_button(icons::CHEVRON_LEFT, 24.0, INK)
+            .on_press_maybe(self.back)
+            .label("Back");
         let titles = col![
-            grotesk(self.title, 20.0).line_height_dp(26.0),
+            grotesk(self.title, 20.0).line_height_dp(26.0).heading(),
             self.subtitle
         ]
         .gap(2.0)
@@ -1154,6 +1187,8 @@ pub fn tab_bar<M>(selected: Tab, message: impl Fn(Tab) -> M) -> Container<M> {
         .height(52.0)
         .fill_width()
         .on_press(message(tab))
+        .role(Role::Tab)
+        .selected(active)
         .id(("tab", tab))
     });
     col![

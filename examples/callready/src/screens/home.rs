@@ -146,6 +146,7 @@ fn profile(model: &Model) -> Container<Message> {
     .cross_align(CrossAlign::Center)
     .on_press(Message::Profile)
     .pressed_background(BLACK)
+    .label(format!("Profile, {}", model.first_name()))
     .id("home-profile")
 }
 
@@ -178,6 +179,12 @@ fn notifications(unread: bool) -> Container<Message> {
         .size(44.0, 44.0)
         .on_press(Message::Notifications)
         .pressed_background(BLACK)
+        // The dot is all that says something is unread.
+        .label(if unread {
+            "Notifications, unread"
+        } else {
+            "Notifications"
+        })
         .id("home-notifications")
 }
 
@@ -212,7 +219,8 @@ fn todays_call(model: &Model) -> Container<Message> {
             // `font-size: 30px; font-weight: 600; line-height: 1.1`.
             outfit(Scenario::MissingDelivery.title(), 30.0)
                 .semibold()
-                .line_height_dp(33.0),
+                .line_height_dp(33.0)
+                .heading(),
             // `font-size: 16px; color: #A1A1A6; margin-top: 4px`.
             outfit(model.settings.summary(), 16.0).color(MUTED),
         ]
@@ -226,6 +234,7 @@ fn todays_call(model: &Model) -> Container<Message> {
             .radius(30.0)
             .background(YELLOW)
             .on_press(Message::StartCall)
+            .label("Start call")
             .id("home-start-call"),
     ]
     .gap(18.0)
@@ -239,12 +248,13 @@ fn todays_call(model: &Model) -> Container<Message> {
 /// button.
 fn scenarios_heading() -> Container<Message> {
     row![
-        outfit("Scenarios", 26.0).bold(),
+        outfit("Scenarios", 26.0).bold().heading(),
         Container::new(Icon::vector(GEAR).size(24.0).color(WHITE).offset(-1.0, 0.0))
             .size(44.0, 44.0)
             .center()
             .on_press(Message::ScenarioSettings)
             .pressed_background(BLACK)
+            .label("Scenario settings")
             .id("home-scenario-settings"),
     ]
     .space_between()
@@ -406,6 +416,9 @@ fn card(
     .height(138.0)
     .on_press(Message::Scenario(index))
     .pressed_background(BLACK)
+    // The numeral is an ornament; the card is its scenario.
+    .label(Scenario::CARDS[index].title())
+    .hint("Starts a practice call")
     .id(("home-scenario", index))
 }
 

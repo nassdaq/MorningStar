@@ -92,7 +92,7 @@ fn header(state: &State) -> Container<Message> {
     });
     col![
         row![
-            grotesk("Repairs", 26.0).line_height_dp(32.0),
+            grotesk("Repairs", 26.0).line_height_dp(32.0).heading(),
             // `width: 44px; height: 44px; border-radius: 14px; background:
             // #1E8416; color: #FFFFFF` around a 22 px plus.
             Container::new(Icon::vector(icons::PLUS).size(22.0).color(WHITE))
@@ -101,6 +101,7 @@ fn header(state: &State) -> Container<Message> {
                 .radius(radius::BUTTON)
                 .background(GREEN)
                 .on_press(Message::NewRepair)
+                .label("New repair")
                 .id("new-repair"),
         ]
         .space_between()
