@@ -32,6 +32,18 @@ pub(crate) enum AtlasKey {
     /// `context::tone`): the same glyph drawn dark and light is two images.
     Glyph(CacheKey, u8),
     Icon(crate::icon::IconKey),
+    /// A glyph rasterised through the linear part of a transform (in
+    /// 4096ths), for text that is drawn turned, with the tone it is
+    /// weighted for. The key's bins are the pen's fraction on both axes of
+    /// the screen. See ADR 0029.
+    Turned(CacheKey, u8, [i32; 4]),
+    /// The coverage of a single-ink SVG picture, by its content hash and
+    /// pixel size.
+    Svg {
+        content: u64,
+        width: u32,
+        height: u32,
+    },
 }
 
 impl From<CacheKey> for AtlasKey {

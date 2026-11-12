@@ -8,9 +8,11 @@ use cosmic_text::{
 };
 use morningstar_core::{AtlasView, Color, DisplayList, Point, Rect, Size, Transform};
 
-use crate::atlas::{Atlas, Lookup};
+use crate::atlas::{Atlas, AtlasKey, Lookup};
 use crate::icon::{Art, IconError, IconKey, MAX_ICON_PIXELS, VectorIcon};
-use crate::picture::{Canvas, LineCap, LineJoin, MAX_PICTURE_PIXELS, Paint, StrokePaint};
+use crate::picture::{
+    Canvas, DEFAULT_MITER_LIMIT, Ink, LineCap, LineJoin, MAX_PICTURE_PIXELS, Paint, StrokePaint,
+};
 use crate::{FontFamily, TextAlign, TextSpan, TextStyle};
 
 /// Filled and outlined lettering as an image, from
@@ -43,8 +45,10 @@ struct PlacedGlyph {
     /// From the line's top, once that is on a pixel row, down to the pen:
     /// a whole number of pixels (see [`baseline`]).
     rise: f32,
-    /// The colour of the span the glyph belongs to, if the span sets one.
-    color: Option<Color>,
+    /// Which span the glyph belongs to: its colour is the span's, looked
+    /// up when the glyph is drawn, so that a paragraph whose colours change
+    /// (a fade) keeps its shaping.
+    span: u32,
 }
 
 /// A shaped and line-broken paragraph, kept between frames.
@@ -132,6 +136,48 @@ impl CaretMap {
         Rect::new(x, line.top, 0.0, line.height)
     }
 
+    /// The rectangles that cover bytes `from..to`, one or more per visual
+    /// line: a line that mixes directions has one per run of the selection.
+    fn selection(&self, from: usize, to: usize, out: &mut Vec<Rect>) {
+        let mut spans: Vec<(f32, f32)> = Vec::new();
+        for line in &self.lines {
+            spans.clear();
+            for stop in &self.stops[line.stops.clone()] {
+                let (start, end) = (stop.start.max(from), stop.end.min(to));
+                if start >= end || stop.width <= 0.0 {
+                    continue;
+                }
+                // The part of the cluster that is selected, from its
+                // leading edge.
+                let length = (stop.end - stop.start).max(1) as f32;
+                let near = (start - stop.start) as f32 / length * stop.width;
+                let far = (end - stop.start) as f32 / length * stop.width;
+                spans.push(if stop.rtl {
+                    let right = stop.x + stop.width;
+                    (right - far, right - near)
+                } else {
+                    (stop.x + near, stop.x + far)
+                });
+            }
+            spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut current: Option<(f32, f32)> = None;
+            for &(left, right) in &spans {
+                current = Some(match current {
+                    // Neighbours, give or take the rounding of positions.
+                    Some((start, end)) if left <= end + 0.5 => (start, end.max(right)),
+                    Some((start, end)) => {
+                        out.push(Rect::new(start, line.top, end - start, line.height));
+                        (left, right)
+                    }
+                    None => (left, right),
+                });
+            }
+            if let Some((start, end)) = current {
+                out.push(Rect::new(start, line.top, end - start, line.height));
+            }
+        }
+    }
+
     fn index_at(&self, point: Point) -> usize {
         let Some(line) = self
             .lines
@@ -200,6 +246,44 @@ pub struct TextContext {
     /// Kerning across a space, per font and pair of letters, in ems. See
     /// [`space_kerning`](Self::space_kerning).
     space_kerns: HashMap<SpaceKern, f32>,
+    /// The texts drawn turned in the previous frame and in this one, by
+    /// layout, each with the transforms (linear parts, quantised) it was
+    /// drawn through. See [`draw_spans`](Self::draw_spans).
+    turned_before: HashMap<u64, Vec<[i32; 4]>>,
+    turned_now: HashMap<u64, Vec<[i32; 4]>>,
+    /// Set when a turned text was drawn resampled because its transform
+    /// had just changed: one more frame will draw it sharp.
+    settle: bool,
+    /// Paragraphs shaped since the context was made.
+    shaped: u64,
+}
+
+/// Quantisation of a transform's linear part in a turned glyph's key:
+/// steps of 1/4096, a seventieth of a degree.
+const TURN_STEPS: f32 = 4096.0;
+/// Largest glyph size in pixels, font size times the transform's scale,
+/// that is rasterised turned. Larger text is resampled by the renderer.
+const MAX_TURNED_SIZE: f32 = 160.0;
+
+/// The linear part of `transform` as it keys turned glyphs, if text drawn
+/// through it should be rasterised for it: it turns, slants or scales, can
+/// be undone, and does not make `size` pixel glyphs too large.
+fn turned_linear(transform: Transform, size: f32) -> Option<[i32; 4]> {
+    if transform.is_translation() || !transform.is_finite() {
+        return None;
+    }
+    let scale = transform.determinant().abs().sqrt();
+    // Written so that NaN fails.
+    if !(scale > 1.0e-3 && scale * size <= MAX_TURNED_SIZE) {
+        return None;
+    }
+    let step = |value: f32| (value * TURN_STEPS).round();
+    let quantised = [transform.a, transform.b, transform.c, transform.d].map(step);
+    // Within the range of an `i32` by a wide margin, given the scale.
+    quantised
+        .iter()
+        .all(|value| value.abs() < 1.0e9)
+        .then(|| quantised.map(|value| value as i32))
 }
 
 impl Default for TextContext {
@@ -223,6 +307,10 @@ impl TextContext {
             atlas_full: false,
             icons: HashMap::new(),
             space_kerns: HashMap::new(),
+            turned_before: HashMap::new(),
+            turned_now: HashMap::new(),
+            settle: false,
+            shaped: 0,
         }
     }
 
@@ -274,6 +362,9 @@ impl TextContext {
         self.layouts
             .retain(|_, layout| layout.last_used >= previous);
         self.frame += 1;
+        std::mem::swap(&mut self.turned_before, &mut self.turned_now);
+        self.turned_now.clear();
+        self.settle = false;
 
         // The renderer has had the chance to upload the frame that just
         // ended; from here on the atlas records what changes relative to it.
@@ -340,6 +431,12 @@ impl TextContext {
         max_width: Option<f32>,
     ) -> Size {
         let key = self.layout(spans, style, max_width);
+        let through = list.current_transform();
+        if let Some(linear) = turned_linear(through, style.size)
+            && self.admit_turned(key, linear)
+        {
+            return self.draw_turned(list, key, spans, style, origin, (through, linear));
+        }
         let layout = &self.layouts[&key];
         // Positions far outside any surface would overflow the whole-pixel
         // arithmetic below; NaN draws at the origin.
@@ -364,7 +461,10 @@ impl TextContext {
             let (pen_x, x_bin) = SubpixelBin::new(origin.x + glyph.x);
             let pen_y = baseline(origin.y, glyph.line_top, glyph.rise) as i32;
             let glyph_key = CacheKey { x_bin, ..glyph.key };
-            let color = glyph.color.unwrap_or(style.color);
+            let color = spans
+                .get(glyph.span as usize)
+                .and_then(|span| span.color)
+                .unwrap_or(style.color);
             // Runs of one colour are the rule: its tone is worked out once.
             let tone = match toned {
                 Some((of, tone)) if of == color => tone,
@@ -416,6 +516,147 @@ impl TextContext {
         layout.size
     }
 
+    /// Records that the layout `key` is drawn through `linear` in this
+    /// frame, and decides how: true to rasterise its glyphs for the
+    /// transform, false to leave the turning to the renderer.
+    ///
+    /// The policy: a text is rasterised for its transform unless the same
+    /// text was drawn in the previous frame through other transforms and
+    /// not this one. That is a text whose angle or scale is changing, an
+    /// animation: every frame of it would put a whole new set of glyphs in
+    /// the atlas for one frame's use, so it is resampled instead, and one
+    /// more frame is asked for ([`take_settle_request`]), in which the
+    /// transform, if it has stopped changing, is the previous frame's and
+    /// the text is drawn sharp. A text that only moves keeps its linear
+    /// part and stays sharp.
+    ///
+    /// [`take_settle_request`]: Self::take_settle_request
+    fn admit_turned(&mut self, key: u64, linear: [i32; 4]) -> bool {
+        let now = self.turned_now.entry(key).or_default();
+        if !now.contains(&linear) {
+            now.push(linear);
+        }
+        match self.turned_before.get(&key) {
+            Some(before) if !before.contains(&linear) => {
+                self.settle = true;
+                false
+            }
+            _ => true,
+        }
+    }
+
+    /// How many paragraphs have been shaped since the context was made:
+    /// the expensive step, which a text drawn again unchanged skips. A
+    /// change of colour alone, of the style or of a span, is not a change
+    /// to the shaping. For tests and benchmarks.
+    pub fn shaped_count(&self) -> u64 {
+        self.shaped
+    }
+
+    /// True, once, if a text drawn since [`begin_frame`](Self::begin_frame)
+    /// was left to the renderer to turn because its transform had just
+    /// changed, and so wants one more frame to be drawn sharp in. Whoever
+    /// schedules frames asks after drawing and schedules one if so.
+    pub fn take_settle_request(&mut self) -> bool {
+        std::mem::take(&mut self.settle)
+    }
+
+    /// Draws a laid-out text through the transform `through`, whose
+    /// quantised linear part is `linear`: each glyph's outline is
+    /// rasterised turned, slanted and scaled as the transform does it, for
+    /// the fraction of a pixel its pen lands on, and drawn upright where
+    /// the transform takes the pen, in screen space. The glyph is then as
+    /// sharp as upright text, where the renderer turning an upright
+    /// bitmap resamples it (ADR 0029).
+    fn draw_turned(
+        &mut self,
+        list: &mut DisplayList,
+        key: u64,
+        spans: &[TextSpan<'_>],
+        style: &TextStyle,
+        origin: Point,
+        (through, linear): (Transform, [i32; 4]),
+    ) -> Size {
+        let layout = &self.layouts[&key];
+        let origin = Point::new(
+            if origin.x.is_nan() { 0.0 } else { origin.x },
+            if origin.y.is_nan() { 0.0 } else { origin.y },
+        );
+        list.push_screen_space();
+        let mut toned: Option<(Color, u8)> = None;
+        for glyph in &layout.glyphs {
+            // The pen where upright text has it, without its quarter-pixel
+            // rounding across (the rounding is made on screen, below), and
+            // then through the transform.
+            let pen = through.apply(Point::new(
+                origin.x + glyph.x,
+                baseline(origin.y, glyph.line_top, glyph.rise),
+            ));
+            // Written so that NaN is skipped.
+            if !(pen.x.abs() < 1.0e7 && pen.y.abs() < 1.0e7) {
+                continue;
+            }
+            let (pen_x, x_bin) = SubpixelBin::new(pen.x);
+            let (pen_y, y_bin) = SubpixelBin::new(pen.y);
+            let glyph_key = CacheKey {
+                x_bin,
+                y_bin,
+                ..glyph.key
+            };
+            let color = spans
+                .get(glyph.span as usize)
+                .and_then(|span| span.color)
+                .unwrap_or(style.color);
+            let tone = match toned {
+                Some((of, tone)) if of == color => tone,
+                _ => {
+                    let tone = tone(color);
+                    toned = Some((color, tone));
+                    tone
+                }
+            };
+            let atlas_key = AtlasKey::Turned(glyph_key, tone, linear);
+            let slot = match self.atlas.lookup(atlas_key) {
+                Lookup::Found(slot) => slot,
+                Lookup::Blank => continue,
+                Lookup::Missing => {
+                    match rasterise_turned(
+                        &mut self.fonts,
+                        &mut self.rasteriser,
+                        &mut self.atlas,
+                        glyph_key,
+                        tone,
+                        linear,
+                    ) {
+                        Rasterised::Slot(slot) => slot,
+                        Rasterised::Blank => continue,
+                        Rasterised::AtlasFull => {
+                            self.atlas_full = true;
+                            continue;
+                        }
+                    }
+                }
+            };
+            list.draw_glyph(
+                Rect::new(
+                    (pen_x + slot.left) as f32,
+                    (pen_y - slot.top) as f32,
+                    slot.width as f32,
+                    slot.height as f32,
+                ),
+                Rect::new(
+                    slot.x as f32,
+                    slot.y as f32,
+                    slot.width as f32,
+                    slot.height as f32,
+                ),
+                color,
+            );
+        }
+        list.pop_screen_space();
+        layout.size
+    }
+
     /// Where a caret at byte offset `index` of `text` belongs, relative to
     /// the origin the text is drawn at with the same style and width: a
     /// rectangle of zero width and one line's height. `index` is clamped to
@@ -455,6 +696,38 @@ impl TextContext {
     ) -> usize {
         self.caret_map(text, style, max_width)
             .map_or(0, |map| map.index_at(point))
+    }
+
+    /// The rectangles a selection of bytes `from..to` of `text` covers,
+    /// relative to the origin the text is drawn at with the same style and
+    /// width, appended to `out`: one per visual line the selection touches,
+    /// each one line tall, and more than one on a line where the selection
+    /// is split by a change of direction (the middle of an Arabic word and
+    /// the Latin word after it are not next to each other on screen). The
+    /// offsets are clamped to the text and moved back to character
+    /// boundaries; a line break inside the selection covers nothing.
+    pub fn selection_rects(
+        &mut self,
+        text: &str,
+        style: &TextStyle,
+        max_width: Option<f32>,
+        from: usize,
+        to: usize,
+        out: &mut Vec<Rect>,
+    ) {
+        let clamp = |index: usize| {
+            let mut index = index.min(text.len());
+            while !text.is_char_boundary(index) {
+                index -= 1;
+            }
+            index
+        };
+        let (from, to) = (clamp(from.min(to)), clamp(from.max(to)));
+        if from < to
+            && let Some(map) = self.caret_map(text, style, max_width)
+        {
+            map.selection(from, to, out);
+        }
     }
 
     /// The caret map of a text, built on first use and kept with its layout.
@@ -595,6 +868,81 @@ impl TextContext {
         );
     }
 
+    /// Draws a loaded SVG as a one-colour icon into `rect` (physical
+    /// pixels), in `color`, if it is one: returns false, having drawn
+    /// nothing, for a picture that is not
+    /// [single-ink](crate::SvgPicture::is_single_ink), which belongs on the
+    /// image path instead.
+    ///
+    /// As for [`draw_icon`](Self::draw_icon): fitted and centred, snapped
+    /// to whole pixels, rasterised for exactly that many, and kept in the
+    /// glyph atlas (keyed by the picture's content and pixel size) so that
+    /// it shares text's draw call and takes any colour without being
+    /// rasterised again. The picture's own colour is not used. Larger than
+    /// 512 pixels, it is rasterised at 512 and stretched.
+    pub fn draw_svg_icon(
+        &mut self,
+        list: &mut DisplayList,
+        picture: &crate::SvgPicture,
+        rect: Rect,
+        color: Color,
+    ) -> bool {
+        if !picture.is_single_ink() {
+            return false;
+        }
+        let (left, top) = (rect.x.round(), rect.y.round());
+        let width = (rect.x + rect.width).round() - left;
+        let height = (rect.y + rect.height).round() - top;
+        // Written so that NaN is rejected.
+        if !(width >= 1.0 && height >= 1.0 && width < 1.0e6 && height < 1.0e6) {
+            return true;
+        }
+        let (width, height) = (width as u32, height as u32);
+        let longest = width.max(height);
+        let (mask_width, mask_height) = if longest > MAX_ICON_PIXELS {
+            let shrink = |side: u32| (side * MAX_ICON_PIXELS).div_ceil(longest).max(1);
+            (shrink(width), shrink(height))
+        } else {
+            (width, height)
+        };
+        let key = crate::atlas::AtlasKey::Svg {
+            // The mask does not depend on the current colour.
+            content: picture.with_current_color(Color::BLACK).content_hash(),
+            width: mask_width,
+            height: mask_height,
+        };
+        let slot = match self.atlas.lookup(key) {
+            Lookup::Found(slot) => slot,
+            Lookup::Blank => return true,
+            Lookup::Missing => {
+                let coverage = picture
+                    .with_current_color(Color::BLACK)
+                    .rasterise_mask(mask_width, mask_height);
+                match self
+                    .atlas
+                    .insert(key, mask_width, mask_height, 0, 0, &coverage)
+                {
+                    Some(slot) => slot,
+                    None => {
+                        self.atlas_full = true;
+                        return true;
+                    }
+                }
+            }
+        };
+        list.draw_glyph(
+            Rect::new(left, top, width as f32, height as f32),
+            Rect::new(
+                slot.x as f32,
+                slot.y as f32,
+                slot.width as f32,
+                slot.height as f32,
+            ),
+            color,
+        );
+        true
+    }
+
     /// Rasterises a short text as filled and outlined lettering (CSS
     /// `-webkit-text-stroke`): the glyphs' outlines filled with the style's
     /// colour and then stroked, centred on the outline, `stroke_width`
@@ -689,16 +1037,19 @@ impl TextContext {
         canvas.paint(&Paint {
             commands: &path,
             transform: Transform::translate(-left, -top),
-            fill: Some(style.color),
+            fill: Some(Ink::color(style.color)),
             even_odd: false,
             stroke: (stroke_width > 0.0).then_some(StrokePaint {
-                color: stroke,
+                ink: Ink::color(stroke),
                 width: stroke_width,
                 cap: LineCap::Butt,
                 join: LineJoin::Miter,
+                miter_limit: DEFAULT_MITER_LIMIT,
+                dashes: &[],
+                dash_offset: 0.0,
             }),
             opacity: 1.0,
-            clip: None,
+            clips: &[],
         });
         Some(OutlinedText {
             width: width as u32,
@@ -724,9 +1075,8 @@ impl TextContext {
             span.weight.hash(&mut hasher);
             span.family.hash(&mut hasher);
             span.italic.hash(&mut hasher);
-            span.color
-                .map(|color| [color.r, color.g, color.b, color.a].map(f32::to_bits))
-                .hash(&mut hasher);
+            // Not the colour: it changes nothing about the shaping, and a
+            // text fading in would otherwise be shaped anew every frame.
         }
         style.size.to_bits().hash(&mut hasher);
         style.line_height.to_bits().hash(&mut hasher);
@@ -746,6 +1096,7 @@ impl TextContext {
             return key;
         }
 
+        self.shaped += 1;
         let (glyphs, size) = self.shape(spans, style, max_width);
         self.layouts.insert(
             key,
@@ -816,7 +1167,7 @@ impl TextContext {
                     // Marks raised or lowered by the font stay on whole
                     // pixels with their base.
                     rise: rise + (glyph.y - glyph.font_size * glyph.y_offset).round(),
-                    color: spans.get(glyph.metadata).and_then(|span| span.color),
+                    span: glyph.metadata as u32,
                 });
             }
             size.width = size.width.max(run.line_w + moved.total);
@@ -1165,6 +1516,63 @@ fn tone_curve(tone: u8) -> &'static [u8; 256] {
             .collect()
     });
     &curves[usize::from(tone.clamp(1, TONES - 1)) - 1]
+}
+
+/// Rasterises a glyph's outline through `linear` (a transform's linear
+/// part, in 4096ths) for the pen fractions in `key`'s bins, and puts it in
+/// the atlas. The outline is the one upright text is filled from, with the
+/// synthetic slant if the glyph has one, unhinted.
+fn rasterise_turned(
+    fonts: &mut FontSystem,
+    rasteriser: &mut SwashCache,
+    atlas: &mut Atlas,
+    key: CacheKey,
+    tone: u8,
+    linear: [i32; 4],
+) -> Rasterised {
+    let atlas_key = AtlasKey::Turned(key, tone, linear);
+    // One outline per glyph, whatever the fraction.
+    let outline = CacheKey {
+        x_bin: SubpixelBin::Zero,
+        y_bin: SubpixelBin::Zero,
+        ..key
+    };
+    let Some(commands) = rasteriser.get_outline_commands(fonts, outline) else {
+        atlas.insert_blank(atlas_key);
+        return Rasterised::Blank;
+    };
+    let [a, b, c, d] = linear.map(|value| value as f32 / TURN_STEPS);
+    // The outline is y-up about the pen; the screen is y-down. Flip, then
+    // the transform's linear part, then the pen's fraction of a pixel.
+    let place = zeno::Transform::new(a, b, -c, -d, key.x_bin.as_float(), key.y_bin.as_float());
+    let (coverage, placement) = zeno::Mask::new(commands).transform(Some(place)).render();
+    if placement.width == 0 || placement.height == 0 {
+        atlas.insert_blank(atlas_key);
+        return Rasterised::Blank;
+    }
+    let weighted;
+    let data = if tone == 0 {
+        &coverage
+    } else {
+        let curve = tone_curve(tone);
+        weighted = coverage
+            .iter()
+            .map(|&coverage| curve[usize::from(coverage)])
+            .collect::<Vec<u8>>();
+        &weighted
+    };
+    match atlas.insert(
+        atlas_key,
+        placement.width,
+        placement.height,
+        placement.left,
+        // The slot's `top` is measured upwards; the mask's downwards.
+        -placement.top,
+        data,
+    ) {
+        Some(slot) => Rasterised::Slot(slot),
+        None => Rasterised::AtlasFull,
+    }
 }
 
 fn rasterise(

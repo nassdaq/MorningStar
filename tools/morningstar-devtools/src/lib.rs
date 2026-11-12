@@ -19,6 +19,9 @@
 //! its `Cargo.toml` (a name, an id, an icon) into the launcher icons and
 //! names the Android and iOS builds need; the `morningstar-icon` binary is
 //! what the build scripts run (ADR 0020).
+//!
+//! [`render_svg`] and the `morningstar-svg` binary render an SVG file to a
+//! PNG with the loader applications use (ADR 0027).
 
 mod diff;
 mod frame;
@@ -28,6 +31,7 @@ mod image;
 mod json;
 mod png;
 mod reference;
+mod svg;
 
 use std::time::Duration;
 
@@ -45,6 +49,7 @@ pub use png::encode as encode_png;
 pub use reference::{
     ReferenceError, ReferenceOutcome, UPDATE_ENV, assert_matches_reference, check_reference,
 };
+pub use svg::{SvgBackground, color_from_srgb, render_svg};
 
 /// Renders one frame of `app` at `size` and returns it as PNG bytes.
 ///

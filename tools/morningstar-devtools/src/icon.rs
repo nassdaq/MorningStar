@@ -28,7 +28,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::identity::{IconError, Identity};
-use crate::image::{Image, linear_to_srgb, srgb_to_linear_table};
+use crate::image::Image;
 
 /// Android's density buckets with the side of a 48 dp launcher icon in
 /// each, in pixels.
@@ -176,12 +176,11 @@ impl IconSet {
     /// a dark field, or on `background` if the app chose a colour.
     pub fn builtin(background: Option<[u8; 3]>) -> Self {
         let field = background.unwrap_or(FIELD);
-        let to_linear = srgb_to_linear_table();
         // The same star in both: the foreground's is 72/108 the size, so
         // the launcher's 72 dp window shows exactly the full icon.
         let mut icon = star(STAR_REACH);
         for pixel in icon.rgba_mut().chunks_exact_mut(4) {
-            let [r, g, b] = over(field, [pixel[0], pixel[1], pixel[2], pixel[3]], &to_linear);
+            let [r, g, b] = over(field, [pixel[0], pixel[1], pixel[2], pixel[3]]);
             pixel.copy_from_slice(&[r, g, b, 255]);
         }
         Self {
@@ -260,11 +259,10 @@ impl IconSet {
         let background = self.background()?;
         let canvas = self.foreground(side / 2 * 3);
         let margin = side / 4;
-        let to_linear = srgb_to_linear_table();
         let mut window = Image::filled(side, side, [0, 0, 0, 255]);
         for y in 0..side {
             for x in 0..side {
-                let [r, g, b] = over(background, canvas.pixel(margin + x, margin + y), &to_linear);
+                let [r, g, b] = over(background, canvas.pixel(margin + x, margin + y));
                 window.set_pixel(x, y, [r, g, b, 255]);
             }
         }
@@ -277,13 +275,8 @@ impl IconSet {
         let mut icon = self.icon.resized(FULL, FULL);
         if !icon.is_opaque() {
             let background = self.background()?;
-            let to_linear = srgb_to_linear_table();
             for pixel in icon.rgba_mut().chunks_exact_mut(4) {
-                let [r, g, b] = over(
-                    background,
-                    [pixel[0], pixel[1], pixel[2], pixel[3]],
-                    &to_linear,
-                );
+                let [r, g, b] = over(background, [pixel[0], pixel[1], pixel[2], pixel[3]]);
                 pixel.copy_from_slice(&[r, g, b, 255]);
             }
         }
@@ -458,7 +451,6 @@ impl IconSet {
             GAP + rows.iter().map(height).sum::<u32>(),
             [0x8A, 0x8A, 0x8E, 255],
         );
-        let to_linear = srgb_to_linear_table();
         let mut top = GAP;
         for row in &rows {
             let mut left = GAP;
@@ -466,7 +458,7 @@ impl IconSet {
                 for y in 0..image.height() {
                     for x in 0..image.width() {
                         let [r, g, b, _] = sheet.pixel(left + x, top + y);
-                        let [r, g, b] = over([r, g, b], image.pixel(x, y), &to_linear);
+                        let [r, g, b] = over([r, g, b], image.pixel(x, y));
                         sheet.set_pixel(left + x, top + y, [r, g, b, 255]);
                     }
                 }
@@ -498,19 +490,19 @@ fn checked(image: Image, path: &Path) -> Result<Image, IconError> {
     Ok(image)
 }
 
-/// `pixel` drawn over an opaque colour, blended in linear light as the
-/// renderer and [`Image::resized`] do.
-fn over(under: [u8; 3], pixel: [u8; 4], to_linear: &[f32; 256]) -> [u8; 3] {
+/// `pixel` drawn over an opaque colour, blended as the renderer, browsers
+/// and both platforms' launchers composite: on the sRGB-encoded values
+/// (ADR 0023). Half-transparent white over black is byte 128.
+fn over(under: [u8; 3], pixel: [u8; 4]) -> [u8; 3] {
     match pixel[3] {
         255 => [pixel[0], pixel[1], pixel[2]],
         0 => under,
         alpha => {
-            let alpha = f32::from(alpha) / 255.0;
+            let alpha = u32::from(alpha);
             std::array::from_fn(|channel| {
-                linear_to_srgb(
-                    to_linear[usize::from(pixel[channel])] * alpha
-                        + to_linear[usize::from(under[channel])] * (1.0 - alpha),
-                )
+                let blended =
+                    u32::from(pixel[channel]) * alpha + u32::from(under[channel]) * (255 - alpha);
+                ((blended + 127) / 255) as u8
             })
         }
     }
@@ -793,14 +785,15 @@ mod tests {
 
     #[test]
     fn the_ios_icon_is_1024_opaque_and_flattened_onto_the_background() {
-        // Half-transparent white over black is 50% linear grey: sRGB 188.
+        // Half-transparent white over black is half the encoded value, as
+        // the renderer and the platforms composite (ADR 0023).
         let mut icon = cutout(512);
         icon.fill_rect(crate::Rect::new(0, 0, 512, 64), [255, 255, 255, 128]);
         let set = IconSet::new(icon, None, Some([0, 0, 0])).unwrap();
         let flat = set.ios_icon().unwrap();
         assert_eq!((flat.width(), flat.height()), (1024, 1024));
         assert!(flat.is_opaque());
-        assert_eq!(flat.pixel(10, 10), [188, 188, 188, 255]);
+        assert_eq!(flat.pixel(10, 10), [128, 128, 128, 255]);
         assert_eq!(flat.pixel(10, 400), [0, 0, 0, 255]);
         assert_eq!(flat.pixel(512, 512), BLUE);
 

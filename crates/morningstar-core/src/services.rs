@@ -379,12 +379,23 @@ pub enum ServiceRequest {
         /// The name the value was kept under.
         key: String,
     },
+    /// Put this plain text on the system clipboard, replacing what is
+    /// there. Not answered.
+    SetClipboard(String),
+    /// Read the system clipboard as plain text (formatting is dropped).
+    /// Answered with [`ServiceResult::Clipboard`]. Hosts read only when
+    /// asked: on Android 12 and later the system tells the user each time
+    /// an application reads what another one copied.
+    ReadClipboard,
 }
 
 impl ServiceRequest {
     /// True if the host answers this request with a [`ServiceResult`].
     pub fn expects_result(&self) -> bool {
-        !matches!(self, Self::StopPlayback | Self::Store { .. })
+        !matches!(
+            self,
+            Self::StopPlayback | Self::Store { .. } | Self::SetClipboard(_)
+        )
     }
 
     /// The answer to give when nothing can carry the request out: the
@@ -397,7 +408,8 @@ impl ServiceRequest {
             Self::StopRecording => ServiceResult::Recording(Err(AudioError::Unsupported)),
             Self::Play(_) => ServiceResult::Played(Err(AudioError::Unsupported)),
             Self::Load { .. } => ServiceResult::Loaded(None),
-            Self::StopPlayback | Self::Store { .. } => return None,
+            Self::ReadClipboard => ServiceResult::Clipboard(None),
+            Self::StopPlayback | Self::Store { .. } | Self::SetClipboard(_) => return None,
         })
     }
 
@@ -411,6 +423,8 @@ impl ServiceRequest {
             Self::StopPlayback => "stop playback",
             Self::Store { .. } => "store",
             Self::Load { .. } => "load",
+            Self::SetClipboard(_) => "set clipboard",
+            Self::ReadClipboard => "read clipboard",
         }
     }
 }
@@ -429,6 +443,9 @@ pub enum ServiceResult {
     /// For [`ServiceRequest::Load`]: the value, or `None` if the key holds
     /// nothing.
     Loaded(Option<String>),
+    /// For [`ServiceRequest::ReadClipboard`]: the clipboard's text, or
+    /// `None` if it is empty, holds no text, or cannot be read here.
+    Clipboard(Option<String>),
 }
 
 /// A request on its way to the host, with the id its answer must carry.

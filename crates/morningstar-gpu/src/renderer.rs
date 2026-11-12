@@ -420,8 +420,9 @@ pub(crate) async fn request_gpu(
     })
 }
 
-/// Encodes one render pass that clears `view` to `color` and then draws the
-/// rectangles `quads` was last prepared with.
+/// Encodes the frame `quads` was last prepared with: `view` cleared to
+/// `color` and the list drawn over it. One render pass, unless the list has
+/// layers (ADR 0028).
 pub(crate) fn encode_frame(
     device: &wgpu::Device,
     view: &wgpu::TextureView,
@@ -431,31 +432,7 @@ pub(crate) fn encode_frame(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("morningstar frame"),
     });
-    {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("clear"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    // Encoded, like every colour drawn over it.
-                    load: wgpu::LoadOp::Clear({
-                        let [r, g, b, a] = color.srgb();
-                        wgpu::Color {
-                            r: f64::from(r),
-                            g: f64::from(g),
-                            b: f64::from(b),
-                            a: f64::from(a),
-                        }
-                    }),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            ..Default::default()
-        });
-        quads.draw(&mut pass);
-    }
+    quads.encode(&mut encoder, view, color);
     encoder.finish()
 }
 

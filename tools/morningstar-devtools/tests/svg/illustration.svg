@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A small multi-colour illustration: a sunset in a round window. Linear
+     and radial gradients (one inheriting another's stops), a clip path, a
+     faded group whose shapes overlap, dashes, and transforms. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="160" height="120" viewBox="0 0 160 120">
+  <title>Sunset</title>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1D3557"/>
+      <stop offset="0.55" stop-color="#E76F51"/>
+      <stop offset="1" stop-color="#F6C445"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFF8E1"/>
+      <stop offset="0.6" stop-color="#FFD166"/>
+      <stop offset="1" stop-color="#FFD166" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sea" gradientUnits="userSpaceOnUse" x1="0" y1="78" x2="0" y2="120">
+      <stop offset="0" stop-color="#264653"/>
+      <stop offset="1" stop-color="#0E0E0E"/>
+    </linearGradient>
+    <linearGradient id="glint" xlink:href="#sea" gradientTransform="rotate(-90 80 99)"/>
+    <clipPath id="window">
+      <rect x="10" y="6" width="140" height="108" rx="30"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#window)">
+    <rect width="160" height="120" fill="url(#sky)"/>
+    <circle cx="80" cy="74" r="34" fill="url(#sun)"/>
+    <!-- Two hills that overlap, faded together: the nearer one must not
+         show the farther one through it. -->
+    <g opacity="0.6" fill="#2A9D8F">
+      <path d="M-10 90 Q 30 40 75 90 Z"/>
+      <path d="M40 90 Q 95 30 170 90 Z" fill="#1B6F65"/>
+    </g>
+    <rect y="78" width="160" height="42" fill="url(#sea)"/>
+    <g fill="none" stroke="#FFD166" stroke-linecap="round" stroke-opacity="0.8">
+      <path d="M52 86h56" stroke-width="2" stroke-dasharray="10 6"/>
+      <path d="M60 95h40" stroke-width="1.6" stroke-dasharray="6 5" stroke-dashoffset="3"/>
+      <path d="M68 104h24" stroke-width="1.2" stroke-dasharray="3 4"/>
+    </g>
+    <g transform="translate(118 30) rotate(20) scale(0.8)" fill="#FFFFFF" fill-opacity="0.85">
+      <ellipse cx="0" cy="0" rx="18" ry="7"/>
+      <ellipse cx="-10" cy="-5" rx="10" ry="6"/>
+      <ellipse cx="8" cy="-6" rx="9" ry="5"/>
+    </g>
+    <polygon points="24,84 30,70 36,84" fill="#0E0E0E"/>
+    <line x1="30" y1="70" x2="30" y2="60" stroke="#0E0E0E" stroke-width="1.5"/>
+    <polyline points="30,61 38,64 30,67" fill="#E63946"/>
+  </g>
+  <rect x="10" y="6" width="140" height="108" rx="30" fill="none" stroke="#0E0E0E" stroke-width="3" stroke-linejoin="round"/>
+</svg>

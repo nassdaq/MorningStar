@@ -515,31 +515,202 @@ impl VectorPicture {
                 Some(own) => own.matrix().then(to_pixels),
                 None => to_pixels,
             };
+            let clip_part = clip.as_deref().map(|commands| {
+                [ClipPart {
+                    commands,
+                    transform: to_pixels,
+                    even_odd: false,
+                }]
+            });
+            let clip_parts = clip_part.as_ref().map(|part| [&part[..]]);
             canvas.paint(&Paint {
                 commands: &commands,
                 transform,
-                fill: layer.fill,
+                fill: layer.fill.map(Ink::color),
                 even_odd: layer.even_odd,
                 stroke: layer.stroke.map(|color| StrokePaint {
-                    color,
+                    ink: Ink::color(color),
                     width: layer.stroke_width,
                     cap: layer.cap,
                     join: layer.join,
+                    miter_limit: DEFAULT_MITER_LIMIT,
+                    dashes: &[],
+                    dash_offset: 0.0,
                 }),
                 opacity: layer.opacity,
-                clip: clip.as_deref().map(|commands| (commands, to_pixels)),
+                clips: clip_parts.as_ref().map_or(&[], |parts| &parts[..]),
             });
         }
         canvas.finish()
     }
 }
 
-pub(crate) struct StrokePaint {
-    pub color: Color,
+/// SVG's initial `stroke-miterlimit`, which is also `zeno`'s default.
+pub(crate) const DEFAULT_MITER_LIMIT: f32 = 4.0;
+
+/// What a fill or a stroke is painted with.
+#[derive(Clone, Copy)]
+pub(crate) enum Ink<'a> {
+    /// One colour: sRGB-encoded and premultiplied by its alpha.
+    Solid([f32; 4]),
+    /// A gradient, evaluated at each pixel's centre.
+    Gradient(&'a GradientInk),
+}
+
+impl Ink<'_> {
+    pub(crate) fn color(color: Color) -> Self {
+        Self::Solid(premultiplied(color))
+    }
+
+    fn paints(&self) -> bool {
+        match self {
+            Self::Solid(color) => color[3] > 0.0,
+            Self::Gradient(gradient) => !gradient.stops.is_empty(),
+        }
+    }
+
+    /// The premultiplied colour at the pixel whose top-left is `(x, y)`.
+    #[inline]
+    fn at(&self, x: u32, y: u32) -> [f32; 4] {
+        match self {
+            Self::Solid(color) => *color,
+            Self::Gradient(gradient) => gradient.at(x as f32 + 0.5, y as f32 + 0.5),
+        }
+    }
+}
+
+/// How a gradient continues outside its vector: SVG `spreadMethod`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Spread {
+    Pad,
+    Reflect,
+    Repeat,
+}
+
+/// The geometry of a gradient, in its own coordinate space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum GradientShape {
+    /// From `(x1, y1)` to `(x2, y2)`.
+    Linear { from: (f32, f32), to: (f32, f32) },
+    /// A circle of `radius` about `center`, with colour 0 at `focus`.
+    Radial {
+        center: (f32, f32),
+        radius: f32,
+        focus: (f32, f32),
+    },
+}
+
+/// A gradient ready to be evaluated per pixel.
+pub(crate) struct GradientInk {
+    pub shape: GradientShape,
+    /// From pixels to the gradient's own space.
+    pub from_pixels: Transform,
+    pub spread: Spread,
+    /// Offsets, never decreasing, in `0..=1`, with sRGB-encoded colours
+    /// and straight alpha: SVG interpolates the channels and the alpha
+    /// separately, unlike CSS gradients. Empty paints nothing.
+    pub stops: Vec<(f32, [f32; 4])>,
+}
+
+impl GradientInk {
+    /// Position along the gradient of a point in pixels, before spreading.
+    fn parameter(&self, x: f32, y: f32) -> f32 {
+        let point = self.from_pixels.apply(morningstar_core::Point::new(x, y));
+        match self.shape {
+            GradientShape::Linear { from, to } => {
+                let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+                let length = dx * dx + dy * dy;
+                if length > 0.0 {
+                    ((point.x - from.0) * dx + (point.y - from.1) * dy) / length
+                } else {
+                    // A zero-length vector paints the last stop.
+                    1.0
+                }
+            }
+            GradientShape::Radial {
+                center,
+                radius,
+                focus,
+            } => {
+                if radius <= 0.0 || radius.is_nan() {
+                    return 1.0;
+                }
+                // The circle through the point, of radius `t * radius`,
+                // centred `t` of the way from the focus to the centre:
+                // |d - t * cf| = t * radius, the larger root.
+                let (dx, dy) = (point.x - focus.0, point.y - focus.1);
+                let (cx, cy) = (center.0 - focus.0, center.1 - focus.1);
+                let a = radius * radius - (cx * cx + cy * cy);
+                let b = dx * cx + dy * cy;
+                let c = dx * dx + dy * dy;
+                if a <= 0.0 {
+                    return 1.0;
+                }
+                (-b + (b * b + a * c).max(0.0).sqrt()).max(0.0) / a
+            }
+        }
+    }
+
+    fn at(&self, x: f32, y: f32) -> [f32; 4] {
+        let Some(&(first_offset, first)) = self.stops.first() else {
+            return [0.0; 4];
+        };
+        let mut t = self.parameter(x, y);
+        if t.is_nan() {
+            t = 0.0;
+        }
+        let t = match self.spread {
+            Spread::Pad => t.clamp(0.0, 1.0),
+            Spread::Repeat => t - t.floor(),
+            Spread::Reflect => {
+                let folded = t.rem_euclid(2.0);
+                if folded > 1.0 { 2.0 - folded } else { folded }
+            }
+        };
+        let mut color = first;
+        if t > first_offset {
+            let mut below = (first_offset, first);
+            color = self.stops[self.stops.len() - 1].1;
+            for &(offset, stop) in &self.stops[1..] {
+                if t < offset {
+                    let amount = (t - below.0) / (offset - below.0);
+                    for channel in 0..4 {
+                        color[channel] =
+                            below.1[channel] + (stop[channel] - below.1[channel]) * amount;
+                    }
+                    break;
+                }
+                below = (offset, stop);
+            }
+        }
+        [
+            color[0] * color[3],
+            color[1] * color[3],
+            color[2] * color[3],
+            color[3],
+        ]
+    }
+}
+
+pub(crate) struct StrokePaint<'a> {
+    pub ink: Ink<'a>,
     /// In the units of the path, before the transform.
     pub width: f32,
     pub cap: LineCap,
     pub join: LineJoin,
+    pub miter_limit: f32,
+    /// Lengths of dashes and gaps in the units of the path; empty for a
+    /// solid line. Never all zero, never negative, and of even length.
+    pub dashes: &'a [f32],
+    pub dash_offset: f32,
+}
+
+/// One shape of a clip, with its own transform to pixels.
+#[derive(Clone, Copy)]
+pub(crate) struct ClipPart<'a> {
+    pub commands: &'a [Command],
+    pub transform: Transform,
+    pub even_odd: bool,
 }
 
 /// One painting step: a path, how it is filled and stroked, and what cuts
@@ -548,12 +719,13 @@ pub(crate) struct Paint<'a> {
     pub commands: &'a [Command],
     /// From the path's units to pixels.
     pub transform: Transform,
-    pub fill: Option<Color>,
+    pub fill: Option<Ink<'a>>,
     pub even_odd: bool,
-    pub stroke: Option<StrokePaint>,
+    pub stroke: Option<StrokePaint<'a>>,
     pub opacity: f32,
-    /// A clip path and its own transform to pixels.
-    pub clip: Option<(&'a [Command], Transform)>,
+    /// Clips, all of which apply: each is the union of its parts. No clips
+    /// leaves the step uncut; a clip with no parts cuts everything away.
+    pub clips: &'a [&'a [ClipPart<'a>]],
 }
 
 /// An image being composited: sRGB-encoded RGBA premultiplied by alpha, in
@@ -567,6 +739,9 @@ pub(crate) struct Canvas {
     fill: Vec<u8>,
     stroke: Vec<u8>,
     clip: Vec<u8>,
+    /// Further coverage buffers, for clips made of several shapes.
+    scratch: Vec<u8>,
+    union: Vec<u8>,
 }
 
 fn to_zeno(transform: Transform) -> zeno::Transform {
@@ -579,6 +754,222 @@ fn to_zeno(transform: Transform) -> zeno::Transform {
         transform.tx,
         transform.ty,
     )
+}
+
+/// How far outside the image, in pixels, geometry may reach and still be
+/// handed to the rasteriser as it is. `zeno` rasterises in 24.8 fixed
+/// point and multiplies the spans of a line by 256 again, so a line may
+/// span some 16000 pixels in all; an image is at most 2048.
+const RASTER_MARGIN: f32 = 1024.0;
+
+/// True if every point of the path, and of its stroke, lands within
+/// [`RASTER_MARGIN`] of the image.
+fn in_raster_range(
+    commands: &[Command],
+    transform: Transform,
+    style: &zeno::Style<'_>,
+    width: u32,
+    height: u32,
+) -> bool {
+    let mut margin = RASTER_MARGIN;
+    if let zeno::Style::Stroke(stroke) = style {
+        // How far a stroke reaches from its path, at most: half the
+        // width times the mitre limit, stretched by the transform.
+        let stretch = (transform.a * transform.a
+            + transform.b * transform.b
+            + transform.c * transform.c
+            + transform.d * transform.d)
+            .sqrt();
+        margin -= stroke.width.abs() * stroke.miter_limit.max(1.5) * stretch;
+        if margin <= 0.0 || margin.is_nan() {
+            return false;
+        }
+    }
+    let (low, high_x, high_y) = (-margin, width as f32 + margin, height as f32 + margin);
+    let inside = |point: &zeno::Point| {
+        let x = point.x * transform.a + point.y * transform.c + transform.tx;
+        let y = point.x * transform.b + point.y * transform.d + transform.ty;
+        // Written so that NaN fails.
+        x >= low && x <= high_x && y >= low && y <= high_y
+    };
+    commands.iter().all(|command| match command {
+        Command::MoveTo(p) | Command::LineTo(p) => inside(p),
+        Command::QuadTo(c, p) => inside(c) && inside(p),
+        Command::CurveTo(a, b, p) => inside(a) && inside(b) && inside(p),
+        Command::Close => true,
+    })
+}
+
+/// Most points an outline is flattened into before curves are cut short.
+const MAX_OUTLINE_POINTS: usize = 1 << 20;
+
+/// The outline of a styled path in pixels, as polygons cut to a box
+/// [`RASTER_MARGIN`] around the image, and the rule to fill them by.
+fn clipped_outline(
+    commands: &[Command],
+    transform: Transform,
+    style: zeno::Style<'_>,
+    width: u32,
+    height: u32,
+) -> (Vec<Command>, Fill) {
+    let mut outline: Vec<Command> = Vec::new();
+    let rule = zeno::apply(commands, style, Some(to_zeno(transform)), &mut outline);
+    let bounds = [
+        -RASTER_MARGIN,
+        -RASTER_MARGIN,
+        width as f32 + RASTER_MARGIN,
+        height as f32 + RASTER_MARGIN,
+    ];
+
+    // Flatten into polygons, leaving alone what lies wholly to one side
+    // of the box.
+    type P = (f32, f32);
+    fn outside(points: &[P], bounds: &[f32; 4]) -> bool {
+        points.iter().all(|p| p.0 < bounds[0])
+            || points.iter().all(|p| p.1 < bounds[1])
+            || points.iter().all(|p| p.0 > bounds[2])
+            || points.iter().all(|p| p.1 > bounds[3])
+    }
+    fn middle(a: P, b: P) -> P {
+        ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0)
+    }
+    fn cubic(points: [P; 4], depth: u32, bounds: &[f32; 4], out: &mut Vec<P>) {
+        let [p0, p1, p2, p3] = points;
+        // Flat enough when the control points are within a twentieth of
+        // a pixel of the chord's thirds.
+        let flat = |a: P, b: P| (a.0 - b.0).abs() + (a.1 - b.1).abs() < 0.05;
+        let third = |t: f32| (p0.0 + (p3.0 - p0.0) * t, p0.1 + (p3.1 - p0.1) * t);
+        if depth >= 24
+            || out.len() >= MAX_OUTLINE_POINTS
+            || outside(&points, bounds)
+            || (flat(p1, third(1.0 / 3.0)) && flat(p2, third(2.0 / 3.0)))
+        {
+            out.push(p3);
+            return;
+        }
+        let (a, b, c) = (middle(p0, p1), middle(p1, p2), middle(p2, p3));
+        let (d, e) = (middle(a, b), middle(b, c));
+        let f = middle(d, e);
+        cubic([p0, a, d, f], depth + 1, bounds, out);
+        cubic([f, e, c, p3], depth + 1, bounds, out);
+    }
+    let finite = |p: zeno::Point| -> P {
+        // Far beyond the box either way; the cut brings it back.
+        let clean = |value: f32| {
+            if value.is_nan() {
+                0.0
+            } else {
+                value.clamp(-1.0e9, 1.0e9)
+            }
+        };
+        (clean(p.x), clean(p.y))
+    };
+    let mut polygons: Vec<Vec<P>> = Vec::new();
+    let mut current: Vec<P> = Vec::new();
+    for command in &outline {
+        match *command {
+            Command::MoveTo(p) => {
+                if current.len() > 2 {
+                    polygons.push(std::mem::take(&mut current));
+                }
+                current.clear();
+                current.push(finite(p));
+            }
+            Command::LineTo(p) => current.push(finite(p)),
+            Command::QuadTo(c, p) => {
+                let Some(&from) = current.last() else {
+                    continue;
+                };
+                let (c, p) = (finite(c), finite(p));
+                let a = (
+                    from.0 + (c.0 - from.0) * 2.0 / 3.0,
+                    from.1 + (c.1 - from.1) * 2.0 / 3.0,
+                );
+                let b = (p.0 + (c.0 - p.0) * 2.0 / 3.0, p.1 + (c.1 - p.1) * 2.0 / 3.0);
+                cubic([from, a, b, p], 0, &bounds, &mut current);
+            }
+            Command::CurveTo(a, b, p) => {
+                let Some(&from) = current.last() else {
+                    continue;
+                };
+                cubic(
+                    [from, finite(a), finite(b), finite(p)],
+                    0,
+                    &bounds,
+                    &mut current,
+                );
+            }
+            Command::Close => {
+                // The next subpath starts where this one did.
+                let start = current.first().copied();
+                if current.len() > 2 {
+                    polygons.push(std::mem::take(&mut current));
+                }
+                current.clear();
+                current.extend(start);
+            }
+        }
+    }
+    if current.len() > 2 {
+        polygons.push(current);
+    }
+
+    // Cut each polygon by the four sides in turn. The pieces that run
+    // along a side are outside the image, where they change nothing.
+    let mut result: Vec<Command> = Vec::new();
+    let mut scratch: Vec<P> = Vec::new();
+    for mut polygon in polygons {
+        for side in 0..4 {
+            let keep = |p: P| match side {
+                0 => p.0 >= bounds[0],
+                1 => p.1 >= bounds[1],
+                2 => p.0 <= bounds[2],
+                _ => p.1 <= bounds[3],
+            };
+            let cross = |a: P, b: P| -> P {
+                if side % 2 == 0 {
+                    let x = bounds[side];
+                    (x, a.1 + (b.1 - a.1) * ((x - a.0) / (b.0 - a.0)))
+                } else {
+                    let y = bounds[side];
+                    (a.0 + (b.0 - a.0) * ((y - a.1) / (b.1 - a.1)), y)
+                }
+            };
+            scratch.clear();
+            let Some(&last) = polygon.last() else { break };
+            let mut previous = last;
+            for &point in &polygon {
+                match (keep(previous), keep(point)) {
+                    (true, true) => scratch.push(point),
+                    (true, false) => scratch.push(cross(previous, point)),
+                    (false, true) => {
+                        scratch.push(cross(previous, point));
+                        scratch.push(point);
+                    }
+                    (false, false) => {}
+                }
+                previous = point;
+            }
+            std::mem::swap(&mut polygon, &mut scratch);
+        }
+        // The crossing points are computed, so hold them to the box.
+        let mut points = polygon.iter().map(|p| {
+            (
+                p.0.clamp(bounds[0], bounds[2]),
+                p.1.clamp(bounds[1], bounds[3]),
+            )
+        });
+        if polygon.len() > 2 {
+            if let Some(first) = points.next() {
+                result.move_to(first);
+                for point in points {
+                    result.line_to(point);
+                }
+                result.close();
+            }
+        }
+    }
+    (result, rule)
 }
 
 fn premultiplied(color: Color) -> [f32; 4] {
@@ -596,6 +987,8 @@ impl Canvas {
             fill: Vec::new(),
             stroke: Vec::new(),
             clip: Vec::new(),
+            scratch: Vec::new(),
+            union: Vec::new(),
         }
     }
 
@@ -612,11 +1005,111 @@ impl Canvas {
     ) {
         target.clear();
         target.resize(width as usize * height as usize, 0);
-        Mask::new(commands)
-            .size(width, height)
-            .transform(Some(to_zeno(transform)))
-            .style(style)
-            .render_into(target, None);
+        if in_raster_range(commands, transform, &style, width, height) {
+            Mask::new(commands)
+                .size(width, height)
+                .transform(Some(to_zeno(transform)))
+                .style(style)
+                .render_into(target, None);
+            return;
+        }
+        // Geometry far outside the image: the rasteriser works in 32-bit
+        // fixed point and cannot take it. Outline it here, cut the
+        // outline to a box around the image, and fill that.
+        let (outline, rule) = clipped_outline(commands, transform, style, width, height);
+        if !outline.is_empty() {
+            Mask::new(&outline)
+                .size(width, height)
+                .style(rule)
+                .render_into(target, None);
+        }
+    }
+
+    /// Renders the coverage of `clips` into `self.clip`. False if a part's
+    /// transform cannot be drawn through, or if nothing is left.
+    fn clip_mask(&mut self, clips: &[&[ClipPart<'_>]]) -> bool {
+        let size = (self.width, self.height);
+        let rule = |part: &ClipPart<'_>| {
+            if part.even_odd {
+                Fill::EvenOdd
+            } else {
+                Fill::NonZero
+            }
+        };
+        for (number, parts) in clips.iter().enumerate() {
+            let Some((first, rest)) = parts.split_first() else {
+                return false;
+            };
+            if parts.iter().any(|part| !part.transform.is_finite()) {
+                return false;
+            }
+            // The first clip goes straight into the buffer, each further
+            // one into `union` and is then multiplied in.
+            let target = if number == 0 {
+                &mut self.clip
+            } else {
+                &mut self.union
+            };
+            Self::mask(
+                target,
+                size,
+                first.commands,
+                first.transform,
+                rule(first).into(),
+            );
+            for part in rest {
+                Self::mask(
+                    &mut self.scratch,
+                    size,
+                    part.commands,
+                    part.transform,
+                    rule(part).into(),
+                );
+                for (below, above) in target.iter_mut().zip(&self.scratch) {
+                    let (b, a) = (u32::from(*below), u32::from(*above));
+                    *below = (a + b - (a * b + 127) / 255) as u8;
+                }
+            }
+            if number > 0 {
+                for (all, one) in self.clip.iter_mut().zip(&self.union) {
+                    *all = ((u32::from(*all) * u32::from(*one) + 127) / 255) as u8;
+                }
+            }
+        }
+        true
+    }
+
+    /// Composites another canvas of the same size over this one, as a
+    /// group: faded as a whole by `opacity` and cut by `clips`.
+    pub(crate) fn blend(&mut self, group: &Canvas, opacity: f32, clips: &[&[ClipPart<'_>]]) {
+        let opacity = if opacity > 0.0 {
+            opacity.min(1.0)
+        } else {
+            return;
+        };
+        if self.is_empty() || group.pixels.len() != self.pixels.len() {
+            return;
+        }
+        let clipped = !clips.is_empty();
+        if clipped && !self.clip_mask(clips) {
+            return;
+        }
+        for (index, (pixel, source)) in self.pixels.iter_mut().zip(&group.pixels).enumerate() {
+            if source[3] <= 0.0 {
+                continue;
+            }
+            let mut visible = opacity;
+            if clipped {
+                if self.clip[index] == 0 {
+                    continue;
+                }
+                visible *= f32::from(self.clip[index]) / 255.0;
+            }
+            let keep = 1.0 - source[3] * visible;
+            for channel in 0..4 {
+                pixel[channel] = source[channel] * visible + pixel[channel] * keep;
+            }
+        }
     }
 
     /// Paints one step over what is there.
@@ -631,13 +1124,12 @@ impl Canvas {
             return;
         }
         let size = (self.width, self.height);
-        let fill = paint.fill.map(premultiplied).filter(|color| color[3] > 0.0);
+        let fill = paint.fill.filter(Ink::paints);
         let stroke = paint
             .stroke
             .as_ref()
             .filter(|stroke| stroke.width > 0.0 && stroke.width.is_finite())
-            .map(|stroke| (premultiplied(stroke.color), stroke))
-            .filter(|(color, _)| color[3] > 0.0);
+            .filter(|stroke| stroke.ink.paints());
         if fill.is_none() && stroke.is_none() {
             return;
         }
@@ -656,7 +1148,7 @@ impl Canvas {
                 rule.into(),
             );
         }
-        if let Some((_, stroke)) = &stroke {
+        if let Some(stroke) = stroke {
             // The width is in the path's units; `scale` (on by default)
             // applies the transform to it.
             let mut style = Stroke::new(stroke.width);
@@ -671,6 +1163,12 @@ impl Canvas {
                     LineJoin::Round => Join::Round,
                     LineJoin::Bevel => Join::Bevel,
                 });
+            if stroke.miter_limit != DEFAULT_MITER_LIMIT {
+                style.miter_limit(stroke.miter_limit);
+            }
+            if !stroke.dashes.is_empty() {
+                style.dash(stroke.dashes, stroke.dash_offset);
+            }
             Self::mask(
                 &mut self.stroke,
                 size,
@@ -679,41 +1177,36 @@ impl Canvas {
                 style.into(),
             );
         }
-        if let Some((commands, transform)) = paint.clip {
-            if !transform.is_finite() {
-                return;
-            }
-            Self::mask(
-                &mut self.clip,
-                size,
-                commands,
-                transform,
-                Fill::NonZero.into(),
-            );
+        let clipped = !paint.clips.is_empty();
+        if clipped && !self.clip_mask(paint.clips) {
+            return;
         }
 
+        let width = self.width.max(1);
         let coverage = |mask: &[u8], index: usize| f32::from(mask[index]) / 255.0;
         for (index, pixel) in self.pixels.iter_mut().enumerate() {
             let mut visible = opacity;
-            if paint.clip.is_some() {
+            if clipped {
                 if self.clip[index] == 0 {
                     continue;
                 }
                 visible *= coverage(&self.clip, index);
             }
+            let (x, y) = (index as u32 % width, index as u32 / width);
             // The layer's own colour here: stroke over fill.
             let mut layer = [0.0f32; 4];
-            if let Some(color) = fill {
+            if let Some(ink) = &fill {
                 let amount = self.fill[index];
                 if amount > 0 {
                     let amount = f32::from(amount) / 255.0;
-                    layer = color.map(|channel| channel * amount);
+                    layer = ink.at(x, y).map(|channel| channel * amount);
                 }
             }
-            if let Some((color, _)) = &stroke {
+            if let Some(stroke) = stroke {
                 let amount = self.stroke[index];
                 if amount > 0 {
                     let amount = f32::from(amount) / 255.0;
+                    let color = stroke.ink.at(x, y);
                     let keep = 1.0 - color[3] * amount;
                     for channel in 0..4 {
                         layer[channel] = color[channel] * amount + layer[channel] * keep;
@@ -729,6 +1222,14 @@ impl Canvas {
                 pixel[channel] = layer[channel] * visible + pixel[channel] * keep;
             }
         }
+    }
+
+    /// The alpha of every pixel, as coverage bytes.
+    pub(crate) fn alpha(&self) -> Vec<u8> {
+        self.pixels
+            .iter()
+            .map(|pixel| (pixel[3].clamp(0.0, 1.0) * 255.0 + 0.5) as u8)
+            .collect()
     }
 
     /// The image as stored bytes: sRGB-encoded premultiplied RGBA.

@@ -295,6 +295,19 @@ pub enum DrawOp {
     PushTransform { transform: Transform },
     /// Ends the innermost transform.
     PopTransform,
+    /// Draws every following operation, of any kind, as one group that is
+    /// then faded as a whole, until the matching
+    /// [`PopLayer`](Self::PopLayer). See [`DisplayList::push_layer`].
+    PushLayer { opacity: f32 },
+    /// Ends the innermost layer.
+    PopLayer,
+    /// Draws every following operation in the surface's own pixels, not
+    /// through the transforms open around it, until the matching
+    /// [`PopScreenSpace`](Self::PopScreenSpace). See
+    /// [`DisplayList::push_screen_space`].
+    PushScreenSpace,
+    /// Ends the innermost stretch of screen-space drawing.
+    PopScreenSpace,
 }
 
 /// Which rows of a glyph atlas changed recently, so a renderer that already
@@ -363,16 +376,39 @@ impl<'a> AtlasView<'a> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DisplayList {
     ops: Vec<DrawOp>,
+    /// The transforms open at the end of the list, each composed with
+    /// those around it; the identity for a stretch of screen space.
+    open_transforms: Vec<Transform>,
 }
 
 impl DisplayList {
     pub const fn new() -> Self {
-        Self { ops: Vec::new() }
+        Self {
+            ops: Vec::new(),
+            open_transforms: Vec::new(),
+        }
     }
 
     /// Removes every operation, keeping the allocation.
     pub fn clear(&mut self) {
         self.ops.clear();
+        self.open_transforms.clear();
+    }
+
+    /// The transform an operation recorded now would be drawn through:
+    /// the composition of the transforms pushed and not yet popped, from
+    /// the operation's coordinates to the surface's pixels. The identity
+    /// where none is open, and inside
+    /// [`push_screen_space`](Self::push_screen_space).
+    ///
+    /// For whoever records operations whose *content* depends on how they
+    /// will be turned: text rasterises its glyphs for the transform
+    /// (ADR 0029).
+    pub fn current_transform(&self) -> Transform {
+        self.open_transforms
+            .last()
+            .copied()
+            .unwrap_or(Transform::IDENTITY)
     }
 
     pub fn ops(&self) -> &[DrawOp] {
@@ -702,6 +738,8 @@ impl DisplayList {
     /// line (a zero scale), draws nothing until it is popped.
     pub fn push_transform(&mut self, transform: Transform) {
         self.ops.push(DrawOp::PushTransform { transform });
+        self.open_transforms
+            .push(transform.then(self.current_transform()));
     }
 
     /// Ends the transform started by the most recent unmatched
@@ -709,12 +747,108 @@ impl DisplayList {
     /// nothing. Transforms still open at the end of the list end with it.
     pub fn pop_transform(&mut self) {
         self.ops.push(DrawOp::PopTransform);
+        self.open_transforms.pop();
+    }
+
+    /// Draws everything until the matching
+    /// [`pop_screen_space`](Self::pop_screen_space) in the surface's own
+    /// pixels, as if no transform were open: for content that has already
+    /// been put through [`current_transform`](Self::current_transform) by
+    /// whoever records it, such as glyphs rasterised for their rotation
+    /// and placed where the transform takes them (ADR 0029).
+    ///
+    /// Clips stay in force. A clip that was pushed inside a transform that
+    /// turns (which is kept in the turned space) acts on these operations
+    /// as its bounding rectangle on the screen: it never cuts more than
+    /// the exact clip would. Pushes and pops must be properly nested with
+    /// those of transforms and clips.
+    pub fn push_screen_space(&mut self) {
+        self.ops.push(DrawOp::PushScreenSpace);
+        self.open_transforms.push(Transform::IDENTITY);
+    }
+
+    /// Ends the stretch started by the most recent unmatched
+    /// [`push_screen_space`](Self::push_screen_space).
+    pub fn pop_screen_space(&mut self) {
+        self.ops.push(DrawOp::PopScreenSpace);
+        self.open_transforms.pop();
+    }
+
+    /// Draws everything until the matching [`pop_layer`](Self::pop_layer)
+    /// as one group, and then shows the group at `opacity` (`0..=1`):
+    /// group opacity, as CSS `opacity` on an element with children.
+    ///
+    /// Multiplying `opacity` into each colour instead is cheaper and is the
+    /// same for a single operation, but where operations overlap (a label
+    /// on a card, a card on its shadow) the lower ones then show through
+    /// the upper ones. A layer composes the group first, so what was
+    /// covered stays covered while the whole fades.
+    ///
+    /// The group is drawn where it would be drawn without the layer:
+    /// clips and transforms open around the layer apply to what is inside
+    /// it, and clips and transforms pushed inside it must be popped inside
+    /// it. Layers nest.
+    ///
+    /// A renderer draws a layer into an offscreen target the size of the
+    /// surface and blends that back, which costs two more render passes
+    /// and the blending of the group's bounding rectangle; a list without
+    /// layers costs nothing for their existence (ADR 0028). An `opacity`
+    /// of 1 or more is no layer at all; of 0 or less, or NaN, draws
+    /// nothing until the pop.
+    pub fn push_layer(&mut self, opacity: f32) {
+        self.ops.push(DrawOp::PushLayer { opacity });
+    }
+
+    /// Ends the layer started by the most recent unmatched
+    /// [`push_layer`](Self::push_layer). Without one, this does nothing.
+    /// Layers still open at the end of the list end with it.
+    pub fn pop_layer(&mut self) {
+        self.ops.push(DrawOp::PopLayer);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_current_transform_follows_pushes_and_pops() {
+        let mut list = DisplayList::new();
+        assert_eq!(list.current_transform(), Transform::IDENTITY);
+        let (move_right, double) = (Transform::translate(10.0, 0.0), Transform::scale(2.0, 2.0));
+        list.push_transform(move_right);
+        list.push_transform(double);
+        // The inner one acts first: (1, 1) doubles, then moves.
+        assert_eq!(
+            list.current_transform().apply(Point::new(1.0, 1.0)),
+            Point::new(12.0, 2.0)
+        );
+        list.push_screen_space();
+        assert_eq!(list.current_transform(), Transform::IDENTITY);
+        list.pop_screen_space();
+        assert_eq!(list.current_transform(), double.then(move_right));
+        list.pop_transform();
+        assert_eq!(list.current_transform(), move_right);
+        list.pop_transform();
+        list.pop_transform();
+        assert_eq!(list.current_transform(), Transform::IDENTITY);
+        assert_eq!(list.ops()[2], DrawOp::PushScreenSpace);
+        assert_eq!(list.ops()[3], DrawOp::PopScreenSpace);
+        list.push_transform(double);
+        list.clear();
+        assert_eq!(list.current_transform(), Transform::IDENTITY);
+    }
+
+    #[test]
+    fn layers_are_recorded_around_what_they_group() {
+        let mut list = DisplayList::new();
+        list.push_layer(0.5);
+        list.fill_rect(Rect::new(0.0, 0.0, 4.0, 4.0), Color::WHITE);
+        list.pop_layer();
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.ops()[0], DrawOp::PushLayer { opacity: 0.5 });
+        assert_eq!(list.ops()[2], DrawOp::PopLayer);
+    }
 
     #[test]
     fn dashed_border_is_recorded_with_its_pattern() {

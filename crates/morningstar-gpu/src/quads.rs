@@ -73,7 +73,21 @@ pub struct RenderStats {
     pub image_textures: u32,
     /// Bytes of texel data in those textures, mipmaps included.
     pub image_texture_bytes: u64,
+    /// Render passes encoded. One, unless the frame has layers
+    /// (`DisplayList::push_layer`, ADR 0028): each layer that is drawn adds
+    /// one for its own content and one to carry on in its parent.
+    pub passes: u32,
+    /// Offscreen layer targets alive after the frame: the deepest nesting
+    /// of layers in it, and none for a frame without layers.
+    pub layer_textures: u32,
+    /// Bytes of those targets: four per pixel of the surface, each.
+    pub layer_texture_bytes: u64,
 }
+
+/// Deepest nesting of layers drawn as layers. Each level is a target the
+/// size of the surface; a layer nested deeper than this is drawn into its
+/// parent without its own opacity.
+const MAX_LAYER_DEPTH: usize = 8;
 
 /// A rectangle as its minimum and maximum corners: `[x0, y0, x1, y1]`.
 type Bounds = [f32; 4];
@@ -518,6 +532,51 @@ struct Run {
     image: Option<wgpu::BindGroup>,
 }
 
+/// What the image instances of the open run sample.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RunTexture {
+    Image(ImageId),
+    /// A layer's target, by nesting depth, being blended into its parent.
+    Layer(usize),
+}
+
+/// One render pass of a frame: consecutive runs drawn into one target.
+struct Pass {
+    /// The layer target drawn into, by nesting depth; `None` is the frame's
+    /// own target.
+    target: Option<usize>,
+    /// Whether the target is cleared first: to the frame's clear colour, or
+    /// to transparent for a layer. Otherwise it carries on from what an
+    /// earlier pass left.
+    clear: bool,
+    /// One past its last run. It starts where the previous pass ended.
+    end_run: usize,
+}
+
+/// An offscreen target a layer is drawn into, the size of the surface.
+struct LayerTarget {
+    view: wgpu::TextureView,
+    /// For blending it into its parent, as an image.
+    bind_group: wgpu::BindGroup,
+}
+
+/// A `PushLayer` waiting for its `PopLayer`.
+enum OpenLayer {
+    /// Opacity 1, or nested too deep: its content is drawn into the parent.
+    Passthrough,
+    /// Opacity 0: its content is not drawn.
+    Hidden,
+    /// Drawn into the target at `depth`, to be blended back at `opacity`.
+    Target {
+        depth: usize,
+        opacity: f32,
+        /// The screen bounds of what was drawn into it.
+        painted: Bounds,
+    },
+}
+
+const NOTHING_PAINTED: Bounds = [FAR, FAR, -FAR, -FAR];
+
 pub(crate) struct QuadRenderer {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
@@ -543,6 +602,18 @@ pub(crate) struct QuadRenderer {
     images: ImageTextures,
     /// The draw calls of the current frame. Kept to reuse its allocation.
     runs: Vec<Run>,
+    /// The render passes of the current frame: one, unless it has layers.
+    passes: Vec<Pass>,
+    /// Layer targets by nesting depth, all of `layer_size`. Empty unless
+    /// the last frame had layers.
+    layers: Vec<LayerTarget>,
+    layer_size: SurfaceSize,
+    /// Layers open at the current point of the list being prepared. Kept
+    /// to reuse its allocation.
+    open_layers: Vec<OpenLayer>,
+    /// Bit `n` is set while the layer target `n` has been pushed and not
+    /// yet drawn into: its next pass clears it.
+    fresh_layers: u32,
     last_atlas_upload: AtlasUpload,
     format: wgpu::TextureFormat,
 }
@@ -635,6 +706,11 @@ impl QuadRenderer {
             transforms: Vec::new(),
             images,
             runs: Vec::new(),
+            passes: Vec::new(),
+            layers: Vec::new(),
+            layer_size: SurfaceSize::new(0, 0),
+            open_layers: Vec::new(),
+            fresh_layers: 0,
             last_atlas_upload: AtlasUpload::None,
             format,
         }
@@ -658,6 +734,12 @@ impl QuadRenderer {
             image_uploads: self.images.uploads(),
             image_textures: self.images.count(),
             image_texture_bytes: self.images.bytes(),
+            passes: self.passes.len() as u32,
+            layer_textures: self.layers.len() as u32,
+            layer_texture_bytes: self.layers.len() as u64
+                * u64::from(self.layer_size.width)
+                * u64::from(self.layer_size.height)
+                * 4,
         }
     }
 
@@ -680,16 +762,39 @@ impl QuadRenderer {
         self.clips.clear();
         self.transforms.clear();
         self.runs.clear();
+        self.passes.clear();
+        self.open_layers.clear();
+        self.fresh_layers = 0;
         self.last_atlas_upload = AtlasUpload::None;
         self.images.begin_frame(&images);
+        if self.layer_size != size {
+            // Targets of another size are of no use.
+            self.layers.clear();
+            self.layer_size = size;
+        }
         let mut clip = Clip::NONE;
         let mut xform = Xform::NONE;
         // The image the instances since the last run boundary sample, once
         // one of them is an image. Rectangles and glyphs sample none, so
         // they join whatever run is open.
-        let mut run_image: Option<ImageId> = None;
-        for op in list.ops() {
-            match *op {
+        let mut run_image: Option<RunTexture> = None;
+        // Layers: how many hidden ones are open, how many targets are in
+        // use at this point and at most, and whether the frame's own
+        // target has been drawn into yet (its first pass clears it).
+        let mut hidden = 0u32;
+        let mut depth = 0usize;
+        let mut deepest = 0usize;
+        let mut root_cleared = false;
+        let whole: Bounds = [0.0, 0.0, size.width as f32, size.height as f32];
+        let mut ops = list.ops().iter();
+        loop {
+            // Layers still open when the list ends, end with it.
+            let op = match ops.next() {
+                Some(op) => *op,
+                None if !self.open_layers.is_empty() => DrawOp::PopLayer,
+                None => break,
+            };
+            match op {
                 DrawOp::PushClip {
                     rect,
                     corner_radius,
@@ -704,9 +809,109 @@ impl QuadRenderer {
                     clip = clip.entering(&transform, &xform);
                     xform = xform.pushed(transform);
                 }
-                DrawOp::PopTransform => {
+                DrawOp::PopTransform | DrawOp::PopScreenSpace => {
                     (xform, clip) = self.transforms.pop().unwrap_or((xform, clip));
                 }
+                DrawOp::PushScreenSpace => {
+                    self.transforms.push((xform, clip));
+                    if clip.local {
+                        // A clip kept in the turned space cannot be
+                        // evaluated outside it: its bounds on screen.
+                        clip = Clip {
+                            scissor: clip.flattened(&xform),
+                            ..Clip::NONE
+                        };
+                    }
+                    if !xform.hidden {
+                        xform = Xform::NONE;
+                    }
+                }
+                DrawOp::PushLayer { opacity } => {
+                    // NaN counts as invisible.
+                    if hidden > 0 || opacity <= 0.0 || opacity.is_nan() {
+                        hidden += 1;
+                        self.open_layers.push(OpenLayer::Hidden);
+                    } else if opacity >= 1.0 || depth >= MAX_LAYER_DEPTH {
+                        self.open_layers.push(OpenLayer::Passthrough);
+                    } else {
+                        // What was drawn so far goes to its target first;
+                        // then the layer's content to the layer's.
+                        self.end_pass(
+                            device,
+                            queue,
+                            &images,
+                            &mut run_image,
+                            depth,
+                            &mut root_cleared,
+                        );
+                        if self.layers.len() <= depth {
+                            let target = self.create_layer(device, size);
+                            self.layers.push(target);
+                        }
+                        self.fresh_layers |= 1 << depth;
+                        self.open_layers.push(OpenLayer::Target {
+                            depth,
+                            opacity,
+                            painted: NOTHING_PAINTED,
+                        });
+                        depth += 1;
+                        deepest = deepest.max(depth);
+                    }
+                }
+                DrawOp::PopLayer => match self.open_layers.pop() {
+                    // A pop with nothing to match is ignored.
+                    None | Some(OpenLayer::Passthrough) => {}
+                    Some(OpenLayer::Hidden) => hidden -= 1,
+                    Some(OpenLayer::Target {
+                        depth: own,
+                        opacity,
+                        painted,
+                    }) => {
+                        self.end_pass(
+                            device,
+                            queue,
+                            &images,
+                            &mut run_image,
+                            depth,
+                            &mut root_cleared,
+                        );
+                        depth = own;
+                        // Whole pixels, so the blend maps texels one to one.
+                        let painted = intersect(
+                            [
+                                painted[0].floor(),
+                                painted[1].floor(),
+                                painted[2].ceil(),
+                                painted[3].ceil(),
+                            ],
+                            whole,
+                        );
+                        if is_empty(painted) {
+                            continue;
+                        }
+                        // The group, blended into its parent as an image
+                        // of itself: where it was drawn, at its opacity.
+                        // Its content was clipped and transformed as it
+                        // was drawn; the blend is neither.
+                        let rect = rect_of(painted);
+                        let (width, height) = (size.width as f32, size.height as f32);
+                        let (u, v) = (rect.x / width, rect.y / height);
+                        let (du, dv) = (rect.width / width, rect.height / height);
+                        let quad = Quad {
+                            color: [opacity; 4],
+                            color2: [u, v, u + du, v + dv],
+                            corner_radius: 0.0,
+                            kind: KIND_IMAGE,
+                            extent: 0.0,
+                            extra: [u, v, du, dv],
+                            rect,
+                        };
+                        run_image = Some(RunTexture::Layer(own));
+                        self.push_instance(&quad, &Clip::NONE, &Xform::NONE);
+                        self.note_painted(painted);
+                    }
+                },
+                _ if hidden > 0 => {}
                 DrawOp::Image {
                     image,
                     rect,
@@ -716,7 +921,8 @@ impl QuadRenderer {
                 } => {
                     // Checked first, so an image scrolled out of view is
                     // not uploaded for nothing.
-                    if !clip.may_show(Quad::solid(rect, 0.0, tint).painted_bounds(&xform), &xform) {
+                    let bounds = Quad::solid(rect, 0.0, tint).painted_bounds(&xform);
+                    if !clip.may_show(bounds, &xform) {
                         continue;
                     }
                     // A released image has no texture and draws nothing.
@@ -732,32 +938,64 @@ impl QuadRenderer {
                         (texture.width, texture.height),
                         xform.edge_scale,
                     );
-                    if run_image.is_some_and(|current| current != image.id()) {
+                    let wanted = RunTexture::Image(image.id());
+                    if run_image.is_some_and(|current| current != wanted) {
                         // A different texture: what came before is drawn
                         // first, by its own draw call, so paint order holds.
                         self.end_run(device, queue, &images, run_image);
                     }
-                    run_image = Some(image.id());
+                    run_image = Some(wanted);
                     self.push_instance(&quad, &clip, &xform);
+                    if depth > 0 {
+                        self.note_painted(intersect(
+                            xform.screen_bounds(bounds),
+                            clip.flattened(&xform),
+                        ));
+                    }
                 }
                 _ => {
-                    if let Some(quad) = quad_for(op)
+                    if let Some(quad) = quad_for(&op) {
+                        let bounds = quad.painted_bounds(&xform);
                         // Clipped-out operations cost nothing on the GPU.
-                        && clip.may_show(quad.painted_bounds(&xform), &xform)
-                    {
-                        self.push_instance(&quad, &clip, &xform);
+                        if clip.may_show(bounds, &xform) {
+                            self.push_instance(&quad, &clip, &xform);
+                            if depth > 0 {
+                                self.note_painted(intersect(
+                                    xform.screen_bounds(bounds),
+                                    clip.flattened(&xform),
+                                ));
+                            }
+                        }
                     }
                 }
             }
         }
+        // Targets the frame did not need are freed with it.
+        self.layers.truncate(deepest);
 
         let needed = self.scratch.len() as u64 / INSTANCE_SIZE;
         // One draw call's instance count is a `u32`.
         self.count = u32::try_from(needed).unwrap_or(u32::MAX);
         if self.count == 0 {
+            // Nothing to draw: one pass that clears.
+            self.runs.clear();
+            self.passes.clear();
+            self.passes.push(Pass {
+                target: None,
+                clear: true,
+                end_run: 0,
+            });
             return;
         }
-        self.end_run(device, queue, &images, run_image);
+        self.end_pass(device, queue, &images, &mut run_image, 0, &mut root_cleared);
+        if !root_cleared {
+            // Everything was inside layers that drew nothing.
+            self.passes.push(Pass {
+                target: None,
+                clear: true,
+                end_run: self.runs.len(),
+            });
+        }
 
         if needed > self.capacity {
             // Grow geometrically so a slowly growing UI does not reallocate
@@ -788,20 +1026,112 @@ impl QuadRenderer {
         );
     }
 
-    /// Closes the run of instances pushed since the previous one ended.
+    /// Closes the run of instances pushed since the previous one ended, if
+    /// there are any.
     fn end_run(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         images: &ImagesView<'_>,
-        image: Option<ImageId>,
+        image: Option<RunTexture>,
     ) {
         let end = u32::try_from(self.scratch.len() as u64 / INSTANCE_SIZE).unwrap_or(u32::MAX);
-        // Already uploaded when its first instance was pushed.
-        let image = image
-            .and_then(|id| self.images.get(device, queue, images, id))
-            .map(|texture| texture.bind_group.clone());
+        if self.runs.last().map_or(0, |run| run.end) == end {
+            return;
+        }
+        let image = match image {
+            // Already uploaded when its first instance was pushed.
+            Some(RunTexture::Image(id)) => self
+                .images
+                .get(device, queue, images, id)
+                .map(|texture| texture.bind_group.clone()),
+            Some(RunTexture::Layer(depth)) => {
+                self.layers.get(depth).map(|layer| layer.bind_group.clone())
+            }
+            None => None,
+        };
         self.runs.push(Run { end, image });
+    }
+
+    /// Closes the render pass into the target at `depth` (0 is the frame's
+    /// own, `n` the layer target `n - 1`): everything pushed since the
+    /// previous pass ended.
+    fn end_pass(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        images: &ImagesView<'_>,
+        run_image: &mut Option<RunTexture>,
+        depth: usize,
+        root_cleared: &mut bool,
+    ) {
+        self.end_run(device, queue, images, *run_image);
+        *run_image = None;
+        let target = depth.checked_sub(1);
+        let started = self.passes.last().map_or(0, |pass| pass.end_run);
+        // A layer's target is cleared by its first pass since it was
+        // pushed; the frame's own target is cleared once.
+        let clear = match target {
+            None => !*root_cleared,
+            Some(layer) => {
+                let fresh = self.fresh_layers & (1 << layer) != 0;
+                self.fresh_layers &= !(1 << layer);
+                fresh
+            }
+        };
+        if target.is_none() {
+            if !clear && started == self.runs.len() {
+                // Nothing more for the frame's target: no pass.
+                return;
+            }
+            *root_cleared = true;
+        }
+        self.passes.push(Pass {
+            target,
+            clear,
+            end_run: self.runs.len(),
+        });
+    }
+
+    /// Adds `bounds`, on screen, to what the innermost layer with a target
+    /// has had drawn into it.
+    fn note_painted(&mut self, bounds: Bounds) {
+        if is_empty(bounds) {
+            return;
+        }
+        for layer in self.open_layers.iter_mut().rev() {
+            if let OpenLayer::Target { painted, .. } = layer {
+                *painted = [
+                    painted[0].min(bounds[0]),
+                    painted[1].min(bounds[1]),
+                    painted[2].max(bounds[2]),
+                    painted[3].max(bounds[3]),
+                ];
+                return;
+            }
+        }
+    }
+
+    /// A target for a layer: the surface's size and format, drawn into and
+    /// then sampled.
+    fn create_layer(&self, device: &wgpu::Device, size: SurfaceSize) -> LayerTarget {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("layer"),
+            size: wgpu::Extent3d {
+                width: size.width.max(1),
+                height: size.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = self.images.bind_group(device, &view);
+        LayerTarget { view, bind_group }
     }
 
     fn push_instance(&mut self, quad: &Quad, clip: &Clip, xform: &Xform) {
@@ -937,30 +1267,78 @@ impl QuadRenderer {
         self.atlas_generation = Some(atlas.generation);
     }
 
-    /// Draws what the last [`prepare`](Self::prepare) uploaded.
-    pub(crate) fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
-        if self.count == 0 {
-            return;
-        }
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.bind_group, &[]);
+    /// Encodes the frame the last [`prepare`](Self::prepare) uploaded into
+    /// `target`, cleared to `clear`: one render pass, or, with layers, one
+    /// per stretch of the list that goes to one target.
+    pub(crate) fn encode(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        clear: Color,
+    ) {
+        let mut run_start = 0;
         let mut start = 0;
-        for run in &self.runs {
-            pass.set_bind_group(
-                1,
-                run.image.as_ref().unwrap_or(self.images.placeholder()),
-                &[],
-            );
-            // Each run binds its own slice of the instance buffer, rather
-            // than drawing a range of instances from one binding: a non-zero
-            // first instance is the less portable of the two.
-            pass.set_vertex_buffer(
-                0,
-                self.instances
-                    .slice(u64::from(start) * INSTANCE_SIZE..u64::from(run.end) * INSTANCE_SIZE),
-            );
-            pass.draw(0..4, 0..run.end - start);
-            start = run.end;
+        for pass_info in &self.passes {
+            let (view, background) = match pass_info.target.and_then(|depth| self.layers.get(depth))
+            {
+                Some(layer) => (&layer.view, wgpu::Color::TRANSPARENT),
+                None => {
+                    // Encoded, like every colour drawn over it.
+                    let [r, g, b, a] = clear.srgb();
+                    (
+                        target,
+                        wgpu::Color {
+                            r: f64::from(r),
+                            g: f64::from(g),
+                            b: f64::from(b),
+                            a: f64::from(a),
+                        },
+                    )
+                }
+            };
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("clear"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: if pass_info.clear {
+                            wgpu::LoadOp::Clear(background)
+                        } else {
+                            wgpu::LoadOp::Load
+                        },
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            let runs = &self.runs[run_start..pass_info.end_run];
+            run_start = pass_info.end_run;
+            if runs.is_empty() {
+                continue;
+            }
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            for run in runs {
+                pass.set_bind_group(
+                    1,
+                    run.image.as_ref().unwrap_or(self.images.placeholder()),
+                    &[],
+                );
+                // Each run binds its own slice of the instance buffer,
+                // rather than drawing a range of instances from one
+                // binding: a non-zero first instance is the less portable
+                // of the two.
+                pass.set_vertex_buffer(
+                    0,
+                    self.instances.slice(
+                        u64::from(start) * INSTANCE_SIZE..u64::from(run.end) * INSTANCE_SIZE,
+                    ),
+                );
+                pass.draw(0..4, 0..run.end - start);
+                start = run.end;
+            }
         }
     }
 }

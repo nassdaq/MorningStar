@@ -114,6 +114,29 @@ impl ImageTextures {
         self.textures.get(&id)
     }
 
+    /// A bind group for group 1 that samples `view` as images are
+    /// sampled: for a layer's target.
+    pub(crate) fn bind_group(
+        &self,
+        device: &wgpu::Device,
+        view: &wgpu::TextureView,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("layer"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        })
+    }
+
     pub(crate) fn count(&self) -> u32 {
         self.textures.len() as u32
     }

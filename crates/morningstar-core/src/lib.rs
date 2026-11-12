@@ -24,9 +24,9 @@ pub use image::{
     MAX_IMAGE_BYTES, MAX_IMAGE_DIMENSION, srgb_encode,
 };
 pub use input::{
-    Capitalization, ImeAction, KeyboardType, PointerEvent, PointerPhase, TextEditState,
-    TextInputCommand, TextInputEvent, TextInputRequest, TextInputTraits, byte_to_utf16_offset,
-    utf16_to_byte_offset,
+    BarContent, Capitalization, CaretMove, ImeAction, KeyboardType, PointerEvent, PointerPhase,
+    SystemBars, TextEditState, TextInputCommand, TextInputEvent, TextInputRequest, TextInputTraits,
+    byte_to_utf16_offset, utf16_to_byte_offset,
 };
 pub use insets::Insets;
 pub use lifecycle::{Lifecycle, LifecycleEvent, SurfaceSize};

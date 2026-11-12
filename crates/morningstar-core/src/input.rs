@@ -97,7 +97,13 @@ pub struct TextInputRequest {
     /// The field's whole text.
     pub text: String,
     /// The caret, as a byte offset into `text` (on a character boundary).
+    /// With a selection, the end of it that moves.
     pub caret: usize,
+    /// The other end of the selection, as a byte offset into `text`: where
+    /// it was started from, before or after the caret. `None` when nothing
+    /// is selected. The platform's input method is told, so that its
+    /// suggestions and its own selection gestures agree with the field.
+    pub anchor: Option<usize>,
 }
 
 /// What a host must do to its keyboard, from `Engine::take_text_input_command`.
@@ -120,6 +126,9 @@ pub struct TextEditState {
     pub text: String,
     /// The caret (the end of the selection), as a byte offset into `text`.
     pub caret: usize,
+    /// The start of the selection (the end that stays put), if the
+    /// platform's editor selected a range: `None` when nothing is selected.
+    pub anchor: Option<usize>,
     /// The part of `text` still being composed (pre-edit), as byte offsets.
     pub composing: Option<(usize, usize)>,
 }
@@ -147,6 +156,115 @@ pub enum TextInputEvent {
     /// The user dismissed the keyboard (Android's back gesture, the
     /// keyboard's own hide key): the field should give up focus.
     FocusLost,
+    /// A key that moves the caret (an arrow, Home, End, with or without
+    /// Control), from a hardware keyboard or from an input method that
+    /// moves its cursor with key events. `extend` (Shift) keeps the other
+    /// end of the selection where it is.
+    Move {
+        /// Where to.
+        to: CaretMove,
+        /// Select from where the caret was instead of only moving.
+        extend: bool,
+    },
+    /// Select the field's whole text (Ctrl/Cmd+A, an input method's
+    /// "select all").
+    SelectAll,
+    /// Copy the selection to the clipboard (Ctrl/Cmd+C).
+    Copy,
+    /// Move the selection to the clipboard (Ctrl/Cmd+X).
+    Cut,
+    /// Replace the selection with the clipboard's text (Ctrl/Cmd+V).
+    Paste,
+    /// Take back the last edit (Ctrl/Cmd+Z).
+    Undo,
+    /// Make the edit that was taken back again (Ctrl/Cmd+Shift+Z, Ctrl+Y).
+    Redo,
+}
+
+/// Where a key moves the caret of the focused field. See
+/// [`TextInputEvent::Move`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CaretMove {
+    /// One character towards the left of the screen.
+    Left,
+    /// One character towards the right of the screen.
+    Right,
+    /// To the edge of the word on the left.
+    WordLeft,
+    /// To the edge of the word on the right.
+    WordRight,
+    /// One line up; on the first line, to the start of the text.
+    Up,
+    /// One line down; on the last line, to the end of the text.
+    Down,
+    /// To the start of the caret's line (Home).
+    LineStart,
+    /// To the end of the caret's line (End).
+    LineEnd,
+    /// To the start of the text (Ctrl+Home).
+    TextStart,
+    /// To the end of the text (Ctrl+End).
+    TextEnd,
+}
+
+/// Whether the icons and text the system draws in a bar over the
+/// application (clock, battery, the gesture handle) should be light or
+/// dark. The application draws edge to edge under transparent bars, so
+/// only it knows what is behind them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BarContent {
+    /// Light icons, for a dark background.
+    Light,
+    /// Dark icons, for a light background.
+    Dark,
+}
+
+/// How the system's bars should look over the application: see
+/// `Frame::set_system_bars` in `morningstar-runtime`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SystemBars {
+    /// The status bar, at the top.
+    pub status: BarContent,
+    /// The navigation bar or gesture handle, at the bottom.
+    pub navigation: BarContent,
+}
+
+impl SystemBars {
+    /// Light icons in both bars, for a dark screen.
+    pub const LIGHT_CONTENT: Self = Self::all(BarContent::Light);
+    /// Dark icons in both bars, for a light screen.
+    pub const DARK_CONTENT: Self = Self::all(BarContent::Dark);
+
+    /// The same content colour in both bars.
+    pub const fn all(content: BarContent) -> Self {
+        Self {
+            status: content,
+            navigation: content,
+        }
+    }
+
+    /// What reads on a screen whose background is `background`: dark
+    /// icons on a light colour and light icons on a dark one, by the
+    /// colour's relative luminance (WCAG's; a [`Color`](crate::Color) is
+    /// already linear). The threshold, 0.179, is where black and white
+    /// text contrast equally with the background.
+    pub fn for_background(background: crate::Color) -> Self {
+        let channel = |value: f32| {
+            if value.is_nan() {
+                0.0
+            } else {
+                value.clamp(0.0, 1.0)
+            }
+        };
+        let luminance = 0.2126 * channel(background.r)
+            + 0.7152 * channel(background.g)
+            + 0.0722 * channel(background.b);
+        if luminance > 0.179 {
+            Self::DARK_CONTENT
+        } else {
+            Self::LIGHT_CONTENT
+        }
+    }
 }
 
 /// Converts an offset in UTF-16 code units (what Java and UIKit count in)
@@ -198,5 +316,36 @@ mod tests {
         // Inside the four-byte character: it has started, so it is counted.
         assert_eq!(byte_to_utf16_offset(text, 3), 3);
         assert_eq!(utf16_to_byte_offset("", 4), 0);
+    }
+
+    #[test]
+    fn bar_content_follows_the_luminance_of_the_background() {
+        use crate::Color;
+        assert_eq!(
+            SystemBars::for_background(Color::WHITE),
+            SystemBars::DARK_CONTENT
+        );
+        assert_eq!(
+            SystemBars::for_background(Color::BLACK),
+            SystemBars::LIGHT_CONTENT
+        );
+        // Mid grey in sRGB (#777777, linear 0.184) is just on the light
+        // side; a saturated blue is dark, a yellow light.
+        assert_eq!(
+            SystemBars::for_background(Color::rgb(0.184, 0.184, 0.184)),
+            SystemBars::DARK_CONTENT
+        );
+        assert_eq!(
+            SystemBars::for_background(Color::rgb(0.0, 0.0, 1.0)),
+            SystemBars::LIGHT_CONTENT
+        );
+        assert_eq!(
+            SystemBars::for_background(Color::rgb(1.0, 1.0, 0.0)),
+            SystemBars::DARK_CONTENT
+        );
+        assert_eq!(
+            SystemBars::for_background(Color::rgb(f32::NAN, 0.0, 0.0)),
+            SystemBars::LIGHT_CONTENT
+        );
     }
 }
