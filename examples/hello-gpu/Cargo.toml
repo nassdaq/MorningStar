@@ -7,6 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# The name under the home-screen icon, and the application id this example
+# has always had (ADR 0020). No icon of its own: the built-in Morningstar one.
+[package.metadata.morningstar]
+name = "Morningstar"
+id = "dev.morningstar.hello"
+
 [lib]
 # cdylib -> libhello_gpu.so for Android. The iOS static library is requested
 # explicitly by tools/build-ios.sh (`cargo rustc --crate-type staticlib`), so

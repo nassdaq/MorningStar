@@ -7,6 +7,13 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# The home-screen icon and name (ADR 0020). The picture is drawn by
+# `cargo run -p fundidesk --example icon`; it is the only one, so the
+# Android adaptive icon is made from it (the single-icon rule).
+[package.metadata.morningstar]
+name = "FundiDesk"
+icon = "assets/icon.png"
+
 [lib]
 # cdylib for Android; tools/build-ios.sh requests the static library itself.
 crate-type = ["cdylib", "lib"]
