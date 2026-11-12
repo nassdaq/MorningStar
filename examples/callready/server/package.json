@@ -1,0 +1,15 @@
+{
+  "name": "callready-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend for the CallReady practice-call app: DeepSeek plays the caller and scores the call, ElevenLabs gives it a voice, PostgreSQL keeps the history.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}
