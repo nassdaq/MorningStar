@@ -60,48 +60,14 @@ pub fn screenshot(
     frame.begin();
     app.frame(&FrameInfo::new(size).with_elapsed(elapsed), &mut frame);
 
-    let mut pixels = render_offscreen_with_images(
+    // The renderer composites sRGB-encoded values (ADR 0023): its pixels
+    // are an image file's, as they are.
+    let pixels = render_offscreen_with_images(
         size,
         frame.clear,
         &frame.list,
         frame.atlas(),
         frame.images(),
     )?;
-    // The renderer works in linear light; image files are sRGB-encoded.
-    // Without this the picture would look much darker than on a device.
-    let table = srgb_table();
-    for pixel in pixels.chunks_exact_mut(4) {
-        for channel in &mut pixel[..3] {
-            *channel = table[usize::from(*channel)];
-        }
-    }
     Ok(png::encode(size.width, size.height, &pixels))
-}
-
-/// Linear-to-sRGB transfer function for every 8-bit value.
-fn srgb_table() -> [u8; 256] {
-    std::array::from_fn(|value| {
-        let linear = value as f32 / 255.0;
-        let encoded = if linear <= 0.003_130_8 {
-            linear * 12.92
-        } else {
-            1.055 * linear.powf(1.0 / 2.4) - 0.055
-        };
-        (encoded * 255.0).round() as u8
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn srgb_table_endpoints_and_midpoint() {
-        let table = srgb_table();
-        assert_eq!(table[0], 0);
-        assert_eq!(table[255], 255);
-        // Linear 50% grey is sRGB 188.
-        assert_eq!(table[128], 188);
-        assert!(table.windows(2).all(|pair| pair[0] <= pair[1]), "monotonic");
-    }
 }

@@ -95,9 +95,9 @@ fn png_alpha_is_straight_and_gets_premultiplied_on_registration() {
     let image = frame
         .add_image_png(&rgba_png(2, 1, &[255, 255, 255, 128, 200, 100, 50, 0]))
         .unwrap();
-    // Half-transparent white holds half the light (byte 188, not 128), and
-    // an invisible pixel loses its colour.
-    assert_eq!(stored(&frame, image).2, [188, 188, 188, 128, 0, 0, 0, 0]);
+    // Half-transparent white is its bytes times alpha (ADR 0023: encoded
+    // values are what is blended), and an invisible pixel loses its colour.
+    assert_eq!(stored(&frame, image).2, [128, 128, 128, 128, 0, 0, 0, 0]);
     // Registering the same bytes as raw pixels gives the same image data.
     let raw = frame
         .add_image_rgba8(2, 1, &[255, 255, 255, 128, 200, 100, 50, 0])
@@ -807,10 +807,11 @@ fn image_scene() {
     // Tinted icons: the centre of the first star is the first tint, with no
     // trace of the magenta its transparent pixels carry.
     let first = picture.at(24 + 19, 396 + 20);
+    // The target holds the colour sRGB-encoded (ADR 0023).
     let byte = |channel: f32| (channel * 255.0).round() as u8;
-    let tint = tints[0];
+    let [r, g, b, _] = tints[0].srgb();
     assert!(
-        near(first, [byte(tint.r), byte(tint.g), byte(tint.b), 255], 2),
+        near(first, [byte(r), byte(g), byte(b), 255], 2),
         "{first:?}"
     );
     for x in 24..62 {
@@ -841,9 +842,13 @@ fn image_scene() {
     // Ordering: the light rectangle covers the landscape, and the text on
     // it is dark; the landscape covers the blue rectangle.
     let light = picture.at(panel.x as u32 + 200, panel.y as u32 + 140);
-    assert!(near(light, [234, 234, 244, 255], 3), "{light:?}");
+    // The scene's `srgb(246, 246, 250)` and `srgb(50, 120, 235)`: the
+    // target holds the bytes a screen shows (ADR 0023), which are the
+    // colours as written. (They were the linear values 234, 234, 244 and
+    // 8, 47, 213 while the target was linear.)
+    assert!(near(light, [246, 246, 250, 255], 1), "{light:?}");
     let over_blue = picture.at(panel.x as u32 + 100, panel.y as u32 + 80);
-    assert!(!near(over_blue, [8, 47, 213, 255], 40), "{over_blue:?}");
+    assert!(!near(over_blue, [50, 120, 235, 255], 40), "{over_blue:?}");
     assert_eq!(frame.images().len(), 6);
 }
 

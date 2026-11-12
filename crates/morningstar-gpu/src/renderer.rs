@@ -62,6 +62,9 @@ pub(crate) struct Gpu {
 struct SurfaceState {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
+    /// The format frames are rendered in: the surface's, without any sRGB
+    /// encoding on write.
+    target_format: wgpu::TextureFormat,
     /// False while the surface has a zero dimension and so is unconfigured.
     configured: bool,
 }
@@ -169,14 +172,19 @@ impl Renderer {
         let gpu = self.gpu.as_ref().expect("gpu initialised above");
 
         let caps = surface.get_capabilities(&gpu.adapter);
-        // Prefer an sRGB format so linear `Color` values are encoded for us.
-        let format = caps
+        // Colours are encoded on the CPU and composited as encoded values
+        // (ADR 0023), so the target must store what the shader writes
+        // unchanged: a format without the sRGB suffix. Where the surface
+        // offers only sRGB formats, the same texture is rendered to through
+        // a view of its plain twin.
+        let surface_format = caps
             .formats
             .iter()
             .copied()
-            .find(wgpu::TextureFormat::is_srgb)
+            .find(|format| !format.is_srgb())
             .or_else(|| caps.formats.first().copied())
             .ok_or(GpuError::UnsupportedSurface)?;
+        let format = surface_format.remove_srgb_suffix();
         let alpha_mode = *caps
             .alpha_modes
             .first()
@@ -185,7 +193,10 @@ impl Renderer {
         let mut config = surface
             .get_default_config(&gpu.adapter, size.width.max(1), size.height.max(1))
             .ok_or(GpuError::UnsupportedSurface)?;
-        config.format = format;
+        config.format = surface_format;
+        if format != surface_format {
+            config.view_formats = vec![format];
+        }
         config.alpha_mode = alpha_mode;
         // Vsync. Frame pacing comes from the display, not from a busy loop.
         config.present_mode = wgpu::PresentMode::Fifo;
@@ -193,6 +204,7 @@ impl Renderer {
         let mut state = SurfaceState {
             surface,
             config,
+            target_format: format,
             configured: false,
         };
         state.configure(&gpu.device, size);
@@ -317,9 +329,10 @@ impl Renderer {
         let acquire = acquire_start.elapsed();
 
         let encode_start = Instant::now();
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(state.target_format),
+            ..Default::default()
+        });
         let size = SurfaceSize::new(state.config.width, state.config.height);
         quads.prepare(&gpu.device, &gpu.queue, size, list, atlas, images);
         gpu.queue
@@ -426,11 +439,15 @@ pub(crate) fn encode_frame(
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: f64::from(color.r),
-                        g: f64::from(color.g),
-                        b: f64::from(color.b),
-                        a: f64::from(color.a),
+                    // Encoded, like every colour drawn over it.
+                    load: wgpu::LoadOp::Clear({
+                        let [r, g, b, a] = color.srgb();
+                        wgpu::Color {
+                            r: f64::from(r),
+                            g: f64::from(g),
+                            b: f64::from(b),
+                            a: f64::from(a),
+                        }
                     }),
                     store: wgpu::StoreOp::Store,
                 },

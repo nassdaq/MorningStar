@@ -6,9 +6,10 @@ use std::collections::HashMap;
 
 use morningstar_core::{ImageId, ImagePixels, ImagesView};
 
-/// sRGB, so that sampling decodes to linear before filtering. The pixels
-/// arrive premultiplied (see `ImagePixels`).
-const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+/// Plain 8-bit, not sRGB: the pixels arrive sRGB-encoded and premultiplied
+/// (see `ImagePixels`) and are sampled, filtered and blended as those
+/// encoded values, like every other colour (ADR 0023).
+const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// One uploaded image.
 pub(crate) struct ImageTexture {
@@ -183,8 +184,8 @@ fn upload(
 
     let mut bytes = 0;
     if let Some(queue) = queue {
-        // Each level is a box filter of the one before, averaged in linear
-        // light on the CPU: the same result on every backend, with no
+        // Each level is a box filter of the one before, averaged on the
+        // CPU: the same result on every backend, with no
         // render-target support needed for the texture format.
         let mut smaller;
         for mip_level in 0..levels {

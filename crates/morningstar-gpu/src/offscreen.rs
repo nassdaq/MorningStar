@@ -4,7 +4,8 @@ use crate::GpuError;
 use crate::quads::{AtlasUpload, QuadRenderer, RenderStats};
 use crate::renderer::{Gpu, encode_frame, new_instance, request_gpu};
 
-/// Linear, so readback bytes are the blended values themselves.
+/// Without sRGB encoding on write, like a surface's target: readback bytes
+/// are the composited values themselves.
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// Renders one frame into an offscreen texture and returns its pixels as
@@ -13,8 +14,10 @@ const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// `atlas` is the glyph atlas the list's glyphs refer to; pass
 /// [`AtlasView::EMPTY`] for a list without text.
 ///
-/// The target is linear (not sRGB-encoded) with premultiplied alpha, so the
-/// bytes are the blended linear values scaled to `0..=255`.
+/// The bytes are what a screen would show: sRGB-encoded colour, composited
+/// in that encoding (ADR 0023), premultiplied by alpha where the clear
+/// colour left the target translucent. Over an opaque clear colour they
+/// are the bytes of an image file.
 ///
 /// This runs the same frame-encoding path as on-screen rendering, without a
 /// window, so it can back tests and benchmarks on any machine with a GPU.

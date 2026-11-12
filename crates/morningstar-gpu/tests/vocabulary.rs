@@ -2,8 +2,9 @@
 //! glyphs: borders, linear gradients, box shadows and clipping (ADR 0011).
 //!
 //! Like `offscreen.rs` these run on the real GPU of the machine and skip
-//! where there is none. The target is linear RGBA8, so expected bytes are the
-//! blended linear value times 255.
+//! where there is none. The target is RGBA8 holding sRGB-encoded values,
+//! composited as such (ADR 0023); the colours here have components of 0 or
+//! 1, so expected bytes are the blended value times 255.
 //!
 //! Set `MORNINGSTAR_DUMP_DIR` to a directory to have the scenes that are
 //! meant to be judged by eye written there as sRGB-encoded PPM files.
@@ -45,16 +46,8 @@ impl Image {
         let Some(dir) = std::env::var_os("MORNINGSTAR_DUMP_DIR") else {
             return;
         };
-        // The target is linear; encode to sRGB so it looks as on a screen.
-        let encode = |linear: u8| {
-            let v = f32::from(linear) / 255.0;
-            let srgb = if v <= 0.003_130_8 {
-                v * 12.92
-            } else {
-                1.055 * v.powf(1.0 / 2.4) - 0.055
-            };
-            (srgb * 255.0).round() as u8
-        };
+        // The target's bytes are what a screen shows.
+        let encode = |byte: u8| byte;
         let mut file = format!("P6\n{} {}\n255\n", self.width, self.height).into_bytes();
         for pixel in self.pixels.chunks_exact(4) {
             file.extend(pixel[..3].iter().map(|&channel| encode(channel)));
@@ -300,8 +293,13 @@ fn dashes_on_a_straight_edge_are_exact() {
         return;
     };
     for x in 5..39 {
-        // Distance along the pattern of this pixel's centre.
-        let along = 18.0 + (x as f32 + 0.5 - 3.0);
+        // Distance along the pattern of this pixel's centre. The pattern
+        // starts at the top of the left edge and runs down it, round the
+        // bottom and up the right (18 + 38 + 18 along the middle of the
+        // stroke), so the top edge comes last, right to left, and ends
+        // where the pattern began, 112 along. (It ran clockwise from the
+        // bottom of the left edge until Chrome's was measured; ADR 0022.)
+        let along = 112.0 - (x as f32 + 0.5 - 3.0);
         let expected = if along.rem_euclid(8.0) < 4.0 {
             RED_PX
         } else {
@@ -449,7 +447,7 @@ fn dashes_follow_a_circle_in_equal_steps() {
 }
 
 #[test]
-fn horizontal_gradient_is_linear_in_linear_space() {
+fn horizontal_gradient_is_linear_in_the_composited_values() {
     let rect = Rect::new(0.0, 0.0, 256.0, 4.0);
     let mut list = DisplayList::new();
     list.fill_gradient_rect(
@@ -462,7 +460,8 @@ fn horizontal_gradient_is_linear_in_linear_space() {
     };
 
     for x in 0..256 {
-        // Sampled at the pixel centre, in a linear target: no gamma curve.
+        // Sampled at the pixel centre; the bytes on screen rise evenly, as
+        // a CSS gradient's do.
         let expected = (x as f32 + 0.5) / 256.0 * 255.0;
         let [r, g, b, a] = image.at(x, 2);
         assert!(

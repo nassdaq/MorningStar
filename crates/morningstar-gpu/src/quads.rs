@@ -388,14 +388,13 @@ fn image_quad(
     }
 }
 
+/// A colour as the pipeline composites it: sRGB-encoded, then multiplied
+/// by alpha, as the blend state expects. Everything is blended, interpolated
+/// and filtered on these encoded values and written to a target that stores
+/// them unchanged (ADR 0023).
 fn premultiplied(color: Color) -> [f32; 4] {
-    // As the blend state expects.
-    [
-        color.r * color.a,
-        color.g * color.a,
-        color.b * color.a,
-        color.a,
-    ]
+    let [r, g, b, a] = color.srgb();
+    [r * a, g * a, b * a, a]
 }
 
 /// Translates one drawing operation. `None` for clip operations, images

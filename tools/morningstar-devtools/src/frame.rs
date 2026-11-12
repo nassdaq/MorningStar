@@ -26,20 +26,15 @@ pub fn screenshot_frame(app: &mut dyn App, info: &FrameInfo) -> Result<Vec<u8>, 
     frame.begin();
     app.frame(info, &mut frame);
 
-    let mut pixels = render_offscreen_with_images(
+    // The renderer composites sRGB-encoded values (ADR 0023): its pixels
+    // are an image file's, as they are.
+    let pixels = render_offscreen_with_images(
         info.size,
         frame.clear,
         &frame.list,
         frame.atlas(),
         frame.images(),
     )?;
-    // The renderer works in linear light; image files are sRGB-encoded.
-    let table = super::srgb_table();
-    for pixel in pixels.chunks_exact_mut(4) {
-        for channel in &mut pixel[..3] {
-            *channel = table[usize::from(*channel)];
-        }
-    }
     Ok(super::png::encode(
         info.size.width,
         info.size.height,
@@ -68,13 +63,13 @@ pub fn screenshot_transparent(
 
     let mut pixels =
         render_offscreen_with_images(info.size, clear, &frame.list, frame.atlas(), frame.images())?;
-    // The renderer's pixels are linear light multiplied by their alpha; an
-    // image file holds sRGB-encoded colour beside its alpha.
+    // The renderer's pixels are sRGB-encoded colour multiplied by alpha;
+    // an image file holds the colour beside its alpha.
     for pixel in pixels.chunks_exact_mut(4) {
-        let alpha = f32::from(pixel[3]);
+        let alpha = u32::from(pixel[3]);
         for channel in &mut pixel[..3] {
-            *channel = if alpha > 0.0 {
-                crate::image::linear_to_srgb(f32::from(*channel) / alpha)
+            *channel = if alpha > 0 {
+                ((u32::from(*channel) * 255 + alpha / 2) / alpha).min(255) as u8
             } else {
                 0
             };

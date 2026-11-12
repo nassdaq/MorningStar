@@ -28,9 +28,10 @@ impl Border {
 /// The pattern of a dashed border: `length` pixels of stroke, then `gap`
 /// pixels of nothing, repeated along the middle of the stroke.
 ///
-/// The pattern starts at the bottom end of the rectangle's left edge and
-/// runs clockwise (up the left edge first), which is where a browser starts
-/// it. See [`Dash::fitted`] for a pattern that closes without a seam.
+/// The pattern starts with a dash at the top end of the straight part of
+/// the rectangle's left edge and runs down that edge first (anticlockwise),
+/// which is where Chrome's dashes are (ADR 0022). See [`Dash::fitted`] for
+/// a pattern that closes without a seam.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Dash {
     /// Length of each dash, in pixels, measured along the stroke's middle.
@@ -107,11 +108,11 @@ fn dash_perimeter(rect: Rect, corner_radius: f32, width: f32) -> f32 {
 ///
 /// # Interpolation
 ///
-/// Colours are interpolated **in linear RGB with premultiplied alpha**, the
-/// space the whole pipeline blends in. This is physically uniform but is not
-/// what CSS and most design tools do by default (they interpolate
-/// sRGB-encoded values), so the midpoint of a gradient between two colours is
-/// lighter here than in a browser. Premultiplied interpolation means a fade
+/// Colours are interpolated **as sRGB-encoded values with premultiplied
+/// alpha**, the space the whole pipeline composites in (ADR 0023) and what
+/// CSS's `linear-gradient` and design tools do: the midpoint of a gradient
+/// between two colours is the mean of their bytes. Premultiplied
+/// interpolation means a fade
 /// to a fully transparent stop keeps the hue of the opaque stop, whatever the
 /// RGB of the transparent one.
 #[derive(Clone, Copy, Debug, PartialEq)]

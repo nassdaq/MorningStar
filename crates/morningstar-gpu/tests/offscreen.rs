@@ -2,8 +2,11 @@
 //! macOS dev host). They skip, rather than fail, where no adapter exists
 //! (e.g. CI containers without a GPU).
 //!
-//! The offscreen target is linear RGBA8 with premultiplied alpha, so expected
-//! bytes are simply the blended linear value times 255.
+//! The offscreen target is RGBA8 with premultiplied alpha, holding colours
+//! as the pipeline composites them: sRGB-encoded (ADR 0023). The colours
+//! used here have components of 0 or 1, which encode to themselves, so
+//! expected bytes are simply the blended value times 255;
+//! `tests/compositing.rs` covers the colours in between.
 
 use morningstar_core::{AtlasView, Color, DisplayList, Rect, SurfaceSize};
 use morningstar_gpu::{FrameOutcome, GpuError, Renderer, render_offscreen};
@@ -54,7 +57,10 @@ fn empty_list_clears_every_pixel() {
         for x in 0..13 {
             let [r, g, b, a] = image.at(x, y);
             assert_eq!((r, b, a), (255, 0, 255), "pixel {x},{y}");
-            assert!(g.abs_diff(128) <= 1, "green was {g} at {x},{y}");
+            // Half the light is byte 188 once sRGB-encoded, which is what a
+            // screen shows for it (it was 128 while the target held linear
+            // values; ADR 0023).
+            assert!(g.abs_diff(188) <= 1, "green was {g} at {x},{y}");
         }
     }
 }

@@ -121,17 +121,16 @@ pub struct ImagePixels<'a> {
     pub width: u32,
     pub height: u32,
     /// `width * height * 4` bytes of RGBA, row by row from the top:
-    /// sRGB-encoded colour premultiplied by alpha. The premultiplication was
-    /// done in linear light, so decoding a colour byte from sRGB gives the
-    /// linear colour times alpha. This is the content of an sRGB texture
-    /// that samples as premultiplied linear colour.
+    /// sRGB-encoded colour premultiplied by alpha, the encoded value times
+    /// alpha: what the renderer blends (ADR 0023). This is the content of a
+    /// plain 8-bit texture, sampled and filtered as it is.
     pub pixels: &'a [u8],
 }
 
 impl ImagePixels<'_> {
     /// These pixels scaled down to `width` x `height` (each at least 1 and at
     /// most the current size) with a box filter: every output pixel is the
-    /// average of the source area it covers, taken in linear light. Used for
+    /// average of the source area it covers, of the stored values. Used for
     /// oversized images and for mipmaps.
     pub fn downscaled(&self, width: u32, height: u32) -> Vec<u8> {
         downscale(self.pixels, self.width, self.height, width, height)
@@ -288,8 +287,9 @@ impl ImageStore {
 
     /// Registers an image whose pixels are already in the form the store
     /// keeps them in (see [`ImagePixels::pixels`]): `width * height * 4`
-    /// bytes of RGBA, sRGB-encoded colour premultiplied by alpha in linear
-    /// light. [`srgb_encode`] produces such bytes from linear values. For
+    /// bytes of RGBA, sRGB-encoded colour premultiplied by alpha (the
+    /// encoded value times alpha). [`srgb_encode`] gives the encoded byte of
+    /// a [`Color`](crate::Color) component. For
     /// pictures composited on the CPU, which would lose precision going
     /// through straight alpha and back.
     ///
@@ -391,8 +391,6 @@ fn decode(encoded: f32) -> f32 {
 }
 
 struct Tables {
-    /// Linear value of each sRGB byte.
-    linear: [f32; 256],
     /// `thresholds[i]` is the linear value halfway, in encoded terms,
     /// between bytes `i` and `i + 1`: values at or above it encode to more
     /// than `i`.
@@ -410,7 +408,6 @@ fn tables() -> &'static Tables {
         let thresholds: [f32; 255] =
             std::array::from_fn(|byte| decode((byte as f32 + 0.5) / 255.0));
         Tables {
-            linear: std::array::from_fn(|byte| decode(byte as f32 / 255.0)),
             guesses: std::array::from_fn(|index| {
                 let linear = index as f32 / (GUESSES - 1) as f32;
                 thresholds.partition_point(|&t| linear >= t) as u8
@@ -421,7 +418,7 @@ fn tables() -> &'static Tables {
 }
 
 /// The sRGB byte nearest (in encoded terms) to a linear value. Exactly
-/// inverts `Tables::linear`. Out-of-range values clamp; NaN encodes as 0.
+/// inverts `decode` on every byte. Out-of-range values clamp; NaN encodes as 0.
 fn encode(tables: &Tables, linear: f32) -> u8 {
     // The float-to-integer cast saturates, and maps NaN to zero.
     let index = ((linear * (GUESSES - 1) as f32 + 0.5) as usize).min(GUESSES - 1);
@@ -445,30 +442,33 @@ pub fn srgb_encode(linear: f32) -> u8 {
 }
 
 /// Converts straight-alpha sRGB pixels to premultiplied in place: each
-/// colour channel becomes the encoding of (its linear value times alpha).
+/// colour channel becomes its encoded value times alpha.
 ///
-/// Multiplying in linear light, not on the encoded bytes, is what makes the
-/// result blend and filter like any other premultiplied linear colour once
-/// the GPU has decoded it. Fully transparent pixels become transparent
-/// black, so whatever colour they carried cannot bleed into their
-/// neighbours when the image is filtered.
+/// Multiplying the encoded bytes is what the compositing space asks for
+/// (ADR 0023): the renderer blends encoded values, as browsers and design
+/// tools do, so "source plus destination times one minus alpha" must find
+/// the source already scaled in that space. Fully transparent pixels become
+/// transparent black, so whatever colour they carried cannot bleed into
+/// their neighbours when the image is filtered.
 fn premultiply(pixels: &mut [u8]) {
-    let tables = tables();
     for pixel in pixels.chunks_exact_mut(4) {
         match pixel[3] {
             255 => {}
             0 => pixel[..3].fill(0),
             alpha => {
-                let alpha = f32::from(alpha) / 255.0;
+                let alpha = u32::from(alpha);
                 for channel in &mut pixel[..3] {
-                    *channel = encode(tables, tables.linear[usize::from(*channel)] * alpha);
+                    // Rounded to nearest; never more than alpha.
+                    *channel = ((u32::from(*channel) * alpha + 127) / 255) as u8;
                 }
             }
         }
     }
 }
 
-/// Box-filters premultiplied sRGB pixels down to `new_width` x `new_height`.
+/// Box-filters premultiplied sRGB pixels down to `new_width` x `new_height`,
+/// averaging the encoded values: the space everything else is blended and
+/// filtered in (ADR 0023), and what a browser does when it shrinks an image.
 /// Out-of-range target sizes are clamped to `1..=` the source size; a
 /// mismatched buffer yields transparent pixels rather than a panic.
 fn downscale(pixels: &[u8], width: u32, height: u32, new_width: u32, new_height: u32) -> Vec<u8> {
@@ -487,7 +487,6 @@ fn downscale(pixels: &[u8], width: u32, height: u32, new_width: u32, new_height:
         return out;
     }
 
-    let tables = tables();
     if (nw * 2, nh * 2) == (w, h) {
         // Exactly half, as for most mip levels: each output texel is the
         // mean of a two-by-two block.
@@ -501,16 +500,11 @@ fn downscale(pixels: &[u8], width: u32, height: u32, new_width: u32, new_height:
                     &lower[x * 8 + 4..x * 8 + 8],
                 ];
                 let target = &mut out[(y * nw + x) * 4..(y * nw + x) * 4 + 4];
-                for channel in 0..3 {
-                    let light: f32 = block
-                        .iter()
-                        .map(|texel| tables.linear[usize::from(texel[channel])])
-                        .sum();
-                    target[channel] = encode(tables, light / 4.0);
+                for channel in 0..4 {
+                    let sum: u32 = block.iter().map(|texel| u32::from(texel[channel])).sum();
+                    // Rounded to nearest, halves up, as the general path does.
+                    target[channel] = ((sum + 2) / 4) as u8;
                 }
-                let alpha: u32 = block.iter().map(|texel| u32::from(texel[3])).sum();
-                // Rounded to nearest, halves up, as the general path does.
-                target[3] = ((alpha + 2) / 4) as u8;
             }
         }
         return out;
@@ -555,18 +549,16 @@ fn downscale(pixels: &[u8], width: u32, height: u32, new_width: u32, new_height:
                 for sx in column_span.0..column_span.1 {
                     let weight = wy * weight(sx, column_span);
                     let texel = &row[sx * 4..sx * 4 + 4];
-                    sum[0] += weight * tables.linear[usize::from(texel[0])];
-                    sum[1] += weight * tables.linear[usize::from(texel[1])];
-                    sum[2] += weight * tables.linear[usize::from(texel[2])];
-                    sum[3] += weight * f32::from(texel[3]);
+                    for channel in 0..4 {
+                        sum[channel] += weight * f32::from(texel[channel]);
+                    }
                     total += weight;
                 }
             }
             let target = &mut out[(y * nw + x) * 4..(y * nw + x) * 4 + 4];
-            for channel in 0..3 {
-                target[channel] = encode(tables, sum[channel] / total);
+            for channel in 0..4 {
+                target[channel] = (sum[channel] / total).round() as u8;
             }
-            target[3] = (sum[3] / total).round() as u8;
         }
     }
     out
@@ -768,18 +760,18 @@ mod tests {
     fn srgb_bytes_round_trip_exactly() {
         let tables = tables();
         for byte in 0..=255u8 {
-            assert_eq!(encode(tables, tables.linear[usize::from(byte)]), byte);
+            assert_eq!(encode(tables, decode(f32::from(byte) / 255.0)), byte);
         }
         assert_eq!(encode(tables, -1.0), 0);
         assert_eq!(encode(tables, 2.0), 255);
         assert_eq!(encode(tables, f32::NAN), 0);
         // Middle grey: half the light is byte 188, not 128.
         assert_eq!(encode(tables, 0.5), 188);
-        assert!((tables.linear[128] - 0.2158).abs() < 1e-3);
+        assert!((decode(128.0 / 255.0) - 0.2158).abs() < 1e-3);
     }
 
     #[test]
-    fn premultiplies_in_linear_light() {
+    fn premultiplies_the_encoded_values() {
         let mut store = ImageStore::new();
         let image = store
             .add_rgba8(
@@ -796,12 +788,13 @@ mod tests {
         let view = store.view();
         let pixels = view.get(image.id()).unwrap().pixels;
         assert_eq!(pixels[0..4], [255, 128, 0, 255]);
-        // Linear 128/255 = 0.502 encodes to 188: far from the 128 that
-        // multiplying the encoded byte would give.
-        assert_eq!(pixels[4..8], [188, 188, 188, 128]);
+        // The encoded byte times alpha, as the compositing space asks
+        // (ADR 0023): 255 * 128/255, not the 188 that half the light would
+        // encode to.
+        assert_eq!(pixels[4..8], [128, 128, 128, 128]);
         assert_eq!(pixels[8..12], [0, 0, 0, 0]);
-        // 0.503 light * 0.502 alpha = 0.252 light, which encodes to 138.
-        assert_eq!(pixels[12..16], [138, 0, 0, 128]);
+        // 188 * 128/255 = 94.4.
+        assert_eq!(pixels[12..16], [94, 0, 0, 128]);
     }
 
     #[test]
@@ -849,8 +842,9 @@ mod tests {
     }
 
     #[test]
-    fn downscale_averages_light_not_encoded_bytes() {
-        // Black and white texels average to half the light: byte 188.
+    fn downscale_averages_the_encoded_bytes() {
+        // Black and white texels average to the middle byte, as in a
+        // browser; half the light would be 188.
         let pixels = [0, 0, 0, 255, 255, 255, 255, 255];
         let half = ImagePixels {
             width: 2,
@@ -858,7 +852,7 @@ mod tests {
             pixels: &pixels,
         }
         .downscaled(1, 1);
-        assert_eq!(half, [188, 188, 188, 255]);
+        assert_eq!(half, [128, 128, 128, 255]);
 
         // Opaque red beside nothing: half-covered red, premultiplied, with
         // no contribution from the transparent texel's (absent) colour.
@@ -869,7 +863,7 @@ mod tests {
             pixels: &pixels,
         }
         .downscaled(1, 1);
-        assert_eq!(half, [188, 0, 0, 128]);
+        assert_eq!(half, [128, 0, 0, 128]);
     }
 
     #[test]
@@ -882,8 +876,8 @@ mod tests {
             pixels: &pixels,
         };
         let out = view.downscaled(2, 1);
-        // Two thirds white, one third black, in light: 0.667 -> byte 213.
-        assert_eq!(out, [213, 213, 213, 255, 213, 213, 213, 255]);
+        // Two thirds white, one third black: two thirds of 255.
+        assert_eq!(out, [170, 170, 170, 255, 170, 170, 170, 255]);
 
         assert_eq!(view.downscaled(3, 1), pixels, "same size is a copy");
         assert_eq!(view.downscaled(0, 0).len(), 4, "clamped up to one texel");

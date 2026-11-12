@@ -28,13 +28,21 @@ fn next_generation() -> u64 {
 /// rasterised at one size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum AtlasKey {
-    Glyph(CacheKey),
+    /// A glyph, and the tone of the colour it is weighted for (see
+    /// `context::tone`): the same glyph drawn dark and light is two images.
+    Glyph(CacheKey, u8),
     Icon(crate::icon::IconKey),
 }
 
 impl From<CacheKey> for AtlasKey {
     fn from(key: CacheKey) -> Self {
-        Self::Glyph(key)
+        Self::Glyph(key, 0)
+    }
+}
+
+impl From<(CacheKey, u8)> for AtlasKey {
+    fn from((key, tone): (CacheKey, u8)) -> Self {
+        Self::Glyph(key, tone)
     }
 }
 

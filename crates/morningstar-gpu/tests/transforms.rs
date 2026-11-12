@@ -4,8 +4,9 @@
 //! display list documents.
 //!
 //! Like the other pixel tests these run on the real GPU of the machine and
-//! skip where there is none. The target is linear RGBA8 with premultiplied
-//! alpha, so expected bytes are the blended linear value times 255.
+//! skip where there is none. The target is RGBA8 with premultiplied alpha and
+//! holds sRGB-encoded values (ADR 0023); the colours here have components
+//! of 0 or 1, so expected bytes are the blended value times 255.
 
 use morningstar_core::{
     AtlasView, Border, Color, Dash, DisplayList, ImageStore, LinearGradient, Point, Rect, Shadow,

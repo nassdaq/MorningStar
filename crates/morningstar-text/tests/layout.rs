@@ -174,18 +174,18 @@ fn mixed_direction_text_uses_both_fonts() {
 }
 
 #[test]
-fn origin_moves_glyphs_and_is_snapped_to_pixels() {
+fn a_whole_pixel_origin_moves_every_glyph_by_exactly_that() {
     let mut text = context();
     let at_zero = draw(&mut text, "Aa", &STYLE, None);
 
     let mut list = DisplayList::new();
-    text.draw(&mut list, "Aa", &STYLE, Point::new(100.4, 50.6), None);
+    text.draw(&mut list, "Aa", &STYLE, Point::new(100.0, 51.0), None);
     let moved = glyph_rects(&list);
 
+    assert_eq!(at_zero.len(), moved.len());
     for (a, b) in at_zero.iter().zip(&moved) {
         assert_eq!(b.x - a.x, 100.0);
         assert_eq!(b.y - a.y, 51.0);
-        assert_eq!(b.x.fract(), 0.0, "glyphs sit on whole pixels");
     }
 }
 

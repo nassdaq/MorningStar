@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 
 use cosmic_text::{
-    Align, Attrs, Buffer, CacheKey, Family, FeatureTag, FontFeatures, FontSystem, Metrics, Shaping,
-    Style, SwashCache, SwashContent, Weight, fontdb,
+    Align, Attrs, AttrsList, Buffer, CacheKey, CacheKeyFlags, Family, FeatureTag, FontFeatures,
+    FontSystem, LayoutGlyph, LayoutRun, Metrics, ShapeWord, Shaping, Style, SubpixelBin,
+    SwashCache, SwashContent, Weight, fontdb,
 };
 use morningstar_core::{AtlasView, Color, DisplayList, Point, Rect, Size, Transform};
 
@@ -24,18 +25,24 @@ pub struct OutlinedText {
     /// stroke reaches outside the text's box.
     pub offset: Point,
     /// `width * height * 4` bytes of RGBA, row by row from the top:
-    /// sRGB-encoded colour premultiplied by alpha in linear light, as the
-    /// image store keeps images.
+    /// sRGB-encoded colour premultiplied by alpha, as the image store
+    /// keeps images.
     pub pixels: Vec<u8>,
 }
 
 /// One glyph of a laid-out paragraph, relative to the paragraph's origin.
 #[derive(Clone, Copy)]
 struct PlacedGlyph {
+    /// The glyph at a whole pixel; the horizontal sub-pixel bin is chosen
+    /// when it is drawn, from where its paragraph is.
     key: CacheKey,
-    /// Pen position: horizontal offset and baseline.
-    x: i32,
-    y: i32,
+    /// Pen position from the paragraph's left edge, in fractional pixels.
+    x: f32,
+    /// The top of the glyph's line from the paragraph's top, unrounded.
+    line_top: f32,
+    /// From the line's top, once that is on a pixel row, down to the pen:
+    /// a whole number of pixels (see [`baseline`]).
+    rise: f32,
     /// The colour of the span the glyph belongs to, if the span sets one.
     color: Option<Color>,
 }
@@ -190,6 +197,9 @@ pub struct TextContext {
     atlas_full: bool,
     /// Every icon drawn so far, parsed once.
     icons: HashMap<VectorIcon, Result<Art, IconError>>,
+    /// Kerning across a space, per font and pair of letters, in ems. See
+    /// [`space_kerning`](Self::space_kerning).
+    space_kerns: HashMap<SpaceKern, f32>,
 }
 
 impl Default for TextContext {
@@ -212,6 +222,7 @@ impl TextContext {
             frame: 0,
             atlas_full: false,
             icons: HashMap::new(),
+            space_kerns: HashMap::new(),
         }
     }
 
@@ -222,6 +233,7 @@ impl TextContext {
         self.fonts.db_mut().load_font_data(data.to_vec());
         // Cached layouts may have used a fallback this font now replaces.
         self.layouts.clear();
+        self.space_kerns.clear();
     }
 
     /// Adds the fonts installed on the device, as fallback after any added
@@ -298,7 +310,12 @@ impl TextContext {
     /// Draws text with the top-left of its layout box at `origin`, and
     /// returns the size it occupied.
     ///
-    /// `origin` is snapped to whole pixels so glyphs stay sharp.
+    /// `origin` may be anywhere. Horizontally glyphs keep their fractional
+    /// position to a quarter of a pixel, as browsers place them. Vertically
+    /// each line's top goes to the nearest pixel row and its baseline a
+    /// whole number of rows below (half the leading rounded down, then the
+    /// font's rounded ascent), so text is always sharp across its stems'
+    /// tops and feet. See ADR 0022.
     pub fn draw(
         &mut self,
         list: &mut DisplayList,
@@ -324,10 +341,40 @@ impl TextContext {
     ) -> Size {
         let key = self.layout(spans, style, max_width);
         let layout = &self.layouts[&key];
-        let (origin_x, origin_y) = (origin.x.round() as i32, origin.y.round() as i32);
+        // Positions far outside any surface would overflow the whole-pixel
+        // arithmetic below; NaN draws at the origin.
+        let limit = 1.0e7;
+        let origin = Point::new(
+            if origin.x.is_nan() {
+                0.0
+            } else {
+                origin.x.clamp(-limit, limit)
+            },
+            if origin.y.is_nan() {
+                0.0
+            } else {
+                origin.y.clamp(-limit, limit)
+            },
+        );
 
+        let mut toned: Option<(Color, u8)> = None;
         for glyph in &layout.glyphs {
-            let slot = match self.atlas.lookup(glyph.key) {
+            // Horizontally the pen keeps its fraction, to a quarter of a
+            // pixel: the glyph is rasterised for that offset.
+            let (pen_x, x_bin) = SubpixelBin::new(origin.x + glyph.x);
+            let pen_y = baseline(origin.y, glyph.line_top, glyph.rise) as i32;
+            let glyph_key = CacheKey { x_bin, ..glyph.key };
+            let color = glyph.color.unwrap_or(style.color);
+            // Runs of one colour are the rule: its tone is worked out once.
+            let tone = match toned {
+                Some((of, tone)) if of == color => tone,
+                _ => {
+                    let tone = tone(color);
+                    toned = Some((color, tone));
+                    tone
+                }
+            };
+            let slot = match self.atlas.lookup((glyph_key, tone)) {
                 Lookup::Found(slot) => slot,
                 Lookup::Blank => continue,
                 Lookup::Missing => {
@@ -335,7 +382,8 @@ impl TextContext {
                         &mut self.fonts,
                         &mut self.rasteriser,
                         &mut self.atlas,
-                        glyph.key,
+                        glyph_key,
+                        tone,
                     ) {
                         Rasterised::Slot(slot) => slot,
                         Rasterised::Blank => continue,
@@ -351,8 +399,8 @@ impl TextContext {
 
             list.draw_glyph(
                 Rect::new(
-                    (origin_x + glyph.x + slot.left) as f32,
-                    (origin_y + glyph.y - slot.top) as f32,
+                    (pen_x + slot.left) as f32,
+                    (pen_y - slot.top) as f32,
                     slot.width as f32,
                     slot.height as f32,
                 ),
@@ -362,7 +410,7 @@ impl TextContext {
                     slot.width as f32,
                     slot.height as f32,
                 ),
-                glyph.color.unwrap_or(style.color),
+                color,
             );
         }
         layout.size
@@ -444,11 +492,12 @@ impl TextContext {
                 }
                 let first = map.stops.len();
                 let mut end = cursor.1;
-                for glyph in run.glyphs {
+                let moved = self.space_kerning(&run, &spans, style);
+                for (index, glyph) in run.glyphs.iter().enumerate() {
                     map.stops.push(Stop {
                         start: base + glyph.start,
                         end: base + glyph.end,
-                        x: glyph.x,
+                        x: glyph.x + moved.at(index),
                         width: glyph.w,
                         rtl: glyph.level.is_rtl(),
                     });
@@ -584,15 +633,16 @@ impl TextContext {
             else {
                 continue;
             };
-            // Outlines are y-up, relative to the pen position, which the
-            // glyph's key holds the fractional part of.
+            // Outlines are y-up, relative to the pen position. The image
+            // is placed at a whole pixel, so the paragraph is taken to
+            // start on one.
             let place = zeno::Transform::new(
                 1.0,
                 0.0,
                 0.0,
                 -1.0,
-                glyph.x as f32 + glyph.key.x_bin.as_float(),
-                glyph.y as f32 + glyph.key.y_bin.as_float(),
+                glyph.x,
+                baseline(0.0, glyph.line_top, glyph.rise),
             );
             path.extend(commands.iter().map(|command| command.transform(&place)));
         }
@@ -720,25 +770,163 @@ impl TextContext {
             return (Vec::new(), Size::ZERO);
         };
 
+        // The paragraph's own font decides where baselines go (CSS calls
+        // it the strut): the font of the first glyph that belongs to a
+        // span without a family of its own, else of the first glyph.
+        let strut = buffer
+            .layout_runs()
+            .flat_map(|run| run.glyphs.iter())
+            .find(|glyph| {
+                spans
+                    .get(glyph.metadata)
+                    .is_none_or(|span| span.family.is_none())
+            })
+            .or_else(|| buffer.layout_runs().find_map(|run| run.glyphs.first()))
+            .map(|glyph| (glyph.font_id, glyph.font_weight, glyph.font_size));
+        let strut = strut.and_then(|(id, weight, size)| {
+            let font = self.fonts.get_font(id, weight)?;
+            let metrics = font.metrics();
+            let units = f32::from(metrics.units_per_em);
+            (units > 0.0)
+                .then(|| Strut::new(metrics.ascent / units, -metrics.descent / units, size))
+        });
+
         let mut glyphs = Vec::new();
         let mut size = Size::ZERO;
         for run in buffer.layout_runs() {
-            for glyph in run.glyphs {
-                // The baseline goes to the nearest pixel row. (Left as it
-                // is, the shaper would truncate it, which sets a line whose
-                // baseline falls at 32.9 a pixel higher than one at 33.0.)
-                let physical = glyph.physical((0.0, run.line_y.round()), 1.0);
+            let rise = match strut {
+                Some(strut) => strut.rise(run.line_height),
+                // No metrics: the shaper's baseline, on a pixel row.
+                None => (run.line_y - run.line_top).round(),
+            };
+            let moved = self.space_kerning(&run, spans, style);
+            for (index, glyph) in run.glyphs.iter().enumerate() {
+                let (key, _, _) = CacheKey::new(
+                    glyph.font_id,
+                    glyph.glyph_id,
+                    glyph.font_size,
+                    (0.0, 0.0),
+                    glyph.font_weight,
+                    glyph.cache_key_flags,
+                );
                 glyphs.push(PlacedGlyph {
-                    key: physical.cache_key,
-                    x: physical.x,
-                    y: physical.y,
+                    key,
+                    x: glyph.x + glyph.font_size * glyph.x_offset + moved.at(index),
+                    line_top: run.line_top,
+                    // Marks raised or lowered by the font stay on whole
+                    // pixels with their base.
+                    rise: rise + (glyph.y - glyph.font_size * glyph.y_offset).round(),
                     color: spans.get(glyph.metadata).and_then(|span| span.color),
                 });
             }
-            size.width = size.width.max(run.line_w);
+            size.width = size.width.max(run.line_w + moved.total);
             size.height = size.height.max(run.line_top + run.line_height);
         }
         (glyphs, size)
+    }
+
+    /// How far each glyph of a line moves for the kerning its font has
+    /// between a letter and a space, or a space and a letter.
+    ///
+    /// The shaper shapes word by word and spaces by themselves, so such
+    /// pairs (Outfit closes up "f A" by 4% of an em) are never seen by it;
+    /// a browser shapes the run whole. Each pair is shaped once here as
+    /// one piece, compared with its parts, and remembered. Lines are still
+    /// broken by the unkerned widths, and right-to-left lines are left as
+    /// they are.
+    fn space_kerning(
+        &mut self,
+        run: &LayoutRun<'_>,
+        spans: &[TextSpan<'_>],
+        style: &TextStyle,
+    ) -> Moved {
+        let mut moved = Moved::default();
+        if run.rtl || run.glyphs.len() < 3 {
+            return moved;
+        }
+        let text_of = |glyph: &LayoutGlyph| run.text.get(glyph.start..glyph.end).unwrap_or("");
+        for index in 1..run.glyphs.len() - 1 {
+            let [before, space, after] =
+                [-1, 0, 1].map(|d| &run.glyphs[(index as isize + d) as usize]);
+            let (Some(left), Some(right)) = (
+                text_of(before).chars().next_back(),
+                text_of(after).chars().next(),
+            ) else {
+                continue;
+            };
+            if text_of(space) != " "
+                || left.is_whitespace()
+                || right.is_whitespace()
+                || before.font_id != after.font_id
+                || before.font_id != space.font_id
+                || before.font_weight != after.font_weight
+                || before.font_size != after.font_size
+                || before.metadata != after.metadata
+                || [before, space, after].iter().any(|glyph| glyph.level.is_rtl())
+                // In visual order, which for left-to-right text is the
+                // order of the bytes.
+                || !(before.start < space.start && space.start < after.start)
+            {
+                continue;
+            }
+            let key = SpaceKern {
+                font: before.font_id,
+                weight: before.font_weight.0,
+                tabular: style.tabular_nums,
+                left,
+                right,
+            };
+            let ems = match self.space_kerns.get(&key) {
+                Some(ems) => *ems,
+                None => {
+                    let attrs = attrs_of(style, spans.get(before.metadata), false);
+                    let attrs = AttrsList::new(&attrs);
+                    let fonts = &mut self.fonts;
+                    let mut advance = |piece: &str| {
+                        let word = ShapeWord::new(
+                            fonts,
+                            piece,
+                            &attrs,
+                            0..piece.len(),
+                            before.level,
+                            false,
+                            Shaping::Advanced,
+                        );
+                        // A piece that fell back to another font says
+                        // nothing about this one.
+                        word.glyphs
+                            .iter()
+                            .all(|glyph| glyph.font_id == key.font)
+                            .then(|| word.glyphs.iter().map(|glyph| glyph.x_advance).sum::<f32>())
+                    };
+                    let mut buffer = [0u8; 4];
+                    let whole = format!("{left} {right}");
+                    let ems = (|| {
+                        Some(
+                            advance(&whole)?
+                                - advance(left.encode_utf8(&mut buffer))?
+                                - advance(" ")?
+                                - advance(right.encode_utf8(&mut buffer))?,
+                        )
+                    })()
+                    .filter(|ems| ems.is_finite() && ems.abs() < 1.0)
+                    .unwrap_or(0.0);
+                    self.space_kerns.insert(key, ems);
+                    ems
+                }
+            };
+            if ems != 0.0 {
+                moved.from.push((index + 1, ems * before.font_size));
+            }
+        }
+        moved.total = moved.from.iter().map(|(_, by)| by).sum();
+        // A line that got narrower keeps its alignment.
+        moved.line = match style.align {
+            TextAlign::Start => 0.0,
+            TextAlign::Center => -moved.total / 2.0,
+            TextAlign::End => -moved.total,
+        };
+        moved
     }
 
     /// Shapes and line-breaks the spans. `None` when there is nothing to
@@ -756,29 +944,7 @@ impl TextContext {
             return None;
         }
 
-        let family = |family: FontFamily| match family {
-            FontFamily::Default => Family::SansSerif,
-            FontFamily::Named(name) => Family::Name(name),
-        };
-        // Asking for italic picks an italic face when the family has one;
-        // when it has none the shaper marks the glyphs to be slanted as
-        // they are rasterised (and as their outlines are produced).
-        let slant = |italic: bool| {
-            if italic { Style::Italic } else { Style::Normal }
-        };
-        let mut attrs = Attrs::new()
-            .family(family(style.family))
-            .weight(Weight(style.weight.0))
-            .style(slant(style.italic));
-        if style.tabular_nums {
-            let mut features = FontFeatures::new();
-            features.enable(FeatureTag::new(b"tnum"));
-            attrs = attrs.font_features(features);
-        }
-        if style.letter_spacing.is_finite() && style.letter_spacing != 0.0 {
-            // The shaper takes it as a fraction of the font size.
-            attrs = attrs.letter_spacing(style.letter_spacing / font_size);
-        }
+        let attrs = attrs_of(style, None, true);
         let align = match style.align {
             // `None` lets each paragraph follow its own direction.
             TextAlign::Start => None,
@@ -797,17 +963,7 @@ impl TextContext {
         } else {
             // `metadata` carries the span's index to its glyphs.
             let rich = spans.iter().enumerate().map(|(index, span)| {
-                let mut attrs = attrs.clone().metadata(index);
-                if let Some(weight) = span.weight {
-                    attrs = attrs.weight(Weight(weight.0));
-                }
-                if let Some(name) = span.family {
-                    attrs = attrs.family(family(name));
-                }
-                if let Some(italic) = span.italic {
-                    attrs = attrs.style(slant(italic));
-                }
-                (span.text, attrs)
+                (span.text, attrs_of(style, Some(span), true).metadata(index))
             });
             buffer.set_rich_text(&mut self.fonts, rich, &attrs, Shaping::Advanced, align);
         }
@@ -824,6 +980,129 @@ fn line_height(style: &TextStyle) -> f32 {
     } else {
         font_size
     }
+}
+
+/// What identifies the kerning of a letter, a space and a letter.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct SpaceKern {
+    font: fontdb::ID,
+    weight: u16,
+    tabular: bool,
+    left: char,
+    right: char,
+}
+
+/// Horizontal corrections to the glyphs of one line.
+#[derive(Default)]
+struct Moved {
+    /// From this glyph of the line on, this many more pixels.
+    from: Vec<(usize, f32)>,
+    /// The change of the line's width.
+    total: f32,
+    /// The move of the whole line that keeps it aligned.
+    line: f32,
+}
+
+impl Moved {
+    fn at(&self, glyph: usize) -> f32 {
+        self.line
+            + self
+                .from
+                .iter()
+                .take_while(|(from, _)| *from <= glyph)
+                .map(|(_, by)| by)
+                .sum::<f32>()
+    }
+}
+
+/// The shaper's attributes for a style, and for a span of it.
+fn attrs_of<'a>(style: &TextStyle, span: Option<&TextSpan<'_>>, letter_spacing: bool) -> Attrs<'a> {
+    let family = |family: FontFamily| match family {
+        FontFamily::Default => Family::SansSerif,
+        FontFamily::Named(name) => Family::Name(name),
+    };
+    // Asking for italic picks an italic face when the family has one;
+    // when it has none the shaper marks the glyphs to be slanted as
+    // they are rasterised (and as their outlines are produced).
+    let slant = |italic: bool| {
+        if italic { Style::Italic } else { Style::Normal }
+    };
+    let font_size = if style.size > 0.0 { style.size } else { 1.0 };
+    let mut attrs = Attrs::new()
+        // Outlines as the font has them, not fitted to the pixel grid: a
+        // browser on a dense screen does not hint either, and hinted stems
+        // would not sit where fractional positions put them (ADR 0022).
+        .cache_key_flags(CacheKeyFlags::DISABLE_HINTING)
+        .family(family(
+            span.and_then(|span| span.family).unwrap_or(style.family),
+        ))
+        .weight(Weight(
+            span.and_then(|span| span.weight).unwrap_or(style.weight).0,
+        ))
+        .style(slant(
+            span.and_then(|span| span.italic).unwrap_or(style.italic),
+        ));
+    let spaced = style.letter_spacing.is_finite() && style.letter_spacing != 0.0;
+    if style.tabular_nums || spaced {
+        let mut features = FontFeatures::new();
+        if style.tabular_nums {
+            features.enable(FeatureTag::new(b"tnum"));
+        }
+        if spaced {
+            // CSS: "when the effective letter-spacing between two
+            // characters is not zero, user agents should not apply
+            // optional ligatures". Spaced-out letters would otherwise keep
+            // an "fi" joined in the middle of a word.
+            features.disable(FeatureTag::new(b"liga"));
+            features.disable(FeatureTag::new(b"clig"));
+        }
+        attrs = attrs.font_features(features);
+    }
+    if letter_spacing && spaced {
+        // The shaper takes it as a fraction of the font size.
+        attrs = attrs.letter_spacing(style.letter_spacing / font_size);
+    }
+    attrs
+}
+
+/// A paragraph font's vertical metrics in pixels, each rounded to a whole
+/// pixel as a browser rounds them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Strut {
+    ascent: f32,
+    descent: f32,
+}
+
+impl Strut {
+    /// `ascent` and `descent` as fractions of the font size, both positive.
+    fn new(ascent: f32, descent: f32, font_size: f32) -> Self {
+        Self {
+            ascent: (ascent * font_size).round(),
+            descent: (descent * font_size).round(),
+        }
+    }
+
+    /// From the top of a line `line_height` pixels tall down to its
+    /// baseline: half the leading, rounded down to a whole pixel (also when
+    /// it is negative, for a line shorter than its font), and the ascent.
+    ///
+    /// This is the rule Chrome's line boxes follow, derived from the
+    /// measured boxes in `examples/callready/design/layout` (ADR 0022):
+    /// 27 px Outfit on a 35.1 px line at 2 px per dp has 1.1 px of
+    /// half-leading and starts 1 px down; 32 px bold on a 35.84 px line
+    /// has -4.66 px and starts 5 px up.
+    fn rise(self, line_height: f32) -> f32 {
+        ((line_height - (self.ascent + self.descent)) / 2.0).floor() + self.ascent
+    }
+}
+
+/// The pixel row of a baseline: the line's top goes to the nearest row
+/// (halves down the page, as a browser's layout unit rounds), and the
+/// baseline is a whole number of rows below it. So lines of a paragraph
+/// with a fractional line height are not evenly spaced: each is where its
+/// own top rounds to.
+fn baseline(origin_y: f32, line_top: f32, rise: f32) -> f32 {
+    (origin_y + line_top + 0.5).floor() + rise
 }
 
 /// True if the spans' text, joined, is `stored`.
@@ -844,11 +1123,56 @@ enum Rasterised {
     AtlasFull,
 }
 
+/// How many tones glyph images are weighted for, from dark text to light.
+const TONES: u8 = 4;
+
+/// The exponent's divisor for white text; black text has 1 and tones
+/// between lie evenly between. Fitted to the Chrome references of both
+/// example apps (ADR 0023): the share of differing pixels over all
+/// seventeen screens falls from 3.38 to 2.89 between 1 and 3 and is flat
+/// beyond.
+const LIGHT_TEXT_GAMMA: f32 = 3.0;
+
+/// The tone a glyph image is weighted for when drawn in `color`: 0 for
+/// dark text up to `TONES - 1` for white, by the luma of its encoded
+/// colour.
+///
+/// A browser's text is not its outline's plain coverage: light text on
+/// dark is drawn visibly heavier (font smoothing; Skia's text gamma), and
+/// compositing encoded values, unlike blending in linear light, does not
+/// produce that by itself. Coverage `c` becomes `c^(1 / g)`, with `g` from
+/// 1 for black text to [`LIGHT_TEXT_GAMMA`] for white. Icons and pictures
+/// are vector paths, which a browser does not weight, and are left alone.
+fn tone(color: Color) -> u8 {
+    let [r, g, b, _] = color.srgb();
+    let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    // The float-to-integer cast saturates.
+    ((luma * f32::from(TONES - 1) + 0.5) as u8).min(TONES - 1)
+}
+
+/// Coverage to weighted coverage for a tone above 0.
+fn tone_curve(tone: u8) -> &'static [u8; 256] {
+    static CURVES: std::sync::OnceLock<Vec<[u8; 256]>> = std::sync::OnceLock::new();
+    let curves = CURVES.get_or_init(|| {
+        (1..TONES)
+            .map(|tone| {
+                let share = f32::from(tone) / f32::from(TONES - 1);
+                let exponent = 1.0 / (1.0 + (LIGHT_TEXT_GAMMA - 1.0) * share);
+                std::array::from_fn(|coverage| {
+                    ((coverage as f32 / 255.0).powf(exponent) * 255.0 + 0.5) as u8
+                })
+            })
+            .collect()
+    });
+    &curves[usize::from(tone.clamp(1, TONES - 1)) - 1]
+}
+
 fn rasterise(
     fonts: &mut FontSystem,
     rasteriser: &mut SwashCache,
     atlas: &mut Atlas,
     key: CacheKey,
+    tone: u8,
 ) -> Rasterised {
     let image = rasteriser.get_image_uncached(fonts, key);
     let Some(image) = image.filter(|image| {
@@ -857,17 +1181,29 @@ fn rasterise(
             && image.placement.width > 0
             && image.placement.height > 0
     }) else {
-        atlas.insert_blank(key);
+        atlas.insert_blank((key, tone));
         return Rasterised::Blank;
     };
 
+    let weighted;
+    let data = if tone == 0 {
+        &image.data
+    } else {
+        let curve = tone_curve(tone);
+        weighted = image
+            .data
+            .iter()
+            .map(|&coverage| curve[usize::from(coverage)])
+            .collect::<Vec<u8>>();
+        &weighted
+    };
     match atlas.insert(
-        key,
+        (key, tone),
         image.placement.width,
         image.placement.height,
         image.placement.left,
         image.placement.top,
-        &image.data,
+        data,
     ) {
         Some(slot) => Rasterised::Slot(slot),
         None => Rasterised::AtlasFull,

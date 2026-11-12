@@ -3,9 +3,10 @@
 //! order across draw calls, and mipmaps.
 //!
 //! Like the other pixel tests these run on the real GPU of the machine and
-//! skip where there is none. The target is linear RGBA8, so expected bytes
-//! are the blended linear value times 255, while image pixels are given
-//! sRGB-encoded, as in a PNG. Bytes 0 and 255 are the same in both.
+//! skip where there is none. The target is RGBA8 holding sRGB-encoded
+//! values, and image pixels are given sRGB-encoded, as in a PNG: both are
+//! the bytes a screen shows, and blending and filtering work on them as
+//! they are (ADR 0023).
 
 use morningstar_core::{
     AtlasView, Color, DisplayList, Image, ImageFit, ImageStore, ImagesView, MAX_IMAGE_DIMENSION,
@@ -91,17 +92,6 @@ fn close(a: [u8; 4], b: [u8; 4], tolerance: u8) -> bool {
     a.iter().zip(b).all(|(&x, y)| x.abs_diff(y) <= tolerance)
 }
 
-/// What an sRGB-encoded byte is as a linear byte in the target.
-fn linear(encoded: u8) -> u8 {
-    let v = f32::from(encoded) / 255.0;
-    let light = if v <= 0.040_45 {
-        v / 12.92
-    } else {
-        ((v + 0.055) / 1.055).powf(2.4)
-    };
-    (light * 255.0).round() as u8
-}
-
 // --- Sampling ----------------------------------------------------------------
 
 #[test]
@@ -172,7 +162,7 @@ fn magnified_image_is_filtered_between_texels() {
     let Some(frame) = render(SurfaceSize::new(16, 1), &list, &store) else {
         return;
     };
-    // Flat up to each texel's centre, a linear ramp (in light) between.
+    // Flat up to each texel's centre, a linear ramp of the bytes between.
     assert_eq!(frame.at(0, 0), K);
     assert_eq!(frame.at(3, 0), K);
     assert_eq!(frame.at(12, 0), W);
@@ -228,7 +218,7 @@ fn fit_helpers_place_the_image_on_the_gpu() {
 // --- Colour ------------------------------------------------------------------
 
 #[test]
-fn image_bytes_are_decoded_from_srgb_to_linear() {
+fn image_bytes_reach_the_target_unchanged() {
     let mut store = ImageStore::new();
     let grey = |v: u8| [v, v, v, 255];
     let values = [1, 10, 55, 128, 188, 240];
@@ -239,21 +229,16 @@ fn image_bytes_are_decoded_from_srgb_to_linear() {
         return;
     };
     for (x, value) in values.into_iter().enumerate() {
-        let expected = linear(value);
-        assert!(
-            close(frame.at(x as u32, 0), grey(expected), 1),
-            "sRGB {value} should be linear {expected}, got {:?}",
-            frame.at(x as u32, 0)
-        );
+        // An image's bytes are sRGB-encoded and so is the target: an
+        // opaque pixel drawn one to one is the same byte. (While the
+        // target held linear values this was the decoded byte, 55 for
+        // 128; ADR 0023.)
+        assert_eq!(frame.at(x as u32, 0), grey(value), "byte {value}");
     }
-    // The two that matter by eye: mid-grey 128 is 22% light, and half the
-    // light is 188. Reading the bytes as linear would give 128 for both.
-    assert_eq!(linear(128), 55);
-    assert_eq!(linear(188), 128);
 }
 
 #[test]
-fn translucent_pixels_are_premultiplied_in_linear_light() {
+fn translucent_pixels_are_premultiplied_and_blended_as_encoded_values() {
     let mut store = ImageStore::new();
     // Straight alpha, as in a PNG: full-intensity colour, half alpha.
     let half = image(&mut store, &[[[255, 255, 255, 128], [255, 0, 0, 128]]]);
@@ -846,7 +831,8 @@ fn a_large_image_drawn_small_is_averaged_not_point_sampled() {
     };
     for y in 0..16 {
         for x in 0..16 {
-            // Half the light: 128 in the linear target.
+            // The mean of black and white bytes, as a browser shrinks an
+            // image.
             assert!(
                 close(frame.at(x, y), [128, 128, 128, 255], 2),
                 "({x}, {y}): {:?}",

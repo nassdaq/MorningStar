@@ -9,7 +9,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use morningstar_core::{Color, Transform, srgb_encode};
+use morningstar_core::{Color, Transform};
 use zeno::{Cap, Command, Fill, Join, Mask, PathBuilder, Stroke};
 
 use crate::icon::{IconError, path_commands};
@@ -391,8 +391,8 @@ impl Layer {
 /// ```
 ///
 /// A picture is rasterised for the exact pixels it covers, so it is sharp at
-/// every display scale; colours are composited in linear light with
-/// premultiplied alpha, as the renderer blends. Whatever falls outside the
+/// every display scale; its layers are composited as sRGB-encoded values
+/// with premultiplied alpha, as the renderer and browsers blend (ADR 0023). Whatever falls outside the
 /// view box is cut off.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VectorPicture {
@@ -470,7 +470,7 @@ impl VectorPicture {
     /// Rasterises the picture into `width * height * 4` bytes of RGBA, row
     /// by row from the top, in the form the image store keeps
     /// (`ImageStore::add_premultiplied_rgba8_vec`): sRGB-encoded colour
-    /// premultiplied by alpha in linear light.
+    /// premultiplied by alpha.
     ///
     /// The view box is scaled uniformly to fit and centred, as SVG does by
     /// default. A layer whose path data does not parse is skipped.
@@ -556,7 +556,8 @@ pub(crate) struct Paint<'a> {
     pub clip: Option<(&'a [Command], Transform)>,
 }
 
-/// An image being composited: premultiplied linear RGBA in `f32`.
+/// An image being composited: sRGB-encoded RGBA premultiplied by alpha, in
+/// `f32`. The encoded values are what is blended (ADR 0023).
 pub(crate) struct Canvas {
     width: u32,
     height: u32,
@@ -581,12 +582,8 @@ fn to_zeno(transform: Transform) -> zeno::Transform {
 }
 
 fn premultiplied(color: Color) -> [f32; 4] {
-    let alpha = if color.a.is_nan() {
-        0.0
-    } else {
-        color.a.clamp(0.0, 1.0)
-    };
-    [color.r * alpha, color.g * alpha, color.b * alpha, alpha]
+    let [r, g, b, alpha] = color.srgb();
+    [r * alpha, g * alpha, b * alpha, alpha]
 }
 
 impl Canvas {
@@ -742,12 +739,9 @@ impl Canvas {
                 bytes.extend_from_slice(&[0; 4]);
                 continue;
             }
-            bytes.extend_from_slice(&[
-                srgb_encode(r),
-                srgb_encode(g),
-                srgb_encode(b),
-                (a.min(1.0) * 255.0 + 0.5) as u8,
-            ]);
+            // The float-to-integer cast saturates.
+            bytes
+                .extend_from_slice(&[r, g, b, a].map(|value| (value.min(1.0) * 255.0 + 0.5) as u8));
         }
         bytes
     }
@@ -794,17 +788,17 @@ mod tests {
     }
 
     #[test]
-    fn opacity_blends_in_linear_light_and_is_stored_premultiplied() {
+    fn opacity_blends_the_encoded_values_and_is_stored_premultiplied() {
         static LAYERS: [Layer; 2] = [
             Layer::rect(0.0, 0.0, 8.0, 4.0).fill(RED),
             Layer::rect(0.0, 0.0, 4.0, 8.0).fill(BLUE).opacity(0.5),
         ];
         let pixels = VectorPicture::new(8.0, 8.0, &LAYERS).rasterise(8, 8);
-        // Blue at half opacity over red: half of each, in linear light,
-        // which is byte 188 once sRGB-encoded.
-        assert_eq!(at(&pixels, 8, 1, 1), [188, 0, 188, 255]);
+        // Blue at half opacity over red: half of each encoded value, as a
+        // browser shows it (half of each light would be byte 188).
+        assert_eq!(at(&pixels, 8, 1, 1), [128, 0, 128, 255]);
         // Over nothing: half-transparent blue, premultiplied.
-        assert_eq!(at(&pixels, 8, 1, 6), [0, 0, 188, 128]);
+        assert_eq!(at(&pixels, 8, 1, 6), [0, 0, 128, 128]);
         assert_eq!(at(&pixels, 8, 6, 1), [255, 0, 0, 255]);
     }
 
@@ -817,9 +811,9 @@ mod tests {
             .stroke(BLUE, 4.0)
             .opacity(0.5)];
         let pixels = VectorPicture::new(16.0, 16.0, &LAYERS).rasterise(16, 16);
-        assert_eq!(at(&pixels, 16, 8, 8), [188, 0, 0, 128], "fill only");
-        assert_eq!(at(&pixels, 16, 5, 8), [0, 0, 188, 128], "stroke over fill");
-        assert_eq!(at(&pixels, 16, 3, 8), [0, 0, 188, 128], "stroke outside");
+        assert_eq!(at(&pixels, 16, 8, 8), [128, 0, 0, 128], "fill only");
+        assert_eq!(at(&pixels, 16, 5, 8), [0, 0, 128, 128], "stroke over fill");
+        assert_eq!(at(&pixels, 16, 3, 8), [0, 0, 128, 128], "stroke outside");
         assert_eq!(at(&pixels, 16, 1, 8), [0; 4]);
     }
 

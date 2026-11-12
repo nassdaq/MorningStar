@@ -1,7 +1,9 @@
 /// A colour in linear RGB with straight (non-premultiplied) alpha.
 ///
-/// Components are nominally in `0.0..=1.0`. The renderer is responsible for
-/// encoding to the surface's transfer function.
+/// Components are nominally in `0.0..=1.0`. The renderer encodes them with
+/// the sRGB transfer function ([`srgb`](Self::srgb)) and composites the
+/// encoded values, as browsers and design tools do (ADR 0023): a colour
+/// with alpha 0.25 over black shows a quarter of its *encoded* value.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Color {
     pub r: f32,
@@ -20,6 +22,35 @@ impl Color {
 
     pub const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
+    }
+
+    /// The colour as the renderer composites it: red, green and blue
+    /// encoded with the sRGB transfer function, and alpha as it is (not
+    /// premultiplied). Components outside `0..=1` are clamped; NaN encodes
+    /// as 0. A colour made from a design's `#RRGGBB` gives those bytes
+    /// back, over 255.
+    pub fn srgb(self) -> [f32; 4] {
+        let encode = |linear: f32| {
+            if linear.is_nan() || linear <= 0.0 {
+                0.0
+            } else if linear >= 1.0 {
+                1.0
+            } else if linear <= 0.003_130_8 {
+                linear * 12.92
+            } else {
+                1.055 * linear.powf(1.0 / 2.4) - 0.055
+            }
+        };
+        [
+            encode(self.r),
+            encode(self.g),
+            encode(self.b),
+            if self.a.is_nan() {
+                0.0
+            } else {
+                self.a.clamp(0.0, 1.0)
+            },
+        ]
     }
 
     /// Builds an opaque colour from hue (degrees, any range), saturation and
@@ -53,6 +84,35 @@ mod tests {
     fn close(a: Color, b: Color) -> bool {
         let eq = |x: f32, y: f32| (x - y).abs() < 1e-5;
         eq(a.r, b.r) && eq(a.g, b.g) && eq(a.b, b.b) && eq(a.a, b.a)
+    }
+
+    #[test]
+    fn srgb_encodes_the_colour_and_leaves_alpha() {
+        assert_eq!(
+            Color::rgba(0.0, 1.0, 0.0, 0.25).srgb(),
+            [0.0, 1.0, 0.0, 0.25]
+        );
+        // Linear 0.2158 is byte 128; the darkest values are on the straight
+        // part of the curve.
+        let [r, g, b, _] = Color::rgb(0.215_86, 0.001, 0.5).srgb();
+        assert!((r * 255.0 - 128.0).abs() < 0.01, "{r}");
+        assert!((g - 0.012_92).abs() < 1e-6, "{g}");
+        assert!((b * 255.0 - 187.5).abs() < 0.1, "{b}");
+        // Every byte of a design's colour survives the round trip.
+        for byte in 0..=255u8 {
+            let encoded = f32::from(byte) / 255.0;
+            let linear = if encoded <= 0.040_45 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            };
+            let [back, ..] = Color::rgb(linear, 0.0, 0.0).srgb();
+            assert_eq!((back * 255.0).round() as u8, byte);
+        }
+        assert_eq!(
+            Color::rgba(f32::NAN, -1.0, 7.0, f32::NAN).srgb(),
+            [0.0, 0.0, 1.0, 0.0]
+        );
     }
 
     #[test]

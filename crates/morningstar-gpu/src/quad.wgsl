@@ -7,7 +7,10 @@
 // one draw call is a change of image texture (group 1); see `quads.rs`.
 //
 // All geometry is in physical pixels with the origin at the top-left.
-// Colours are premultiplied linear RGB.
+// Colours are sRGB-encoded and premultiplied by alpha, and are blended,
+// interpolated and filtered as those encoded values: the compositing space
+// of browsers and design tools (ADR 0023). The target stores them as
+// written.
 //
 // Transforms (ADR 0017): each instance carries a 2x3 affine matrix. The
 // vertex stage puts the quad's corners through it; everything the fragment
@@ -33,8 +36,9 @@ struct Globals {
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var atlas: texture_2d<f32>;
 @group(0) @binding(2) var atlas_sampler: sampler;
-// The image the current draw call's image instances sample: sRGB-encoded,
-// premultiplied, so a sample is premultiplied linear colour.
+// The image the current draw call's image instances sample: sRGB-encoded
+// and premultiplied, in a plain 8-bit texture, so a sample is a colour in
+// the compositing space.
 @group(1) @binding(0) var image: texture_2d<f32>;
 @group(1) @binding(1) var image_sampler: sampler;
 
@@ -207,9 +211,9 @@ fn rounded_box_distance(point: vec2<f32>, half_size: vec2<f32>, radius: f32) -> 
 
 // Coverage of a dash pattern at `point`, relative to the centre of a
 // rectangle with a border of `width` along the inside of its edge. The
-// pattern is laid along the middle of the border, starting at the bottom end
-// of the left edge and running clockwise, which is where a browser starts a
-// rounded rectangle's outline. `dash.x` is the dash length, `dash.y` the
+// pattern is laid along the middle of the border, starting with a dash at
+// the top end of the left edge's straight part and running down it, anti-
+// clockwise, which is where Chrome's dashes are. `dash.x` is the dash length, `dash.y` the
 // period. Dash ends get one pixel of linear falloff.
 fn dash_coverage(
     point: vec2<f32>,
@@ -258,6 +262,11 @@ fn dash_coverage(
         along = 4.0 * b + 3.0 * quarter + 2.0 * a + (a - point.x);
     }
 
+    // `along` runs clockwise from the bottom end of the left edge. Chrome's
+    // pattern starts at the top end of the left edge and runs the other
+    // way, down it (measured on FundiDesk's dashed tiles; ADR 0022): the
+    // same line, measured backwards from `2 b` further on.
+    along = 2.0 * b - along;
     let phase = along - floor(along / dash.y) * dash.y;
     // Distance into the dash from its nearer end; negative in the gap.
     var inside = min(phase, dash.x - phase);
