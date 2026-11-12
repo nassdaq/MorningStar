@@ -17,14 +17,21 @@
 //! subset of SVG rasterised by `zeno` at the exact pixel size they are drawn
 //! at. See [`TextContext::draw_icon`].
 //!
+//! Multi-colour illustrations are [`VectorPicture`]s: layers of shapes
+//! composited on the CPU into an RGBA image for the renderer's image path
+//! (ADR 0017). The outline of a short text can be had the same way
+//! ([`TextContext::rasterise_outlined`]), for stroked lettering.
+//!
 //! Not supported yet: colour glyphs (emoji), mixed sizes in one paragraph,
 //! and text selection.
 
 mod atlas;
 mod context;
 mod icon;
+mod picture;
 mod style;
 
-pub use context::TextContext;
+pub use context::{OutlinedText, TextContext};
 pub use icon::{IconError, VectorIcon};
+pub use picture::{Layer, LineCap, LineJoin, MAX_PICTURE_PIXELS, Shape, VectorPicture};
 pub use style::{FontFamily, TextAlign, TextSpan, TextStyle, TextWeight};

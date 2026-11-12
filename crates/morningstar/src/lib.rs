@@ -29,9 +29,17 @@
 pub use morningstar_runtime::{
     App, AtlasView, Capitalization, Color, Dash, DisplayList, DrawOp, FontFamily, Frame, FrameInfo,
     IconError, Image, ImageError, ImageFit, ImageId, ImagePlacement, ImagesView, ImeAction, Insets,
-    KeyboardType, Point, PointerEvent, PointerPhase, Rect, Setup, Size, SurfaceSize, TextAlign,
-    TextEditState, TextInputCommand, TextInputEvent, TextInputRequest, TextInputTraits, TextSpan,
-    TextStyle, TextWeight, VectorIcon, app,
+    KeyboardType, Layer, LineCap, LineJoin, Point, PointerEvent, PointerPhase, Rect, Setup, Shape,
+    Size, SurfaceSize, TextAlign, TextEditState, TextInputCommand, TextInputEvent,
+    TextInputRequest, TextInputTraits, TextSpan, TextStyle, TextWeight, Transform, VectorIcon,
+    VectorPicture, app,
+};
+// Platform services (ADR 0019): the data of a request to the device and of
+// its answer. Applications reach them through `ui::Effects`; a low-level
+// `App` through `App::service_requests` and `App::service_result`.
+pub use morningstar_runtime::{
+    AudioClip, AudioError, HostState, HttpError, HttpMethod, HttpRequest, HttpResponse, Recording,
+    ServiceCall, ServiceId, ServiceRequest, ServiceResult,
 };
 
 /// The declarative UI layer: widgets, layout, state and events.

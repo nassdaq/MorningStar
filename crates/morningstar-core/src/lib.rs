@@ -11,16 +11,17 @@ mod image;
 mod input;
 mod insets;
 mod lifecycle;
+mod services;
 
 pub use color::Color;
 pub use display_list::{
     AtlasView, Border, Dash, DirtyRows, DisplayList, DrawOp, LinearGradient, Shadow,
 };
 pub use frame_stats::{FrameStats, FrameSummary};
-pub use geometry::{Point, Rect, Size};
+pub use geometry::{Point, Rect, Size, Transform};
 pub use image::{
     Image, ImageError, ImageFit, ImageId, ImagePixels, ImagePlacement, ImageStore, ImagesView,
-    MAX_IMAGE_BYTES, MAX_IMAGE_DIMENSION,
+    MAX_IMAGE_BYTES, MAX_IMAGE_DIMENSION, srgb_encode,
 };
 pub use input::{
     Capitalization, ImeAction, KeyboardType, PointerEvent, PointerPhase, TextEditState,
@@ -29,3 +30,8 @@ pub use input::{
 };
 pub use insets::Insets;
 pub use lifecycle::{Lifecycle, LifecycleEvent, SurfaceSize};
+pub use services::{
+    AudioClip, AudioError, DEFAULT_HTTP_TIMEOUT, HostState, HttpError, HttpMethod, HttpRequest,
+    HttpResponse, MAX_HTTP_RESPONSE_BYTES, MAX_RECORDING_DURATION, NO_INSTALL_ID, Recording,
+    ServiceCall, ServiceId, ServiceRequest, ServiceResult,
+};

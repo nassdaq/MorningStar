@@ -83,6 +83,17 @@ pub struct TextStyle {
     /// Extra space after every character, in physical pixels (CSS
     /// `letter-spacing`). Negative values tighten. Zero unless set.
     pub letter_spacing: f32,
+    /// Italic (CSS `font-style: italic`). An italic face of the family is
+    /// used if one was added; otherwise the upright face is slanted by 14
+    /// degrees when its glyphs are rasterised, which is what a browser
+    /// does. Either way the text takes the room the upright text would.
+    pub italic: bool,
+    /// Sets digits on a common width so that columns of numbers line up
+    /// and a running timer does not jitter (CSS
+    /// `font-variant-numeric: tabular-nums`, the OpenType `tnum` feature).
+    /// Has no effect on a font without the feature; many fonts' digits are
+    /// tabular already.
+    pub tabular_nums: bool,
 }
 
 impl TextStyle {
@@ -96,7 +107,22 @@ impl TextStyle {
             align: TextAlign::Start,
             family: FontFamily::Default,
             letter_spacing: 0.0,
+            italic: false,
+            tabular_nums: false,
         }
+    }
+
+    /// Sets digits on a common width. See
+    /// [`tabular_nums`](Self::tabular_nums).
+    pub const fn tabular_nums(mut self) -> Self {
+        self.tabular_nums = true;
+        self
+    }
+
+    /// Makes the text italic. See [`italic`](Self::italic).
+    pub const fn italic(mut self) -> Self {
+        self.italic = true;
+        self
     }
 
     /// Sets the typeface.
@@ -154,6 +180,9 @@ pub struct TextSpan<'a> {
     pub color: Option<Color>,
     /// Family, if different from the paragraph's.
     pub family: Option<FontFamily>,
+    /// Italic or upright, if different from the paragraph's
+    /// ([`TextStyle::italic`]).
+    pub italic: Option<bool>,
 }
 
 impl<'a> TextSpan<'a> {
@@ -164,7 +193,14 @@ impl<'a> TextSpan<'a> {
             weight: None,
             color: None,
             family: None,
+            italic: None,
         }
+    }
+
+    /// Makes the span italic. See [`TextStyle::italic`].
+    pub const fn italic(mut self) -> Self {
+        self.italic = Some(true);
+        self
     }
 
     /// Sets the span's weight.

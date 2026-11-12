@@ -140,6 +140,19 @@
 //! [`ScrollView`] is scrolled into view. There is no selection, copy or
 //! paste yet. `docs/building-screens.md` has a worked form.
 //!
+//! # Talking to a server, sound, and remembering things
+//!
+//! `update` returns at once and never touches the platform. Work that
+//! takes time is started from [`Application::effects`] by queueing
+//! requests on an [`Effects`]: [`http`](Effects::http),
+//! [`start_recording`](Effects::start_recording) and
+//! [`stop_recording`](Effects::stop_recording), [`play`](Effects::play),
+//! [`store`](Effects::store) and [`load`](Effects::load). The host does
+//! the work off the render thread and the result comes back as a message.
+//! In tests, [`Ui::testing`] holds each request for the test to answer
+//! ("the server replies this"). ADR 0019; `docs/building-screens.md` has a
+//! complete example.
+//!
 //! # Touch
 //!
 //! A tap is a finger going down and coming up on the same pressable. If
@@ -166,11 +179,13 @@
 
 mod color;
 mod edit;
+mod effects;
 mod element;
 mod theme;
 mod ui;
 
 pub use color::{ColorRef, ThemeColor, hex, hexa, rgb8, with_alpha};
+pub use effects::Effects;
 pub use element::{
     Avatar, Button, Column, Container, Divider, Element, Gradient, Icon, Picture, Pressable, Row,
     SafeArea, SafeEdges, ScrollView, Spacer, Span, Stack, Text, TextInput, elevation, icon, span,
@@ -180,19 +195,31 @@ pub use theme::{Colors, Fonts, Radii, Spacing, TextRole, TextSpec, Theme, TypeSc
 pub use ui::{Application, Overflow, Ui};
 
 pub use morningstar_core::{
-    Capitalization, Color, Image, ImageError, ImageFit, ImeAction, KeyboardType, Shadow,
+    AudioClip, AudioError, HostState, HttpError, HttpMethod, HttpRequest, HttpResponse, Recording,
+    ServiceCall, ServiceId, ServiceRequest, ServiceResult,
+};
+pub use morningstar_core::{
+    Capitalization, Color, Image, ImageError, ImageFit, ImeAction, KeyboardType, Shadow, Transform,
 };
 pub use morningstar_layout::{Align, Alignment, CrossAlign, MainAlign, Sizing};
-pub use morningstar_runtime::{FontFamily, IconError, Setup, TextAlign, TextWeight, VectorIcon};
+pub use morningstar_runtime::{
+    FontFamily, IconError, Layer, LineCap, LineJoin, Setup, Shape, TextAlign, TextWeight,
+    VectorIcon, VectorPicture,
+};
 
 /// Everything a screen is written with: `use morningstar::ui::prelude::*;`.
 pub mod prelude {
     pub use crate::{
         Align, Alignment, Application, Avatar, Button, Capitalization, Color, ColorRef, Colors,
         Column, Container, CrossAlign, Divider, Element, FontFamily, Fonts, Gradient, Icon, Image,
-        ImageFit, ImeAction, KeyboardType, MainAlign, Picture, Pressable, Radii, Row, SafeArea,
-        SafeEdges, ScrollView, Setup, Shadow, Sizing, Spacer, Spacing, Span, Stack, Text,
-        TextAlign, TextInput, TextRole, TextSpec, TextWeight, Theme, ThemeColor, TypeScale, Ui,
-        VectorIcon, col, elevation, hex, hexa, icon, rgb8, row, span, stack, text, with_alpha,
+        ImageFit, ImeAction, KeyboardType, Layer, LineCap, LineJoin, MainAlign, Picture, Pressable,
+        Radii, Row, SafeArea, SafeEdges, ScrollView, Setup, Shadow, Shape, Sizing, Spacer, Spacing,
+        Span, Stack, Text, TextAlign, TextInput, TextRole, TextSpec, TextWeight, Theme, ThemeColor,
+        Transform, TypeScale, Ui, VectorIcon, VectorPicture, col, elevation, hex, hexa, icon, rgb8,
+        row, span, stack, text, with_alpha,
+    };
+    pub use crate::{
+        AudioClip, AudioError, Effects, HttpError, HttpMethod, HttpRequest, HttpResponse,
+        Recording, ServiceRequest, ServiceResult,
     };
 }

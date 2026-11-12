@@ -13,7 +13,12 @@ pub use app::{App, Frame, FrameInfo, Setup};
 pub use engine::{Engine, EngineReport};
 pub use morningstar_core::{
     AtlasView, Color, Dash, DisplayList, DrawOp, FrameSummary, Insets, Point, PointerEvent,
-    PointerPhase, Rect, Size, SurfaceSize,
+    PointerPhase, Rect, Size, SurfaceSize, Transform,
+};
+pub use morningstar_core::{
+    AudioClip, AudioError, DEFAULT_HTTP_TIMEOUT, HostState, HttpError, HttpMethod, HttpRequest,
+    HttpResponse, MAX_HTTP_RESPONSE_BYTES, MAX_RECORDING_DURATION, NO_INSTALL_ID, Recording,
+    ServiceCall, ServiceId, ServiceRequest, ServiceResult,
 };
 pub use morningstar_core::{
     Capitalization, ImeAction, KeyboardType, TextEditState, TextInputCommand, TextInputEvent,
@@ -22,7 +27,8 @@ pub use morningstar_core::{
 pub use morningstar_core::{Image, ImageError, ImageFit, ImageId, ImagePlacement, ImagesView};
 pub use morningstar_gpu::{AdapterInfo, FrameOutcome, GpuError, NativeSurface};
 pub use morningstar_text::{
-    FontFamily, IconError, TextAlign, TextSpan, TextStyle, TextWeight, VectorIcon,
+    FontFamily, IconError, Layer, LineCap, LineJoin, Shape, TextAlign, TextSpan, TextStyle,
+    TextWeight, VectorIcon, VectorPicture,
 };
 
 /// Registers the application type for the platform host to start.

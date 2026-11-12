@@ -9,6 +9,14 @@
 // All geometry is in physical pixels with the origin at the top-left.
 // Colours are premultiplied linear RGB.
 //
+// Transforms (ADR 0017): each instance carries a 2x3 affine matrix. The
+// vertex stage puts the quad's corners through it; everything the fragment
+// stage evaluates (the rounded box, border, dashes, gradient, shadow, atlas
+// and image coordinates) stays in the quad's own untransformed space, so a
+// turned shape is the same shape, turned, with the same anti-aliased edge.
+// With the identity matrix every expression below reduces exactly to what
+// it was before transforms existed.
+//
 // Portability notes (Vulkan, Metal, GLES 3.0):
 // - No derivatives and no implicit-level sampling, so the branches on `kind`
 //   below are valid although `kind` is not uniform. An image's mip level is
@@ -60,6 +68,14 @@ struct Instance {
     @location(5) scissor: vec4<f32>,
     // Rounded clip as min (xy) and max (zw); its radius is `params.w`.
     @location(6) clip: vec4<f32>,
+    // The transform's linear part: a point (x, y) of the quad's own space
+    // goes to (x * a + y * c, x * b + y * d) plus the translation.
+    @location(7) matrix: vec4<f32>,
+    // xy: the transform's translation. z: screen pixels per local pixel
+    // (1 unless the transform scales). w: flags; 1 is set when the
+    // transform does more than move, 2 when `clip` is in the quad's own
+    // space rather than on the screen.
+    @location(8) placement: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -81,6 +97,11 @@ struct VertexOutput {
     @location(6) pixel: vec2<f32>,
     @location(7) @interpolate(flat) scissor: vec4<f32>,
     @location(8) @interpolate(flat) clip: vec4<f32>,
+    // Position in the quad's own space, in pixels: `pixel` before the
+    // transform.
+    @location(9) own: vec2<f32>,
+    // x: screen pixels per local pixel. y: flags.
+    @location(10) @interpolate(flat) placement: vec2<f32>,
 }
 
 // Extra pixels drawn around a rectangle so its anti-aliased edge, which
@@ -98,21 +119,39 @@ fn vs_main(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutpu
     let corner = vec2<f32>(f32(index & 1u), f32((index >> 1u) & 1u));
     let kind = instance.params.y;
 
-    // Glyph quads map texels to pixels one to one, so they get no fringe.
-    var fringe = FRINGE;
+    let edge_scale = instance.placement.z;
+    let flags = instance.placement.w;
+    let turned = flags == 1.0 || flags == 3.0;
+
+    // The fringe is a screen pixel, whatever the transform's scale. Glyph
+    // quads map texels to pixels one to one, so they get no fringe, unless
+    // they are turned: then the quad's own edge needs anti-aliasing too.
+    var fringe = FRINGE / edge_scale;
     if kind == KIND_GLYPH {
-        fringe = 0.0;
+        if !turned {
+            fringe = 0.0;
+        }
     } else if kind == KIND_SHADOW {
-        fringe = FRINGE + SHADOW_EXTENT * instance.params.z;
+        fringe = fringe + SHADOW_EXTENT * instance.params.z;
     }
 
     let half_size = instance.rect.zw * 0.5;
     let center = instance.rect.xy + half_size;
     let local = (corner * 2.0 - 1.0) * (half_size + fringe);
+    // In the quad's own space; `screen` is where that lands.
     let pixel = center + local;
+    let screen = vec2<f32>(
+        pixel.x * instance.matrix.x + pixel.y * instance.matrix.z + instance.placement.x,
+        pixel.x * instance.matrix.y + pixel.y * instance.matrix.w + instance.placement.y,
+    );
 
     var uv = (instance.extra.xy + corner * instance.extra.zw) / globals.atlas_size;
-    if kind == KIND_RECT {
+    if kind == KIND_GLYPH && turned {
+        // The quad has a fringe: the atlas region maps onto the rectangle
+        // itself and the fringe extrapolates (and is clamped when sampled).
+        uv = (instance.extra.xy + (pixel - instance.rect.xy) / instance.rect.zw * instance.extra.zw)
+            / globals.atlas_size;
+    } else if kind == KIND_RECT {
         uv = instance.extra.xy;
     } else if kind == KIND_GRADIENT {
         // Linear in position, so interpolating it across the quad is exact.
@@ -126,8 +165,8 @@ fn vs_main(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutpu
 
     var out: VertexOutput;
     out.position = vec4<f32>(
-        pixel.x / globals.viewport.x * 2.0 - 1.0,
-        1.0 - pixel.y / globals.viewport.y * 2.0,
+        screen.x / globals.viewport.x * 2.0 - 1.0,
+        1.0 - screen.y / globals.viewport.y * 2.0,
         0.0,
         1.0,
     );
@@ -135,6 +174,15 @@ fn vs_main(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutpu
     out.half_size = half_size;
     out.color = instance.color;
     out.color2 = instance.color2;
+    if kind == KIND_GLYPH && turned {
+        // A turned glyph is resampled, and its fringe lies outside its
+        // atlas region: the fragment stage keeps sampling within these
+        // bounds (the centres of the region's outermost texels).
+        out.color2 = vec4<f32>(
+            instance.extra.xy + 0.5,
+            instance.extra.xy + instance.extra.zw - 0.5,
+        ) / globals.atlas_size.xyxy;
+    }
     out.shape = vec4<f32>(
         min(instance.params.x, min(half_size.x, half_size.y)),
         kind,
@@ -142,9 +190,11 @@ fn vs_main(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutpu
         instance.params.w,
     );
     out.uv = uv;
-    out.pixel = pixel;
+    out.pixel = screen;
     out.scissor = instance.scissor;
     out.clip = instance.clip;
+    out.own = pixel;
+    out.placement = vec2<f32>(edge_scale, flags);
     return out;
 }
 
@@ -281,22 +331,39 @@ fn shadow_coverage(point: vec2<f32>, half_size: vec2<f32>, radius: f32, sigma: f
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Sampled unconditionally, at an explicit level, so it is valid outside
-    // uniform control flow on every backend.
-    let glyph_coverage = textureSampleLevel(atlas, atlas_sampler, in.uv, 0.0).r;
-
     let radius = in.shape.x;
     let kind = in.shape.y;
+    // Screen pixels per pixel of the quad's own space: distances measured
+    // in that space are multiplied by it before they become coverage, so an
+    // edge fades over one screen pixel whatever the transform's scale.
+    let edge_scale = in.placement.x;
+    let turned = in.placement.y == 1.0 || in.placement.y == 3.0;
+    let local_clip = in.placement.y >= 2.0;
+
+    var atlas_uv = in.uv;
+    if kind == KIND_GLYPH && turned {
+        atlas_uv = clamp(in.uv, in.color2.xy, in.color2.zw);
+    }
+    // Sampled unconditionally, at an explicit level, so it is valid outside
+    // uniform control flow on every backend.
+    let glyph_coverage = textureSampleLevel(atlas, atlas_sampler, atlas_uv, 0.0).r;
 
     var color: vec4<f32>;
     if kind == KIND_GLYPH {
         color = in.color * glyph_coverage;
+        if turned {
+            // The mask may be solid right up to the edge of its quad (the
+            // stem of an "l"); turned, that edge is no longer on the pixel
+            // grid and is anti-aliased like a rectangle's.
+            let edge = rounded_box_distance(in.local, in.half_size, 0.0);
+            color = color * clamp(0.5 - edge * edge_scale, 0.0, 1.0);
+        }
     } else if kind == KIND_SHADOW {
         color = in.color * shadow_coverage(in.local, in.half_size, radius, in.shape.z);
     } else {
         let distance = rounded_box_distance(in.local, in.half_size, radius);
         // One pixel of linear falloff centred on the edge.
-        let outer = clamp(0.5 - distance, 0.0, 1.0);
+        let outer = clamp(0.5 - distance * edge_scale, 0.0, 1.0);
         if kind == KIND_GRADIENT {
             color = mix(in.color, in.color2, clamp(in.uv.x, 0.0, 1.0)) * outer;
         } else if kind == KIND_IMAGE {
@@ -313,7 +380,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             // `outer - inner` is border over fill, the rest is empty. Moving
             // inwards by the border width gives the inner edge, including
             // its smaller corner radius. With no border the two coincide.
-            let inner = clamp(0.5 - (distance + in.shape.z), 0.0, 1.0);
+            let inner = clamp(0.5 - (distance + in.shape.z) * edge_scale, 0.0, 1.0);
             var stroke = in.color2;
             if in.uv.x > 0.0 {
                 stroke = stroke * dash_coverage(in.local, in.half_size, radius, in.shape.z, in.uv);
@@ -326,11 +393,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Rectangular clip: the exact fraction of the pixel inside it.
     let overlap = min(in.scissor.zw, in.pixel + 0.5) - max(in.scissor.xy, in.pixel - 0.5);
     let scissor_coverage = clamp(overlap.x, 0.0, 1.0) * clamp(overlap.y, 0.0, 1.0);
-    // Rounded clip: the same falloff as a rounded rectangle's edge.
+    // Rounded clip: the same falloff as a rounded rectangle's edge. A clip
+    // pushed inside a transform is a rectangle of the quad's own space and
+    // is evaluated there.
+    var clip_point = in.pixel;
+    var clip_scale = 1.0;
+    if local_clip {
+        clip_point = in.own;
+        clip_scale = edge_scale;
+    }
     let clip_half = (in.clip.zw - in.clip.xy) * 0.5;
     let clip_center = in.clip.xy + clip_half;
-    let clip_distance = rounded_box_distance(in.pixel - clip_center, clip_half, in.shape.w);
-    let clip_coverage = clamp(0.5 - clip_distance, 0.0, 1.0);
+    let clip_distance = rounded_box_distance(clip_point - clip_center, clip_half, in.shape.w);
+    let clip_coverage = clamp(0.5 - clip_distance * clip_scale, 0.0, 1.0);
 
     return color * (scissor_coverage * clip_coverage);
 }

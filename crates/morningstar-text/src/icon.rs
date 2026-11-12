@@ -311,7 +311,7 @@ impl Art {
 /// without separators (`a4 4 0 0 0-5.2 5.2`, `1.5.5`). Written here rather
 /// than taken from `zeno`, whose own reader mishandles a smooth curve
 /// (`s`, `S`) that repeats or follows another.
-fn path_commands(data: &str) -> Result<Vec<Command>, IconError> {
+pub(crate) fn path_commands(data: &str) -> Result<Vec<Command>, IconError> {
     let mut reader = PathReader {
         bytes: data.as_bytes(),
         position: 0,

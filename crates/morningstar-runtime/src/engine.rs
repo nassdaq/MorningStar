@@ -1,8 +1,9 @@
 use std::time::{Duration, Instant};
 
 use morningstar_core::{
-    AtlasView, Color, DisplayList, FrameStats, FrameSummary, ImagesView, Insets, Lifecycle,
-    LifecycleEvent, PointerEvent, SurfaceSize, TextInputCommand, TextInputEvent, TextInputRequest,
+    AtlasView, Color, DisplayList, FrameStats, FrameSummary, HostState, ImagesView, Insets,
+    Lifecycle, LifecycleEvent, PointerEvent, ServiceCall, ServiceId, ServiceResult, SurfaceSize,
+    TextInputCommand, TextInputEvent, TextInputRequest,
 };
 use morningstar_gpu::{AdapterInfo, FrameOutcome, GpuError, NativeSurface, Renderer};
 
@@ -168,12 +169,32 @@ pub struct EngineReport {
 }
 
 impl Engine {
+    /// An engine for `app`, set up as if there were no host: nothing
+    /// stored and the placeholder installation id. A host that has those
+    /// uses [`with_host_state`](Self::with_host_state).
     pub fn new(app: Box<dyn App>) -> Self {
-        Self::with_presenter(app, Box::new(Renderer::new()))
+        Self::with_host_state(app, &HostState::new())
     }
 
-    fn with_presenter(mut app: Box<dyn App>, presenter: Box<dyn Presenter>) -> Self {
-        let frame = Frame::for_app(app.as_mut());
+    /// An engine for `app`, which is handed `host` at setup: the
+    /// installation id and the values stored on earlier runs
+    /// ([`Setup::install_id`](crate::Setup::install_id),
+    /// [`Setup::stored`](crate::Setup::stored)).
+    pub fn with_host_state(app: Box<dyn App>, host: &HostState) -> Self {
+        Self::with_presenter_and_host(app, Box::new(Renderer::new()), host)
+    }
+
+    #[cfg(test)]
+    fn with_presenter(app: Box<dyn App>, presenter: Box<dyn Presenter>) -> Self {
+        Self::with_presenter_and_host(app, presenter, &HostState::new())
+    }
+
+    fn with_presenter_and_host(
+        mut app: Box<dyn App>,
+        presenter: Box<dyn Presenter>,
+        host: &HostState,
+    ) -> Self {
+        let frame = Frame::for_app_with_host(app.as_mut(), host);
         Self {
             app,
             presenter,
@@ -354,6 +375,9 @@ impl Engine {
     /// - the app called [`Frame::request_redraw`] during the previous frame,
     ///   or the delay it gave to [`Frame::request_redraw_after`] has passed;
     /// - text input was delivered, or the keyboard inset changed;
+    /// - the app handled the system's back ([`back`](Self::back));
+    /// - the answer to a platform request reached the app
+    ///   ([`service_result`](Self::service_result));
     /// - the host called [`request_redraw`](Self::request_redraw);
     /// - a frame could not be shown (it was skipped or failed), until one is;
     /// - a frame was shown through a swapchain that no longer matched the
@@ -503,6 +527,49 @@ impl Engine {
         self.redraw = true;
     }
 
+    /// Delivers the system's back gesture or key to the app and returns
+    /// whether the app handled it ([`App::back`]). Handled: a frame is
+    /// scheduled, as after any input. Not handled: nothing changes here, and
+    /// the host does what the platform does when an app has nowhere to go
+    /// back to (on Android, leave the app).
+    pub fn back(&mut self) -> bool {
+        let handled = self.app.back();
+        self.redraw |= handled;
+        handled
+    }
+
+    /// Moves the requests the app has made of the platform since the last
+    /// call into `out` ([`App::service_requests`]). Usually there are none
+    /// and this costs one call.
+    ///
+    /// A host calls this once after creating the engine and then after
+    /// every other call it makes into it, as it asks
+    /// [`needs_frame`](Self::needs_frame): requests only appear inside
+    /// those calls. It carries each one out off this thread and answers
+    /// through [`service_result`](Self::service_result). A request it
+    /// cannot carry out it answers at once with
+    /// [`ServiceRequest::unsupported`](morningstar_core::ServiceRequest::unsupported),
+    /// so that the app is never left waiting.
+    pub fn take_service_requests(&mut self, out: &mut Vec<ServiceCall>) {
+        self.app.service_requests(out);
+    }
+
+    /// Delivers the platform's answer to a request to the app
+    /// ([`App::service_result`]), on this thread, between frames. If the
+    /// app was waiting for it a frame is scheduled, as after input, and
+    /// `true` is returned; an answer nobody is waiting for changes nothing.
+    ///
+    /// Answers are accepted at any time, including while the app is hidden
+    /// or has no surface: the app's state moves on, and the frame comes
+    /// when it is visible again. The app may make new requests in
+    /// response, so call [`take_service_requests`](Self::take_service_requests)
+    /// afterwards.
+    pub fn service_result(&mut self, id: ServiceId, result: ServiceResult) -> bool {
+        let delivered = self.app.service_result(id, result);
+        self.redraw |= delivered;
+        delivered
+    }
+
     /// What the host must do to its keyboard so that it matches the last
     /// frame built: show it for a field, replace the text it holds, or hide
     /// it. `None` when the host is already up to date, which is the usual
@@ -564,6 +631,7 @@ impl std::fmt::Display for EngineReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use morningstar_core::{HttpRequest, HttpResponse, ServiceRequest};
     use morningstar_core::{Point, PointerPhase, Size};
     use morningstar_gpu::FrameTimings;
     use std::collections::VecDeque;
@@ -585,11 +653,55 @@ mod tests {
         /// The app declares this text input on every frame.
         text: Option<TextInputRequest>,
         text_events: Vec<TextInputEvent>,
+        /// What the app answers to `back`, and how often it was asked.
+        handles_back: bool,
+        backs: u32,
+        /// Requests the app has made and the host has not taken yet.
+        outbox: Vec<ServiceCall>,
+        /// Ids the app is waiting for an answer to.
+        waiting: Vec<ServiceId>,
+        /// The answers the app accepted, in order.
+        results: Vec<(ServiceId, ServiceResult)>,
+        /// What the app made of each accepted answer: a request to make.
+        follow_up: Option<ServiceCall>,
+        /// What setup saw.
+        install_id: String,
+        stored_device_id: Option<String>,
     }
 
     struct ProbeApp(Arc<Mutex<Probe>>);
 
     impl App for ProbeApp {
+        fn setup(&mut self, setup: &mut crate::Setup<'_>) {
+            let mut probe = self.0.lock().unwrap();
+            probe.install_id = setup.install_id().to_owned();
+            probe.stored_device_id = setup.stored("device_id").map(str::to_owned);
+        }
+
+        fn service_requests(&mut self, out: &mut Vec<ServiceCall>) {
+            let mut probe = self.0.lock().unwrap();
+            let calls: Vec<ServiceCall> = probe.outbox.drain(..).collect();
+            for call in &calls {
+                if call.request.expects_result() {
+                    probe.waiting.push(call.id);
+                }
+            }
+            out.extend(calls);
+        }
+
+        fn service_result(&mut self, id: ServiceId, result: ServiceResult) -> bool {
+            let mut probe = self.0.lock().unwrap();
+            let Some(index) = probe.waiting.iter().position(|waiting| *waiting == id) else {
+                return false;
+            };
+            probe.waiting.remove(index);
+            probe.results.push((id, result));
+            if let Some(call) = probe.follow_up.take() {
+                probe.outbox.push(call);
+            }
+            true
+        }
+
         fn frame(&mut self, info: &FrameInfo, frame: &mut Frame) {
             let mut probe = self.0.lock().unwrap();
             probe.frames.push(*info);
@@ -611,6 +723,12 @@ mod tests {
 
         fn pointer(&mut self, _event: &PointerEvent) {
             self.0.lock().unwrap().pointers += 1;
+        }
+
+        fn back(&mut self) -> bool {
+            let mut probe = self.0.lock().unwrap();
+            probe.backs += 1;
+            probe.handles_back
         }
     }
 
@@ -1224,6 +1342,50 @@ mod tests {
         assert!(h.engine.needs_frame(), "becoming visible draws anyway");
     }
 
+    // --- Back ---------------------------------------------------------------
+
+    #[test]
+    fn a_back_the_app_handles_produces_one_frame() {
+        let mut h = Harness::idle();
+        h.probe.lock().unwrap().handles_back = true;
+        assert!(h.engine.back());
+        assert_eq!(h.probe.lock().unwrap().backs, 1);
+        assert!(h.engine.needs_frame());
+        assert_eq!(h.run(), 1);
+        assert!(!h.engine.needs_frame());
+    }
+
+    #[test]
+    fn a_back_the_app_declines_draws_nothing() {
+        let mut h = Harness::idle();
+        assert!(!h.engine.back());
+        assert_eq!(h.probe.lock().unwrap().backs, 1, "the app was asked");
+        assert!(!h.engine.needs_frame());
+        assert_eq!(h.run(), 0);
+    }
+
+    #[test]
+    fn an_app_that_does_not_implement_back_declines_it() {
+        struct Plain;
+        impl App for Plain {
+            fn frame(&mut self, _info: &FrameInfo, _frame: &mut Frame) {}
+        }
+        let screen = Arc::new(Mutex::new(Screen::default()));
+        let mut engine = Engine::with_presenter(Box::new(Plain), Box::new(FakePresenter(screen)));
+        assert!(!engine.back());
+    }
+
+    #[test]
+    fn a_back_while_hidden_is_answered_and_drawn_when_visible_again() {
+        let mut h = Harness::idle();
+        h.probe.lock().unwrap().handles_back = true;
+        h.engine.pause();
+        assert!(h.engine.back());
+        assert!(!h.engine.needs_frame(), "nothing is drawn while hidden");
+        h.engine.resume();
+        assert_eq!(h.run(), 1);
+    }
+
     #[test]
     fn the_shortest_delay_of_a_frame_wins() {
         let mut frame = Frame::new();
@@ -1389,6 +1551,177 @@ mod tests {
         assert_eq!(h.engine.keyboard_inset(), 0.0);
         assert_eq!(h.run(), 1);
         assert_eq!(h.last_info().keyboard_inset, 0.0);
+    }
+
+    // --- Platform services (ADR 0019) --------------------------------------
+
+    fn get(id: u64) -> ServiceCall {
+        ServiceCall {
+            id: ServiceId(id),
+            request: ServiceRequest::Http(HttpRequest::get("https://example.com")),
+        }
+    }
+
+    fn ok(status: u16) -> ServiceResult {
+        ServiceResult::Http(Ok(HttpResponse::new(status)))
+    }
+
+    impl Harness {
+        fn ask(&self, call: ServiceCall) {
+            self.probe.lock().unwrap().outbox.push(call);
+        }
+
+        fn take(&mut self) -> Vec<ServiceCall> {
+            let mut out = Vec::new();
+            self.engine.take_service_requests(&mut out);
+            out
+        }
+    }
+
+    #[test]
+    fn an_app_that_asks_for_nothing_hands_the_host_nothing() {
+        let mut h = Harness::idle();
+        assert!(h.take().is_empty());
+        assert_eq!(h.run(), 0, "asking is not a reason to draw");
+    }
+
+    #[test]
+    fn requests_reach_the_host_once_and_in_the_order_they_were_made() {
+        let mut h = Harness::idle();
+        h.ask(get(1));
+        h.ask(ServiceCall {
+            id: ServiceId(2),
+            request: ServiceRequest::StartRecording,
+        });
+        let taken = h.take();
+        assert_eq!(
+            taken.iter().map(|call| call.id.0).collect::<Vec<_>>(),
+            [1, 2]
+        );
+        assert!(h.take().is_empty(), "taken means taken");
+        assert_eq!(h.run(), 0, "a request in flight draws nothing");
+    }
+
+    #[test]
+    fn an_answer_the_app_is_waiting_for_produces_exactly_one_frame() {
+        let mut h = Harness::idle();
+        h.ask(get(7));
+        h.take();
+        assert!(!h.engine.needs_frame(), "idle while the request is out");
+        assert!(h.engine.service_result(ServiceId(7), ok(200)));
+        assert!(h.engine.needs_frame());
+        assert_eq!(h.run(), 1);
+        assert!(!h.engine.needs_frame(), "and idle again");
+        assert_eq!(h.probe.lock().unwrap().results, [(ServiceId(7), ok(200))]);
+    }
+
+    #[test]
+    fn an_answer_nobody_is_waiting_for_changes_nothing() {
+        let mut h = Harness::idle();
+        assert!(!h.engine.service_result(ServiceId(99), ok(200)));
+        assert!(!h.engine.needs_frame());
+        assert_eq!(h.run(), 0);
+        assert!(h.probe.lock().unwrap().results.is_empty());
+    }
+
+    #[test]
+    fn a_second_answer_to_the_same_request_is_dropped() {
+        let mut h = Harness::idle();
+        h.ask(get(3));
+        h.take();
+        assert!(h.engine.service_result(ServiceId(3), ok(200)));
+        assert_eq!(h.run(), 1);
+        assert!(!h.engine.service_result(ServiceId(3), ok(500)));
+        assert_eq!(h.run(), 0);
+        assert_eq!(h.probe.lock().unwrap().results.len(), 1);
+    }
+
+    #[test]
+    fn answers_are_delivered_in_the_order_the_host_gives_them() {
+        let mut h = Harness::idle();
+        h.ask(get(1));
+        h.ask(get(2));
+        h.take();
+        // The second request finished first.
+        h.engine.service_result(ServiceId(2), ok(202));
+        h.engine.service_result(ServiceId(1), ok(201));
+        assert_eq!(h.run(), 1, "two answers before a frame share that frame");
+        assert_eq!(
+            h.probe.lock().unwrap().results,
+            [(ServiceId(2), ok(202)), (ServiceId(1), ok(201))]
+        );
+    }
+
+    #[test]
+    fn an_answer_while_hidden_is_delivered_at_once_and_drawn_on_return() {
+        let mut h = Harness::idle();
+        h.ask(get(5));
+        h.take();
+        h.engine.pause();
+        assert!(h.engine.service_result(ServiceId(5), ok(200)));
+        assert_eq!(h.probe.lock().unwrap().results.len(), 1, "not held back");
+        assert_eq!(h.run(), 0, "nothing is drawn while hidden");
+        h.engine.resume();
+        assert_eq!(h.run(), 1);
+    }
+
+    #[test]
+    fn a_request_made_in_response_to_an_answer_is_there_for_the_host_to_take() {
+        let mut h = Harness::idle();
+        h.ask(get(1));
+        h.take();
+        h.probe.lock().unwrap().follow_up = Some(get(2));
+        h.engine.service_result(ServiceId(1), ok(200));
+        let taken = h.take();
+        assert_eq!(taken.len(), 1);
+        assert_eq!(taken[0].id, ServiceId(2));
+    }
+
+    #[test]
+    fn requests_made_during_setup_are_there_before_the_first_frame() {
+        let mut h = Harness::new();
+        h.ask(get(1));
+        assert_eq!(h.take().len(), 1);
+        assert_eq!(h.app_frames(), 0);
+    }
+
+    #[test]
+    fn without_a_host_setup_sees_nothing_stored_and_the_placeholder_id() {
+        let h = Harness::new();
+        let probe = h.probe.lock().unwrap();
+        assert_eq!(probe.install_id, morningstar_core::NO_INSTALL_ID);
+        assert_eq!(probe.stored_device_id, None);
+    }
+
+    #[test]
+    fn setup_sees_what_the_host_stored_and_its_install_id() {
+        let probe = Arc::new(Mutex::new(Probe::default()));
+        let screen = Arc::new(Mutex::new(Screen::default()));
+        let host = HostState::new()
+            .with_install_id("00112233445566778899aabbccddeeff")
+            .with_stored("device_id", "abc");
+        let _engine = Engine::with_presenter_and_host(
+            Box::new(ProbeApp(probe.clone())),
+            Box::new(FakePresenter(screen)),
+            &host,
+        );
+        let probe = probe.lock().unwrap();
+        assert_eq!(probe.install_id, "00112233445566778899aabbccddeeff");
+        assert_eq!(probe.stored_device_id.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn an_app_without_services_ignores_answers() {
+        struct Plain;
+        impl App for Plain {
+            fn frame(&mut self, _info: &FrameInfo, _frame: &mut Frame) {}
+        }
+        let screen = Arc::new(Mutex::new(Screen::default()));
+        let mut engine = Engine::with_presenter(Box::new(Plain), Box::new(FakePresenter(screen)));
+        let mut out = Vec::new();
+        engine.take_service_requests(&mut out);
+        assert!(out.is_empty());
+        assert!(!engine.service_result(ServiceId(1), ok(200)));
     }
 }
 

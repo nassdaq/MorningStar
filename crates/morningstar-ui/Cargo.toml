@@ -15,3 +15,9 @@ morningstar-runtime.workspace = true
 # character. Already in every app's dependency tree through cosmic-text
 # (same version in Cargo.lock), so it adds no code.
 unicode-segmentation = "1.13"
+
+[dev-dependencies]
+# Renders a screen on the host's GPU, for the tests that check what
+# transforms, pictures and text effects look like end to end. A development
+# tool of this repository; never part of an app.
+morningstar-devtools.workspace = true

@@ -1,22 +1,30 @@
 //! Draws a display list as instanced quads: rectangles (solid, bordered,
 //! gradient-filled), shadows, glyphs and images, each clipped per instance.
 //!
+//! Transforms (ADR 0017) are carried per instance too: the vertex stage moves
+//! the quad's corners through the instance's matrix while the fragment stage
+//! keeps working in the quad's own untransformed space.
+//!
 //! Everything is one instance stream in paint order. It is drawn with one
 //! draw call unless the list uses more than one image: each image is its own
 //! texture, so the stream is cut into consecutive runs wherever the image
 //! being sampled changes (ADR 0014).
 
 use morningstar_core::{
-    AtlasView, Color, DisplayList, DrawOp, Image, ImageId, ImagesView, Rect, SurfaceSize,
+    AtlasView, Color, DisplayList, DrawOp, Image, ImageId, ImagesView, Rect, SurfaceSize, Transform,
 };
 
 use crate::images::ImageTextures;
 
-/// `f32`s per instance. Seven `vec4`s, in the order of `Instance` in
+/// `f32`s per instance. Nine `vec4`s, in the order of `Instance` in
 /// `quad.wgsl`: rect, colour, second colour (or an image's sampling bounds),
 /// params, atlas rect or gradient points or image source region, rectangular
-/// clip, rounded clip.
-const INSTANCE_FLOATS: usize = 28;
+/// clip, rounded clip, the transform's linear part, and its translation
+/// with the edge scale and flags.
+const INSTANCE_FLOATS: usize = 36;
+/// Values of the instance's flags. Must match `quad.wgsl`.
+const FLAG_TURNED: f32 = 1.0;
+const FLAG_LOCAL_CLIP: f32 = 2.0;
 /// Bytes per instance.
 const INSTANCE_SIZE: u64 = (INSTANCE_FLOATS * size_of::<f32>()) as u64;
 /// Values of the instance's `kind` parameter. Must match `quad.wgsl`.
@@ -96,14 +104,86 @@ fn is_empty(bounds: Bounds) -> bool {
     !(bounds[2] > bounds[0] && bounds[3] > bounds[1])
 }
 
-/// The clip in effect at some point in a display list: a rectangle
-/// intersected with at most one rounded rectangle.
+fn rect_of(bounds: Bounds) -> Rect {
+    Rect::new(
+        bounds[0],
+        bounds[1],
+        bounds[2] - bounds[0],
+        bounds[3] - bounds[1],
+    )
+}
+
+/// The transform in effect at some point in a display list: the composition
+/// of the open `PushTransform`s, with what the instances need of it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Xform {
+    /// From the space operations are given in to the screen.
+    matrix: Transform,
+    /// Screen pixels per local pixel, as one number: the square root of the
+    /// area scale. Exactly 1 for rotations, slants and moves. The shader
+    /// multiplies edge distances by it so that an anti-aliased edge stays
+    /// one screen pixel wide.
+    edge_scale: f32,
+    /// True unless the transform only moves things. Only then do glyph
+    /// quads need an anti-aliased edge and clips their own space.
+    turned: bool,
+    /// The transform cannot be drawn through: nothing is.
+    hidden: bool,
+}
+
+impl Xform {
+    const NONE: Self = Self {
+        matrix: Transform::IDENTITY,
+        edge_scale: 1.0,
+        turned: false,
+        hidden: false,
+    };
+
+    /// This transform with `inner` applied before it.
+    fn pushed(self, inner: Transform) -> Self {
+        let matrix = inner.then(self.matrix);
+        let edge_scale = matrix.determinant().abs().sqrt();
+        // Written so that NaN counts as hidden.
+        let drawable = matrix.is_finite() && edge_scale > 0.0 && edge_scale.is_finite();
+        if self.hidden || !drawable {
+            return Self {
+                hidden: true,
+                ..self
+            };
+        }
+        let turned = !matrix.is_translation();
+        Self {
+            matrix,
+            // Exactly 1 where it is 1 in principle, so that such instances
+            // shade exactly as untransformed ones do.
+            edge_scale: if turned { edge_scale } else { 1.0 },
+            turned,
+            hidden: false,
+        }
+    }
+
+    /// The screen bounds of local `bounds`.
+    fn screen_bounds(&self, bounds: Bounds) -> Bounds {
+        if self.matrix.is_identity() || is_empty(bounds) {
+            return bounds;
+        }
+        bounds_of(self.matrix.bounding_rect(rect_of(bounds)))
+    }
+}
+
+/// The clip in effect at some point in a display list: a rectangle on the
+/// screen intersected with at most one further shape, which is either a
+/// rounded rectangle on the screen or a (rounded or square) rectangle in the
+/// space of the transform in effect.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Clip {
     scissor: Bounds,
     rounded: Bounds,
-    /// Corner radius of `rounded`. Zero means there is no rounded clip.
+    /// Corner radius of `rounded`.
     radius: f32,
+    /// `rounded` is in the space of the current transform, not on the
+    /// screen. It is then in use even with a zero radius.
+    local: bool,
 }
 
 impl Clip {
@@ -111,24 +191,60 @@ impl Clip {
         scissor: UNBOUNDED,
         rounded: UNBOUNDED,
         radius: 0.0,
+        local: false,
     };
 
-    /// This clip further restricted to `rect`.
-    fn pushed(self, rect: Rect, corner_radius: f32) -> Self {
-        let bounds = bounds_of(rect);
+    /// True if the second shape is in use.
+    fn has_shape(&self) -> bool {
+        self.radius > 0.0 || self.local
+    }
+
+    /// The screen rectangle with the second shape reduced to its bounding
+    /// rectangle on screen: what remains of it once its slot is needed for
+    /// another. `xform` is the transform a local shape is in.
+    fn flattened(&self, xform: &Xform) -> Bounds {
+        if !self.has_shape() {
+            self.scissor
+        } else if self.local {
+            intersect(self.scissor, xform.screen_bounds(self.rounded))
+        } else {
+            intersect(self.scissor, self.rounded)
+        }
+    }
+
+    /// This clip further restricted to `rect`, given under `xform`.
+    fn pushed(self, rect: Rect, corner_radius: f32, xform: &Xform) -> Self {
         let radius = corner_radius.min(rect.width.min(rect.height) / 2.0);
+        if xform.turned {
+            let bounds = bounds_of(rect);
+            // Written so that a NaN radius counts as square.
+            let rounded = radius > 0.0;
+            if self.local && self.radius == 0.0 && !rounded {
+                // Square inside square, in the same space: exact.
+                return Self {
+                    rounded: intersect(self.rounded, bounds),
+                    ..self
+                };
+            }
+            return Self {
+                scissor: self.flattened(xform),
+                rounded: bounds,
+                radius: if rounded { radius } else { 0.0 },
+                local: true,
+            };
+        }
+
+        // Only moved, if at all: the clip is a rectangle on the screen.
+        let bounds = xform.screen_bounds(bounds_of(rect));
         // Written so that a NaN radius counts as square.
         if radius > 0.0 && !is_empty(bounds) {
             // Only one rounded clip is carried. An enclosing one gives up
             // its corners and continues as its bounding rectangle.
             Self {
-                scissor: if self.radius > 0.0 {
-                    intersect(self.scissor, self.rounded)
-                } else {
-                    self.scissor
-                },
+                scissor: self.flattened(xform),
                 rounded: bounds,
                 radius,
+                local: false,
             }
         } else {
             Self {
@@ -138,9 +254,39 @@ impl Clip {
         }
     }
 
-    /// False if nothing inside `bounds` can be visible through this clip.
-    fn may_show(&self, bounds: Bounds) -> bool {
-        !is_empty(intersect(intersect(self.scissor, self.rounded), bounds))
+    /// This clip as it continues inside a further transform `inner`, pushed
+    /// under `xform`. A shape in `xform`'s space cannot follow into the new
+    /// space unless that only moves; otherwise it continues as its bounding
+    /// rectangle on screen.
+    fn entering(self, inner: &Transform, xform: &Xform) -> Self {
+        if !self.local {
+            return self;
+        }
+        if inner.is_translation() && inner.is_finite() {
+            let [x0, y0, x1, y1] = self.rounded;
+            return Self {
+                rounded: [x0 - inner.tx, y0 - inner.ty, x1 - inner.tx, y1 - inner.ty],
+                ..self
+            };
+        }
+        Self {
+            scissor: self.flattened(xform),
+            ..Self::NONE
+        }
+    }
+
+    /// False if nothing inside `bounds`, given under `xform`, can be
+    /// visible through this clip.
+    fn may_show(&self, bounds: Bounds, xform: &Xform) -> bool {
+        if xform.hidden {
+            return false;
+        }
+        let on_screen = intersect(self.scissor, xform.screen_bounds(bounds));
+        if self.local {
+            !is_empty(on_screen) && !is_empty(intersect(self.rounded, bounds))
+        } else {
+            !is_empty(intersect(on_screen, self.rounded))
+        }
     }
 }
 
@@ -172,15 +318,18 @@ impl Quad {
         }
     }
 
-    /// The rectangle outside which this quad paints nothing.
-    fn painted_bounds(&self) -> Bounds {
+    /// The rectangle, in the quad's own space, outside which it paints
+    /// nothing when drawn through `xform`.
+    fn painted_bounds(&self, xform: &Xform) -> Bounds {
+        // Half a screen pixel of anti-aliased edge, in local pixels.
+        let edge = 0.5 / xform.edge_scale;
         let margin = if self.kind == KIND_GLYPH {
-            0.0
+            // A glyph has an edge of its own only when turned.
+            if xform.turned { edge } else { 0.0 }
         } else if self.kind == KIND_SHADOW {
-            0.5 + SHADOW_EXTENT * self.extent
+            edge + SHADOW_EXTENT * self.extent
         } else {
-            // Half a pixel of anti-aliased edge.
-            0.5
+            edge
         };
         [
             self.rect.x - margin,
@@ -200,6 +349,7 @@ fn image_quad(
     corner_radius: f32,
     tint: Color,
     (texture_width, texture_height): (u32, u32),
+    edge_scale: f32,
 ) -> Quad {
     let (width, height) = (image.width() as f32, image.height() as f32);
     // The source region in texture coordinates.
@@ -212,7 +362,8 @@ fn image_quad(
     // For an axis-aligned quad this is what the GPU would derive from
     // screen-space derivatives, without needing them.
     let (texels_x, texels_y) = (du * texture_width as f32, dv * texture_height as f32);
-    let reduction = (texels_x / rect.width).max(texels_y / rect.height);
+    // A transform that enlarges or shrinks changes the ratio with it.
+    let reduction = (texels_x / rect.width).max(texels_y / rect.height) / edge_scale;
     // Written so that NaN counts as no reduction.
     let level = if reduction > 1.0 {
         reduction.log2()
@@ -386,6 +537,9 @@ pub(crate) struct QuadRenderer {
     /// Clips open at the current point of the list being prepared. Kept to
     /// reuse its allocation.
     clips: Vec<Clip>,
+    /// Transforms open at the current point, each with the clip to return
+    /// to when it ends. Kept to reuse its allocation.
+    transforms: Vec<(Xform, Clip)>,
     /// Image textures, by image id.
     images: ImageTextures,
     /// The draw calls of the current frame. Kept to reuse its allocation.
@@ -413,6 +567,8 @@ impl QuadRenderer {
                 4 => Float32x4,
                 5 => Float32x4,
                 6 => Float32x4,
+                7 => Float32x4,
+                8 => Float32x4,
             ],
         };
 
@@ -477,6 +633,7 @@ impl QuadRenderer {
             scratch: Vec::new(),
             count: 0,
             clips: Vec::new(),
+            transforms: Vec::new(),
             images,
             runs: Vec::new(),
             last_atlas_upload: AtlasUpload::None,
@@ -522,10 +679,12 @@ impl QuadRenderer {
     ) {
         self.scratch.clear();
         self.clips.clear();
+        self.transforms.clear();
         self.runs.clear();
         self.last_atlas_upload = AtlasUpload::None;
         self.images.begin_frame(&images);
         let mut clip = Clip::NONE;
+        let mut xform = Xform::NONE;
         // The image the instances since the last run boundary sample, once
         // one of them is an image. Rectangles and glyphs sample none, so
         // they join whatever run is open.
@@ -537,10 +696,18 @@ impl QuadRenderer {
                     corner_radius,
                 } => {
                     self.clips.push(clip);
-                    clip = clip.pushed(rect, corner_radius);
+                    clip = clip.pushed(rect, corner_radius, &xform);
                 }
                 // A pop with nothing to match is ignored.
                 DrawOp::PopClip => clip = self.clips.pop().unwrap_or(clip),
+                DrawOp::PushTransform { transform } => {
+                    self.transforms.push((xform, clip));
+                    clip = clip.entering(&transform, &xform);
+                    xform = xform.pushed(transform);
+                }
+                DrawOp::PopTransform => {
+                    (xform, clip) = self.transforms.pop().unwrap_or((xform, clip));
+                }
                 DrawOp::Image {
                     image,
                     rect,
@@ -550,7 +717,7 @@ impl QuadRenderer {
                 } => {
                     // Checked first, so an image scrolled out of view is
                     // not uploaded for nothing.
-                    if !clip.may_show(Quad::solid(rect, 0.0, tint).painted_bounds()) {
+                    if !clip.may_show(Quad::solid(rect, 0.0, tint).painted_bounds(&xform), &xform) {
                         continue;
                     }
                     // A released image has no texture and draws nothing.
@@ -564,6 +731,7 @@ impl QuadRenderer {
                         corner_radius,
                         tint,
                         (texture.width, texture.height),
+                        xform.edge_scale,
                     );
                     if run_image.is_some_and(|current| current != image.id()) {
                         // A different texture: what came before is drawn
@@ -571,14 +739,14 @@ impl QuadRenderer {
                         self.end_run(device, queue, &images, run_image);
                     }
                     run_image = Some(image.id());
-                    self.push_instance(&quad, &clip);
+                    self.push_instance(&quad, &clip, &xform);
                 }
                 _ => {
                     if let Some(quad) = quad_for(op)
                         // Clipped-out operations cost nothing on the GPU.
-                        && clip.may_show(quad.painted_bounds())
+                        && clip.may_show(quad.painted_bounds(&xform), &xform)
                     {
-                        self.push_instance(&quad, &clip);
+                        self.push_instance(&quad, &clip, &xform);
                     }
                 }
             }
@@ -637,7 +805,15 @@ impl QuadRenderer {
         self.runs.push(Run { end, image });
     }
 
-    fn push_instance(&mut self, quad: &Quad, clip: &Clip) {
+    fn push_instance(&mut self, quad: &Quad, clip: &Clip, xform: &Xform) {
+        let matrix = xform.matrix;
+        let mut flags = 0.0;
+        if xform.turned {
+            flags += FLAG_TURNED;
+        }
+        if clip.local {
+            flags += FLAG_LOCAL_CLIP;
+        }
         let Quad {
             rect,
             color,
@@ -674,6 +850,14 @@ impl QuadRenderer {
             clip.rounded[1],
             clip.rounded[2],
             clip.rounded[3],
+            matrix.a,
+            matrix.b,
+            matrix.c,
+            matrix.d,
+            matrix.tx,
+            matrix.ty,
+            xform.edge_scale,
+            flags,
         ];
         for value in instance {
             self.scratch.extend_from_slice(&value.to_ne_bytes());
@@ -842,37 +1026,137 @@ mod tests {
     use super::*;
 
     #[test]
-    fn instance_is_seven_vec4s() {
-        assert_eq!(INSTANCE_SIZE, 112);
+    fn instance_is_nine_vec4s() {
+        assert_eq!(INSTANCE_SIZE, 144);
+    }
+
+    const TURN: Transform = Transform::matrix(0.0, 1.0, -1.0, 0.0, 0.0, 0.0);
+
+    #[test]
+    fn transforms_compose_innermost_first() {
+        let outer = Transform::translate(10.0, 0.0);
+        let xform = Xform::NONE.pushed(outer).pushed(TURN);
+        // (1, 0) is turned to (0, 1), then moved right by 10.
+        let point = xform.matrix.apply(morningstar_core::Point::new(1.0, 0.0));
+        assert_eq!((point.x, point.y), (10.0, 1.0));
+        assert!(xform.turned && !xform.hidden);
+        assert_eq!(xform.edge_scale, 1.0);
+
+        let moved = Xform::NONE.pushed(outer);
+        assert!(!moved.turned);
+        assert_eq!(
+            moved.screen_bounds([0.0, 0.0, 4.0, 4.0]),
+            [10.0, 0.0, 14.0, 4.0]
+        );
+        assert_eq!(
+            Xform::NONE.pushed(Transform::scale(2.0, 2.0)).edge_scale,
+            2.0
+        );
+    }
+
+    #[test]
+    fn undrawable_transforms_hide_everything_until_popped() {
+        for bad in [
+            Transform::scale(0.0, 1.0),
+            Transform::translate(f32::NAN, 0.0),
+            Transform::scale(f32::INFINITY, 1.0),
+        ] {
+            let xform = Xform::NONE.pushed(bad);
+            assert!(xform.hidden, "{bad:?}");
+            assert!(!Clip::NONE.may_show(UNBOUNDED, &xform));
+            assert!(
+                xform.pushed(Transform::IDENTITY).hidden,
+                "stays hidden inside"
+            );
+        }
+    }
+
+    #[test]
+    fn a_clip_under_a_move_is_a_screen_clip() {
+        let moved = Xform::NONE.pushed(Transform::translate(100.0, 0.0));
+        let clip = Clip::NONE.pushed(Rect::new(0.0, 0.0, 10.0, 10.0), 0.0, &moved);
+        assert_eq!(clip.scissor, [100.0, 0.0, 110.0, 10.0]);
+        assert!(!clip.local);
+        // Local bounds 0..10 land inside it; 20..30 do not.
+        assert!(clip.may_show([0.0, 0.0, 10.0, 10.0], &moved));
+        assert!(!clip.may_show([20.0, 0.0, 30.0, 10.0], &moved));
+    }
+
+    #[test]
+    fn a_clip_under_a_turn_is_kept_in_the_turned_space() {
+        let turned = Xform::NONE.pushed(TURN);
+        let outer = Clip::NONE.pushed(Rect::new(-50.0, 0.0, 100.0, 100.0), 0.0, &Xform::NONE);
+        let clip = outer.pushed(Rect::new(0.0, 0.0, 20.0, 10.0), 0.0, &turned);
+        assert!(clip.local);
+        assert_eq!(clip.rounded, [0.0, 0.0, 20.0, 10.0]);
+        assert_eq!(clip.scissor, outer.scissor, "the screen clip is untouched");
+        assert!(clip.may_show([5.0, 5.0, 6.0, 6.0], &turned));
+        assert!(
+            !clip.may_show([25.0, 5.0, 30.0, 6.0], &turned),
+            "outside locally"
+        );
+
+        // Square in square, same space: exact intersection.
+        let both = clip.pushed(Rect::new(10.0, 0.0, 20.0, 10.0), 0.0, &turned);
+        assert_eq!(both.rounded, [10.0, 0.0, 20.0, 10.0]);
+        assert_eq!(both.radius, 0.0);
+
+        // A rounded one takes the slot; the square one becomes its bounds
+        // on screen: local 0..20 x 0..10 turns into -10..0 x 0..20.
+        let rounded = clip.pushed(Rect::new(0.0, 0.0, 10.0, 10.0), 5.0, &turned);
+        assert!(rounded.local);
+        assert_eq!(rounded.radius, 5.0);
+        assert_eq!(rounded.scissor, [-10.0, 0.0, 0.0, 20.0]);
+    }
+
+    #[test]
+    fn a_turned_clip_follows_a_move_and_flattens_under_a_further_turn() {
+        let turned = Xform::NONE.pushed(TURN);
+        let clip = Clip::NONE.pushed(Rect::new(0.0, 0.0, 20.0, 10.0), 3.0, &turned);
+
+        let shifted = clip.entering(&Transform::translate(5.0, 1.0), &turned);
+        assert!(shifted.local);
+        assert_eq!(shifted.rounded, [-5.0, -1.0, 15.0, 9.0]);
+
+        let flattened = clip.entering(&TURN, &turned);
+        assert!(!flattened.local && !flattened.has_shape());
+        assert_eq!(flattened.scissor, [-10.0, 0.0, 0.0, 20.0]);
+
+        // A rounded clip on the screen is unaffected by transforms inside.
+        let screen = Clip::NONE.pushed(Rect::new(0.0, 0.0, 20.0, 20.0), 4.0, &Xform::NONE);
+        assert_eq!(screen.entering(&TURN, &Xform::NONE), screen);
     }
 
     #[test]
     fn square_clips_intersect() {
         let clip = Clip::NONE
-            .pushed(Rect::new(0.0, 0.0, 10.0, 10.0), 0.0)
-            .pushed(Rect::new(5.0, -5.0, 10.0, 10.0), 0.0);
+            .pushed(Rect::new(0.0, 0.0, 10.0, 10.0), 0.0, &Xform::NONE)
+            .pushed(Rect::new(5.0, -5.0, 10.0, 10.0), 0.0, &Xform::NONE);
         assert_eq!(clip.scissor, [5.0, 0.0, 10.0, 5.0]);
         assert_eq!(clip.radius, 0.0);
-        assert!(clip.may_show([9.0, 4.0, 20.0, 20.0]));
-        assert!(!clip.may_show([10.0, 0.0, 20.0, 5.0]), "touching only");
+        assert!(clip.may_show([9.0, 4.0, 20.0, 20.0], &Xform::NONE));
+        assert!(
+            !clip.may_show([10.0, 0.0, 20.0, 5.0], &Xform::NONE),
+            "touching only"
+        );
     }
 
     #[test]
     fn disjoint_or_empty_clips_show_nothing() {
         let anything = [-FAR, -FAR, FAR, FAR];
         let disjoint = Clip::NONE
-            .pushed(Rect::new(0.0, 0.0, 4.0, 4.0), 0.0)
-            .pushed(Rect::new(8.0, 0.0, 4.0, 4.0), 0.0);
-        assert!(!disjoint.may_show(anything));
-        let empty = Clip::NONE.pushed(Rect::new(0.0, 0.0, 0.0, 4.0), 0.0);
-        assert!(!empty.may_show(anything));
-        let nan = Clip::NONE.pushed(Rect::new(0.0, 0.0, f32::NAN, 4.0), 3.0);
-        assert!(!nan.may_show(anything));
+            .pushed(Rect::new(0.0, 0.0, 4.0, 4.0), 0.0, &Xform::NONE)
+            .pushed(Rect::new(8.0, 0.0, 4.0, 4.0), 0.0, &Xform::NONE);
+        assert!(!disjoint.may_show(anything, &Xform::NONE));
+        let empty = Clip::NONE.pushed(Rect::new(0.0, 0.0, 0.0, 4.0), 0.0, &Xform::NONE);
+        assert!(!empty.may_show(anything, &Xform::NONE));
+        let nan = Clip::NONE.pushed(Rect::new(0.0, 0.0, f32::NAN, 4.0), 3.0, &Xform::NONE);
+        assert!(!nan.may_show(anything, &Xform::NONE));
     }
 
     #[test]
     fn innermost_rounded_clip_wins_and_the_outer_becomes_its_bounds() {
-        let outer = Clip::NONE.pushed(Rect::new(0.0, 0.0, 100.0, 100.0), 20.0);
+        let outer = Clip::NONE.pushed(Rect::new(0.0, 0.0, 100.0, 100.0), 20.0, &Xform::NONE);
         assert_eq!(
             outer.scissor, UNBOUNDED,
             "a rounded clip is not also a scissor"
@@ -882,14 +1166,14 @@ mod tests {
             ([0.0, 0.0, 100.0, 100.0], 20.0)
         );
 
-        let scrolled = outer.pushed(Rect::new(0.0, 30.0, 100.0, 40.0), 0.0);
+        let scrolled = outer.pushed(Rect::new(0.0, 30.0, 100.0, 40.0), 0.0, &Xform::NONE);
         assert_eq!(scrolled.scissor, [0.0, 30.0, 100.0, 70.0]);
         assert_eq!(
             scrolled.radius, 20.0,
             "square inside rounded keeps the corners"
         );
 
-        let inner = scrolled.pushed(Rect::new(10.0, 10.0, 50.0, 50.0), 1000.0);
+        let inner = scrolled.pushed(Rect::new(10.0, 10.0, 50.0, 50.0), 1000.0, &Xform::NONE);
         assert_eq!(inner.scissor, [0.0, 30.0, 100.0, 70.0]);
         assert_eq!(
             (inner.rounded, inner.radius),

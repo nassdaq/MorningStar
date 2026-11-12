@@ -6,9 +6,10 @@ use std::sync::Arc;
 
 use morningstar_core::{
     Capitalization, Color, Image, ImageFit, ImeAction, KeyboardType, Shadow, TextInputTraits,
+    Transform,
 };
 use morningstar_layout::{Alignment, CrossAlign, Edges, MainAlign, Sizing, Style};
-use morningstar_runtime::{FontFamily, TextAlign, TextWeight, VectorIcon};
+use morningstar_runtime::{FontFamily, TextAlign, TextWeight, VectorIcon, VectorPicture};
 
 use crate::color::{ColorRef, ThemeColor};
 use crate::edit::{self, EditConfig};
@@ -22,8 +23,9 @@ pub(crate) fn key_hash(id: impl Hash) -> u64 {
     hasher.finish() | 1
 }
 
-/// Sizing, placement and identity methods shared by every widget. Expects
-/// the type to have `layout: Style` and `key: Option<u64>` fields.
+/// Sizing, placement, transform and identity methods shared by every
+/// widget. Expects the type to have `layout: Style`, `key: Option<u64>` and
+/// `transform: Option<Transform>` fields.
 macro_rules! layout_methods {
     () => {
         /// Fixed width in dp.
@@ -145,6 +147,35 @@ macro_rules! layout_methods {
             self
         }
 
+        /// Draws the widget, and everything inside it, through a transform
+        /// about its own centre, without affecting layout: CSS
+        /// `transform` with the default `transform-origin`. The widget
+        /// keeps the room it was laid out in; its turned or slanted
+        /// picture may overlap its neighbours.
+        ///
+        /// Lengths in the transform are in dp. Build it as the CSS reads:
+        /// `transform: rotate(5deg) translateY(-8px)` is
+        /// `.transform(Transform::rotate(5.0).and_translate(0.0, -8.0))`.
+        /// A later call replaces an earlier one (and
+        /// [`rotate`](Self::rotate)).
+        ///
+        /// Touches follow the picture: a tappable box that is turned is
+        /// hit where it is drawn. What is not handled: a scroll view
+        /// *inside* a transformed widget scrolls along the screen's axes,
+        /// and [`Ui::rect_of`](crate::Ui::rect_of) reports the layout
+        /// rectangle, before the transform.
+        pub fn transform(mut self, transform: morningstar_core::Transform) -> Self {
+            self.transform = Some(transform);
+            self
+        }
+
+        /// Turns the widget about its centre, clockwise for positive
+        /// degrees: CSS `transform: rotate(..)`. Short for
+        /// `.transform(Transform::rotate(degrees))`.
+        pub fn rotate(self, degrees: f32) -> Self {
+            self.transform(morningstar_core::Transform::rotate(degrees))
+        }
+
         /// Gives the widget an explicit identity. See the crate
         /// documentation, "State and identity".
         pub fn id(mut self, id: impl std::hash::Hash) -> Self {
@@ -173,6 +204,8 @@ macro_rules! box_size_method {
 pub struct Element<M> {
     pub(crate) layout: Style,
     pub(crate) key: Option<u64>,
+    /// In dp, about the element's centre.
+    pub(crate) transform: Option<Transform>,
     pub(crate) kind: Kind<M>,
 }
 
@@ -207,6 +240,7 @@ impl<M> Element<M> {
         Element {
             layout: self.layout,
             key: self.key,
+            transform: self.transform,
             kind: match self.kind {
                 Kind::Text(text) => Kind::Text(text),
                 Kind::Image(image) => Kind::Image(image),
@@ -345,6 +379,12 @@ pub(crate) struct TextNode {
     pub letter_spacing: f32,
     /// Never wrapped, whatever width is offered (a single-line input).
     pub no_wrap: bool,
+    pub italic: bool,
+    pub tabular_nums: bool,
+    /// A copy of the text behind it: offsets in dp, and its colour.
+    pub shadow: Option<(f32, f32, ColorRef)>,
+    /// A stroke around the letters: width in dp, and its colour.
+    pub outline: Option<(f32, ColorRef)>,
 }
 
 /// Builds the message for a text input's new value.
@@ -402,6 +442,7 @@ pub struct Span {
     pub(crate) weight: Option<TextWeight>,
     pub(crate) color: Option<ColorRef>,
     pub(crate) family: Option<FontFamily>,
+    pub(crate) italic: bool,
 }
 
 impl Span {
@@ -412,7 +453,15 @@ impl Span {
             weight: None,
             color: None,
             family: None,
+            italic: false,
         }
+    }
+
+    /// Sets this span in italics (CSS `font-style: italic`, an `<em>`).
+    /// See [`Text::italic`].
+    pub fn italic(mut self) -> Self {
+        self.italic = true;
+        self
     }
 
     /// Font weight of this span.
@@ -471,9 +520,16 @@ pub fn span(content: impl Into<Cow<'static, str>>) -> Span {
     Span::new(content)
 }
 
+/// What a [`Picture`] shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum PictureSource {
+    Image(Image),
+    Vector(VectorPicture),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ImageNode {
-    pub image: Image,
+    pub source: PictureSource,
     pub fit: ImageFit,
     pub radius: f32,
     pub tint: ColorRef,
@@ -580,6 +636,7 @@ pub mod elevation {
 pub struct Container<M> {
     layout: Style,
     key: Option<u64>,
+    transform: Option<Transform>,
     node: BoxNode<M>,
 }
 
@@ -588,6 +645,7 @@ impl<M> Container<M> {
         Self {
             layout: Style::new(),
             key: None,
+            transform: None,
             node: BoxNode::new(axis),
         }
     }
@@ -817,6 +875,7 @@ impl<M> From<Container<M>> for Element<M> {
         Self {
             layout: container.layout,
             key: container.key,
+            transform: container.transform,
             kind: Kind::Box(container.node),
         }
     }
@@ -968,6 +1027,7 @@ impl Spacer {
 pub struct Text {
     layout: Style,
     key: Option<u64>,
+    transform: Option<Transform>,
     node: TextNode,
 }
 
@@ -977,6 +1037,7 @@ impl Text {
         Self {
             layout: Style::new(),
             key: None,
+            transform: None,
             node: TextNode {
                 content: content.into(),
                 spans: Vec::new(),
@@ -990,6 +1051,10 @@ impl Text {
                 family: None,
                 letter_spacing: 0.0,
                 no_wrap: false,
+                italic: false,
+                tabular_nums: false,
+                shadow: None,
+                outline: None,
             },
         }
     }
@@ -1140,6 +1205,42 @@ impl Text {
         self
     }
 
+    /// Sets the text in italics (CSS `font-style: italic`). If an italic
+    /// font of the family was added in `setup` it is used; otherwise the
+    /// upright letters are slanted by 14 degrees, as a browser does for a
+    /// family without an italic. The text takes the same room either way.
+    pub fn italic(mut self) -> Self {
+        self.node.italic = true;
+        self
+    }
+
+    /// Sets digits on a common width, so that columns of numbers line up
+    /// and a running timer keeps still (CSS
+    /// `font-variant-numeric: tabular-nums`). It needs the font to have the
+    /// `tnum` feature and does nothing otherwise.
+    pub fn tabular_nums(mut self) -> Self {
+        self.node.tabular_nums = true;
+        self
+    }
+
+    /// A hard shadow: the same text drawn once more behind it, moved by
+    /// `(x, y)` dp, in `color` (CSS `text-shadow: 3px 3px 0 #fff`). There
+    /// is no blur. The shadow takes no room in layout.
+    pub fn shadow(mut self, x: f32, y: f32, color: impl Into<ColorRef>) -> Self {
+        self.node.shadow = Some((x, y, color.into()));
+        self
+    }
+
+    /// Outlines the letters with a stroke `width` dp wide, centred on
+    /// their edges, over the fill (CSS `-webkit-text-stroke: 1.5px #fff`).
+    /// For a large digit or a word, not for paragraphs: outlined text is
+    /// drawn as an image (ADR 0017), in the text's one colour (span
+    /// colours are ignored).
+    pub fn outline(mut self, width: f32, color: impl Into<ColorRef>) -> Self {
+        self.node.outline = Some((width, color.into()));
+        self
+    }
+
     /// Shows the text in capitals (CSS `text-transform: uppercase`). This
     /// rewrites the characters; it is not a font feature.
     pub fn uppercase(mut self) -> Self {
@@ -1169,6 +1270,7 @@ impl<M> From<Text> for Element<M> {
         Self {
             layout: text.layout,
             key: text.key,
+            transform: text.transform,
             kind: Kind::Text(text.node),
         }
     }
@@ -1265,6 +1367,7 @@ pub fn text(content: impl Into<Cow<'static, str>>) -> Text {
 pub struct TextInput<M> {
     layout: Style,
     key: Option<u64>,
+    transform: Option<Transform>,
     value: String,
     placeholder: Cow<'static, str>,
     placeholder_color: ColorRef,
@@ -1287,6 +1390,7 @@ impl<M> TextInput<M> {
         Self {
             layout: Style::new().width(Sizing::FILL),
             key: None,
+            transform: None,
             value: value.into(),
             placeholder: Cow::Borrowed(""),
             placeholder_color: ColorRef::Token(ThemeColor::TextMuted),
@@ -1507,6 +1611,7 @@ impl<M> From<TextInput<M>> for Element<M> {
         Self {
             layout: input.layout,
             key: input.key,
+            transform: input.transform,
             kind: Kind::Input(InputNode {
                 text,
                 value: input.value,
@@ -1551,6 +1656,7 @@ enum ButtonKind {
 pub struct Button<M> {
     layout: Style,
     key: Option<u64>,
+    transform: Option<Transform>,
     label: Cow<'static, str>,
     on_press: Option<M>,
     kind: ButtonKind,
@@ -1566,6 +1672,7 @@ impl<M> Button<M> {
                 .padding(Edges::symmetric(20.0, 10.0))
                 .content_align(Alignment::CENTER),
             key: None,
+            transform: None,
             label: label.into(),
             on_press: None,
             kind: ButtonKind::Primary,
@@ -1657,6 +1764,7 @@ impl<M> From<Button<M>> for Element<M> {
         Self {
             layout: button.layout,
             key: button.key,
+            transform: button.transform,
             kind: Kind::Box(node),
         }
     }
@@ -1747,7 +1855,7 @@ impl<M> From<Divider> for Element<M> {
     }
 }
 
-/// A registered image, drawn into a box.
+/// A registered image, or a multi-colour vector picture, drawn into a box.
 ///
 /// Register the image once, in [`Application::setup`]
 /// (crate::Application::setup), and keep the handle in the application
@@ -1768,9 +1876,53 @@ impl<M> From<Divider> for Element<M> {
 /// `Contain` letterboxes, `Stretch` distorts.
 ///
 /// (Named `Picture` because [`Image`] is the handle.)
+///
+/// # Vector pictures
+///
+/// [`Picture::vector`] shows a [`VectorPicture`]: an illustration in
+/// several colours described in Rust, layer by layer, from the SVG a design
+/// has inline. It is rasterised for the exact pixels it covers, so it is
+/// sharp at any size and display scale.
+///
+/// ```
+/// use morningstar_ui::prelude::*;
+///
+/// const INK: Color = hex(0x0E0E0E);
+/// const GOLD: Color = hex(0xF6C445);
+///
+/// // <svg width="250" height="250" viewBox="0 0 280 280">
+/// //   <circle cx="140" cy="140" r="122" fill="#0E0E0E" stroke="#F6C445" stroke-width="1.5"/>
+/// //   <rect x="-40" y="114" width="360" height="52" fill="#F6C445"
+/// //         transform="rotate(-18 140 140)" clip-path="(the circle above)"/>
+/// //   <circle cx="140" cy="140" r="114" fill="none" stroke="#F6C445" stroke-opacity="0.55"/>
+/// // </svg>
+/// const DISC: VectorPicture = VectorPicture::new(
+///     280.0,
+///     280.0,
+///     &[
+///         Layer::circle(140.0, 140.0, 122.0).fill(INK).stroke(GOLD, 1.5),
+///         Layer::rect(-40.0, 114.0, 360.0, 52.0)
+///             .fill(GOLD)
+///             .rotate(-18.0, 140.0, 140.0)
+///             .clip_circle(140.0, 140.0, 122.0),
+///         Layer::circle(140.0, 140.0, 114.0).stroke(with_alpha(GOLD, 0.55), 1.0),
+///     ],
+/// );
+///
+/// // The SVG's `width` and `height` are the size in dp.
+/// let disc = Picture::vector(DISC).size(250.0, 250.0);
+/// # let _ = disc;
+/// ```
+///
+/// With no size given a vector picture is as many dp as its view box has
+/// units; with one dimension given the other follows the view box's shape.
+/// It is always shown whole, centred in its box ([`fit`](Self::fit) does
+/// not apply); [`radius`](Self::radius) and [`tint`](Self::tint) work as
+/// for an image.
 pub struct Picture {
     layout: Style,
     key: Option<u64>,
+    transform: Option<Transform>,
     node: ImageNode,
 }
 
@@ -1780,9 +1932,25 @@ impl Picture {
         Self {
             layout: Style::new(),
             key: None,
+            transform: None,
             node: ImageNode {
-                image,
+                source: PictureSource::Image(image),
                 fit: ImageFit::Cover,
+                radius: 0.0,
+                tint: ColorRef::Value(Color::WHITE),
+            },
+        }
+    }
+
+    /// A multi-colour vector picture. See "Vector pictures" above.
+    pub fn vector(picture: VectorPicture) -> Self {
+        Self {
+            layout: Style::new(),
+            key: None,
+            transform: None,
+            node: ImageNode {
+                source: PictureSource::Vector(picture),
+                fit: ImageFit::Contain,
                 radius: 0.0,
                 tint: ColorRef::Value(Color::WHITE),
             },
@@ -1817,12 +1985,12 @@ impl Picture {
 impl<M> From<Picture> for Element<M> {
     fn from(picture: Picture) -> Self {
         let mut layout = picture.layout;
-        let (width, height) = (
-            picture.node.image.width() as f32,
-            picture.node.image.height() as f32,
-        );
+        let (width, height) = match picture.node.source {
+            PictureSource::Image(image) => (image.width() as f32, image.height() as f32),
+            PictureSource::Vector(vector) => (vector.width(), vector.height()),
+        };
         match (layout.width, layout.height) {
-            // Natural size: one dp per image pixel.
+            // Natural size: one dp per image pixel or view-box unit.
             (Sizing::Hug, Sizing::Hug) => {
                 layout.width = Sizing::Fixed(width);
                 layout.height = Sizing::Fixed(height);
@@ -1838,6 +2006,7 @@ impl<M> From<Picture> for Element<M> {
         Self {
             layout,
             key: picture.key,
+            transform: picture.transform,
             kind: Kind::Image(picture.node),
         }
     }
@@ -1848,6 +2017,7 @@ impl<M> From<Picture> for Element<M> {
 pub struct Avatar {
     layout: Style,
     key: Option<u64>,
+    transform: Option<Transform>,
     initials: String,
     image: Option<Image>,
     diameter: f32,
@@ -1867,6 +2037,7 @@ impl Avatar {
         Self {
             layout: Style::new(),
             key: None,
+            transform: None,
             initials,
             image: None,
             diameter: 40.0,
@@ -1919,6 +2090,7 @@ impl<M> From<Avatar> for Element<M> {
                 ..avatar.layout
             };
             picture.key = avatar.key;
+            picture.transform = avatar.transform;
             return picture.into();
         }
         let mut tile: Container<M> = Container::new(
@@ -1937,6 +2109,7 @@ impl<M> From<Avatar> for Element<M> {
             ..avatar.layout
         };
         tile.key = avatar.key;
+        tile.transform = avatar.transform;
         tile.into()
     }
 }
@@ -1969,6 +2142,7 @@ impl<M> From<Avatar> for Element<M> {
 pub struct Icon {
     layout: Style,
     key: Option<u64>,
+    transform: Option<Transform>,
     glyph: Cow<'static, str>,
     vector: Option<VectorIcon>,
     stroke_width: Option<f32>,
@@ -1986,6 +2160,7 @@ impl Icon {
         Self {
             layout: Style::new(),
             key: None,
+            transform: None,
             glyph: glyph.into(),
             vector: None,
             stroke_width: None,
@@ -2076,12 +2251,14 @@ impl<M> From<Icon> for Element<M> {
                     return Self {
                         layout: sized(icon.layout, icon.side),
                         key: icon.key,
+                        transform: icon.transform,
                         kind: Kind::Icon(node),
                     };
                 };
                 Self {
                     layout: sized(Style::new(), icon.side / 2.0),
                     key: None,
+                    transform: None,
                     kind: Kind::Icon(node),
                 }
             }
@@ -2101,6 +2278,7 @@ impl<M> From<Icon> for Element<M> {
             ..sized(icon.layout, icon.side)
         };
         tile.key = icon.key;
+        tile.transform = icon.transform;
         tile.into()
     }
 }

@@ -2,14 +2,32 @@ use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 
 use cosmic_text::{
-    Align, Attrs, Buffer, CacheKey, Family, FontSystem, Metrics, Shaping, SwashCache, SwashContent,
-    Weight, fontdb,
+    Align, Attrs, Buffer, CacheKey, Family, FeatureTag, FontFeatures, FontSystem, Metrics, Shaping,
+    Style, SwashCache, SwashContent, Weight, fontdb,
 };
-use morningstar_core::{AtlasView, Color, DisplayList, Point, Rect, Size};
+use morningstar_core::{AtlasView, Color, DisplayList, Point, Rect, Size, Transform};
 
 use crate::atlas::{Atlas, Lookup};
 use crate::icon::{Art, IconError, IconKey, MAX_ICON_PIXELS, VectorIcon};
+use crate::picture::{Canvas, LineCap, LineJoin, MAX_PICTURE_PIXELS, Paint, StrokePaint};
 use crate::{FontFamily, TextAlign, TextSpan, TextStyle};
+
+/// Filled and outlined lettering as an image, from
+/// [`TextContext::rasterise_outlined`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct OutlinedText {
+    /// Size of the image in pixels.
+    pub width: u32,
+    pub height: u32,
+    /// Where the image's top-left corner goes, relative to the origin the
+    /// text would be drawn at. Whole pixels; usually negative, since the
+    /// stroke reaches outside the text's box.
+    pub offset: Point,
+    /// `width * height * 4` bytes of RGBA, row by row from the top:
+    /// sRGB-encoded colour premultiplied by alpha in linear light, as the
+    /// image store keeps images.
+    pub pixels: Vec<u8>,
+}
 
 /// One glyph of a laid-out paragraph, relative to the paragraph's origin.
 #[derive(Clone, Copy)]
@@ -528,6 +546,118 @@ impl TextContext {
         );
     }
 
+    /// Rasterises a short text as filled and outlined lettering (CSS
+    /// `-webkit-text-stroke`): the glyphs' outlines filled with the style's
+    /// colour and then stroked, centred on the outline, `stroke_width`
+    /// pixels wide in `stroke`.
+    ///
+    /// The result is an RGBA image (see [`OutlinedText`]) for the
+    /// renderer's image path, not glyphs in the atlas: it is meant for a
+    /// large digit or a word, and the caller keeps it for as long as it is
+    /// shown. Per-span colours are not used; the whole text is filled with
+    /// `style.color`. `None` if there is nothing to draw (no text, no
+    /// fonts, only blank glyphs, or glyphs without outlines such as
+    /// bitmaps).
+    pub fn rasterise_outlined(
+        &mut self,
+        spans: &[TextSpan<'_>],
+        style: &TextStyle,
+        max_width: Option<f32>,
+        stroke_width: f32,
+        stroke: Color,
+    ) -> Option<OutlinedText> {
+        let stroke_width = if stroke_width > 0.0 && stroke_width.is_finite() {
+            stroke_width
+        } else {
+            0.0
+        };
+        let key = self.layout(spans, style, max_width);
+        let layout = &self.layouts[&key];
+
+        // All the outlines as one path, relative to the layout's origin,
+        // with y downwards.
+        let mut path: Vec<zeno::Command> = Vec::new();
+        for glyph in &layout.glyphs {
+            let Some(commands) = self
+                .rasteriser
+                .get_outline_commands(&mut self.fonts, glyph.key)
+            else {
+                continue;
+            };
+            // Outlines are y-up, relative to the pen position, which the
+            // glyph's key holds the fractional part of.
+            let place = zeno::Transform::new(
+                1.0,
+                0.0,
+                0.0,
+                -1.0,
+                glyph.x as f32 + glyph.key.x_bin.as_float(),
+                glyph.y as f32 + glyph.key.y_bin.as_float(),
+            );
+            path.extend(commands.iter().map(|command| command.transform(&place)));
+        }
+
+        // The pixels the lettering can touch: its control points bound it,
+        // half the stroke lies outside (a mitre reaches further, up to the
+        // limit of four half-widths), and a pixel for the edge.
+        let mut bounds: Option<[f32; 4]> = None;
+        let mut include = |point: zeno::Point| {
+            let b = bounds.get_or_insert([point.x, point.y, point.x, point.y]);
+            *b = [
+                b[0].min(point.x),
+                b[1].min(point.y),
+                b[2].max(point.x),
+                b[3].max(point.y),
+            ];
+        };
+        for command in &path {
+            match *command {
+                zeno::Command::MoveTo(to) | zeno::Command::LineTo(to) => include(to),
+                zeno::Command::QuadTo(control, to) => {
+                    include(control);
+                    include(to);
+                }
+                zeno::Command::CurveTo(first, second, to) => {
+                    include(first);
+                    include(second);
+                    include(to);
+                }
+                zeno::Command::Close => {}
+            }
+        }
+        let [x0, y0, x1, y1] = bounds?;
+        let margin = (stroke_width * 2.0).ceil() + 1.0;
+        let (left, top) = ((x0 - margin).floor(), (y0 - margin).floor());
+        let (width, height) = ((x1 + margin).ceil() - left, (y1 + margin).ceil() - top);
+        let limit = MAX_PICTURE_PIXELS as f32;
+        // Written so that NaN is rejected.
+        if !(width >= 1.0 && height >= 1.0 && width <= limit && height <= limit) {
+            return None;
+        }
+
+        let mut canvas = Canvas::new(width as u32, height as u32);
+        canvas.paint(&Paint {
+            commands: &path,
+            transform: Transform::translate(-left, -top),
+            fill: Some(style.color),
+            even_odd: false,
+            stroke: (stroke_width > 0.0).then_some(StrokePaint {
+                color: stroke,
+                width: stroke_width,
+                cap: LineCap::Butt,
+                join: LineJoin::Miter,
+            }),
+            opacity: 1.0,
+            clip: None,
+        });
+        Some(OutlinedText {
+            width: width as u32,
+            height: height as u32,
+            offset: Point::new(left, top),
+            pixels: canvas.finish(),
+        })
+    }
+
     /// The atlas the glyphs drawn so far refer to. Hand it to the renderer
     /// together with the display list.
     pub fn atlas(&self) -> AtlasView<'_> {
@@ -543,6 +673,7 @@ impl TextContext {
             span.text.hash(&mut hasher);
             span.weight.hash(&mut hasher);
             span.family.hash(&mut hasher);
+            span.italic.hash(&mut hasher);
             span.color
                 .map(|color| [color.r, color.g, color.b, color.a].map(f32::to_bits))
                 .hash(&mut hasher);
@@ -553,6 +684,8 @@ impl TextContext {
         style.align.hash(&mut hasher);
         style.family.hash(&mut hasher);
         style.letter_spacing.to_bits().hash(&mut hasher);
+        style.italic.hash(&mut hasher);
+        style.tabular_nums.hash(&mut hasher);
         max_width.map(f32::to_bits).hash(&mut hasher);
         let key = hasher.finish();
 
@@ -627,9 +760,21 @@ impl TextContext {
             FontFamily::Default => Family::SansSerif,
             FontFamily::Named(name) => Family::Name(name),
         };
+        // Asking for italic picks an italic face when the family has one;
+        // when it has none the shaper marks the glyphs to be slanted as
+        // they are rasterised (and as their outlines are produced).
+        let slant = |italic: bool| {
+            if italic { Style::Italic } else { Style::Normal }
+        };
         let mut attrs = Attrs::new()
             .family(family(style.family))
-            .weight(Weight(style.weight.0));
+            .weight(Weight(style.weight.0))
+            .style(slant(style.italic));
+        if style.tabular_nums {
+            let mut features = FontFeatures::new();
+            features.enable(FeatureTag::new(b"tnum"));
+            attrs = attrs.font_features(features);
+        }
         if style.letter_spacing.is_finite() && style.letter_spacing != 0.0 {
             // The shaper takes it as a fraction of the font size.
             attrs = attrs.letter_spacing(style.letter_spacing / font_size);
@@ -646,6 +791,7 @@ impl TextContext {
         if let [span] = spans
             && span.weight.is_none()
             && span.family.is_none()
+            && span.italic.is_none()
         {
             buffer.set_text(&mut self.fonts, span.text, &attrs, Shaping::Advanced, align);
         } else {
@@ -657,6 +803,9 @@ impl TextContext {
                 }
                 if let Some(name) = span.family {
                     attrs = attrs.family(family(name));
+                }
+                if let Some(italic) = span.italic {
+                    attrs = attrs.style(slant(italic));
                 }
                 (span.text, attrs)
             });

@@ -1,10 +1,43 @@
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::Duration;
 
 use morningstar_core::{
-    AtlasView, Color, DisplayList, Image, ImageError, ImageStore, ImagesView, Insets, Point,
-    PointerEvent, Rect, Size, SurfaceSize, TextInputEvent, TextInputRequest,
+    AtlasView, Color, DisplayList, HostState, Image, ImageError, ImageStore, ImagesView, Insets,
+    Point, PointerEvent, Rect, ServiceCall, ServiceId, ServiceResult, Size, SurfaceSize,
+    TextInputEvent, TextInputRequest,
 };
-use morningstar_text::{TextContext, TextSpan, TextStyle, VectorIcon};
+use morningstar_text::{
+    MAX_PICTURE_PIXELS, TextContext, TextSpan, TextStyle, VectorIcon, VectorPicture,
+};
+
+/// A cached picture is dropped once this many frames have been built
+/// without drawing it. Frames are only built when something changes, so
+/// this is about how much else has happened, not time: a picture scrolled
+/// out of view and back within a fling is not rasterised again.
+const PICTURE_IDLE_FRAMES: u64 = 120;
+/// Above this many bytes of cached picture pixels, pictures the previous
+/// frame did not draw are dropped at once, least recently drawn first.
+const PICTURE_CACHE_BYTES: usize = 32 * 1024 * 1024;
+
+/// Identifies one rasterisation: what was drawn and at what pixel size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct PictureKey {
+    content: u64,
+    width: u32,
+    height: u32,
+}
+
+/// A vector picture (or outlined text) rasterised and registered as an
+/// image.
+struct CachedPicture {
+    image: Image,
+    /// For outlined text: where the image goes relative to the text's
+    /// origin.
+    offset: Point,
+    /// The frame that last drew it.
+    last_used: u64,
+}
 
 /// Per-frame information handed to the application.
 ///
@@ -144,6 +177,11 @@ pub struct Frame {
     text: TextContext,
     /// The registered images. Not cleared between frames.
     images: ImageStore,
+    /// Rasterised vector pictures and outlined texts, as images in
+    /// `images`. See ADR 0017.
+    pictures: HashMap<PictureKey, CachedPicture>,
+    /// Counts calls to `begin`, for the picture cache.
+    generation: u64,
     redraw_requested: bool,
     redraw_after: Option<Duration>,
     text_input: Option<TextInputRequest>,
@@ -158,6 +196,8 @@ impl Frame {
             list: DisplayList::new(),
             text: TextContext::new(),
             images: ImageStore::new(),
+            pictures: HashMap::new(),
+            generation: 0,
             redraw_requested: false,
             redraw_after: None,
             text_input: None,
@@ -167,11 +207,23 @@ impl Frame {
     /// A frame prepared for `app`: runs [`App::setup`] so its fonts are
     /// available. The engine does this once at startup; tests and tools that
     /// call [`App::frame`] directly should do the same.
+    ///
+    /// The app is set up as if there were no host: nothing stored, and the
+    /// placeholder installation id. See
+    /// [`for_app_with_host`](Self::for_app_with_host).
     pub fn for_app(app: &mut dyn App) -> Self {
+        Self::for_app_with_host(app, &HostState::new())
+    }
+
+    /// As [`for_app`](Self::for_app), with what a host would hand the app
+    /// at setup: its installation id and the values stored on earlier
+    /// runs. Tests use it to start an app "on its second launch".
+    pub fn for_app_with_host(app: &mut dyn App, host: &HostState) -> Self {
         let mut frame = Self::new();
         app.setup(&mut Setup {
             text: &mut frame.text,
             images: &mut frame.images,
+            host,
         });
         frame
     }
@@ -182,6 +234,8 @@ impl Frame {
         self.clear = Color::BLACK;
         self.list.clear();
         self.text.begin_frame();
+        self.evict_pictures();
+        self.generation += 1;
         self.redraw_requested = false;
         self.redraw_after = None;
         self.text_input = None;
@@ -342,6 +396,236 @@ impl Frame {
             .draw_icon(&mut self.list, icon, rect, color, stroke_width);
     }
 
+    /// Draws a multi-colour vector picture into `rect` (physical pixels).
+    ///
+    /// The picture's view box is scaled uniformly to fit the rectangle and
+    /// centred in it. The rectangle is snapped to whole pixels and the
+    /// picture is rasterised for exactly that many pixels, so it is as
+    /// sharp as the display allows at any scale. `corner_radius` rounds the
+    /// rectangle's corners and `tint` multiplies every pixel
+    /// ([`Color::WHITE`] leaves the picture as it is), as for any image.
+    ///
+    /// The rasterisation is an RGBA image kept in the frame's image store
+    /// and drawn through the image path (so, like any image, it is its own
+    /// draw call when another image is on screen; ADR 0014). It is cached
+    /// by the picture's content and pixel size, and dropped again some time
+    /// after it stops being drawn. It costs `4 * width * height` bytes here
+    /// and a third more than that on the GPU, with mipmaps. Pictures larger
+    /// than 2048 pixels on a side are rasterised at that size and
+    /// stretched.
+    pub fn draw_picture(
+        &mut self,
+        picture: &VectorPicture,
+        rect: Rect,
+        corner_radius: f32,
+        tint: Color,
+    ) {
+        let (left, top) = (rect.x.round(), rect.y.round());
+        let width = (rect.x + rect.width).round() - left;
+        let height = (rect.y + rect.height).round() - top;
+        // Written so that NaN is rejected.
+        if !(width >= 1.0 && height >= 1.0 && width < 1.0e6 && height < 1.0e6) {
+            return;
+        }
+        let (mut raster_width, mut raster_height) = (width as u32, height as u32);
+        let longest = raster_width.max(raster_height);
+        if longest > MAX_PICTURE_PIXELS {
+            let shrink = |side: u32| {
+                ((u64::from(side) * u64::from(MAX_PICTURE_PIXELS)).div_ceil(u64::from(longest))
+                    as u32)
+                    .clamp(1, MAX_PICTURE_PIXELS)
+            };
+            (raster_width, raster_height) = (shrink(raster_width), shrink(raster_height));
+        }
+        let key = PictureKey {
+            content: picture.content_hash(),
+            width: raster_width,
+            height: raster_height,
+        };
+        let image = match self.pictures.get_mut(&key) {
+            Some(cached) => {
+                cached.last_used = self.generation;
+                cached.image
+            }
+            None => {
+                let pixels = picture.rasterise(raster_width, raster_height);
+                let Ok(image) =
+                    self.images
+                        .add_premultiplied_rgba8_vec(raster_width, raster_height, pixels)
+                else {
+                    return;
+                };
+                self.pictures.insert(
+                    key,
+                    CachedPicture {
+                        image,
+                        offset: Point::new(0.0, 0.0),
+                        last_used: self.generation,
+                    },
+                );
+                image
+            }
+        };
+        self.list.draw_image_region(
+            image,
+            image.bounds(),
+            Rect::new(left, top, width, height),
+            corner_radius,
+            tint,
+        );
+    }
+
+    /// Draws text as filled and outlined lettering: CSS
+    /// `-webkit-text-stroke`. The glyphs are filled with the style's colour
+    /// and then stroked `stroke_width` pixels wide in `stroke`, centred on
+    /// their outlines, so half the stroke lies outside the letters.
+    ///
+    /// The text is laid out and placed exactly as
+    /// [`draw_text_spans`](Self::draw_text_spans) would place it, and takes
+    /// the same room. It is drawn as one image, cached like a
+    /// [picture](Self::draw_picture): meant for a large digit or a word,
+    /// not for paragraphs. Per-span colours are not used.
+    pub fn draw_text_outlined(
+        &mut self,
+        spans: &[TextSpan<'_>],
+        style: &TextStyle,
+        origin: Point,
+        max_width: Option<f32>,
+        stroke_width: f32,
+        stroke: Color,
+    ) -> Size {
+        let size = self.text.measure_spans(spans, style, max_width);
+        let mut hasher = DefaultHasher::new();
+        for span in spans {
+            span.text.hash(&mut hasher);
+            span.weight.hash(&mut hasher);
+            span.family.hash(&mut hasher);
+            span.italic.hash(&mut hasher);
+        }
+        style.weight.hash(&mut hasher);
+        style.align.hash(&mut hasher);
+        style.family.hash(&mut hasher);
+        style.italic.hash(&mut hasher);
+        style.tabular_nums.hash(&mut hasher);
+        for value in [
+            style.size,
+            style.line_height,
+            style.letter_spacing,
+            style.color.r,
+            style.color.g,
+            style.color.b,
+            style.color.a,
+            max_width.unwrap_or(-1.0),
+            stroke_width,
+            stroke.r,
+            stroke.g,
+            stroke.b,
+            stroke.a,
+        ] {
+            value.to_bits().hash(&mut hasher);
+        }
+        // Zero-sized, which no picture is: the two kinds cannot collide.
+        let key = PictureKey {
+            content: hasher.finish(),
+            width: 0,
+            height: 0,
+        };
+        let (image, offset) = match self.pictures.get_mut(&key) {
+            Some(cached) => {
+                cached.last_used = self.generation;
+                (cached.image, cached.offset)
+            }
+            None => {
+                let Some(outlined) =
+                    self.text
+                        .rasterise_outlined(spans, style, max_width, stroke_width, stroke)
+                else {
+                    return size;
+                };
+                let Ok(image) = self.images.add_premultiplied_rgba8_vec(
+                    outlined.width,
+                    outlined.height,
+                    outlined.pixels,
+                ) else {
+                    return size;
+                };
+                self.pictures.insert(
+                    key,
+                    CachedPicture {
+                        image,
+                        offset: outlined.offset,
+                        last_used: self.generation,
+                    },
+                );
+                (image, outlined.offset)
+            }
+        };
+        self.list.draw_image(
+            image,
+            Rect::new(
+                origin.x.round() + offset.x,
+                origin.y.round() + offset.y,
+                image.width() as f32,
+                image.height() as f32,
+            ),
+        );
+        size
+    }
+
+    /// Bytes of pixel data held for rasterised pictures and outlined
+    /// texts. They are part of [`images`](Self::images) too.
+    pub fn picture_cache_bytes(&self) -> usize {
+        self.pictures
+            .values()
+            .map(|cached| picture_bytes(cached.image))
+            .sum()
+    }
+
+    /// Number of rasterised pictures and outlined texts held.
+    pub fn picture_cache_len(&self) -> usize {
+        self.pictures.len()
+    }
+
+    /// Drops cached pictures that have not been drawn for a while, and,
+    /// when the cache is over its budget, everything the frame that just
+    /// ended did not draw, least recently drawn first.
+    fn evict_pictures(&mut self) {
+        if self.pictures.is_empty() {
+            return;
+        }
+        // What the frame that just ended drew is marked with `now`.
+        let now = self.generation;
+        let images = &mut self.images;
+        self.pictures.retain(|_, cached| {
+            let keep = now - cached.last_used <= PICTURE_IDLE_FRAMES;
+            if !keep {
+                images.remove(cached.image);
+            }
+            keep
+        });
+
+        let mut bytes = self.picture_cache_bytes();
+        if bytes <= PICTURE_CACHE_BYTES {
+            return;
+        }
+        let mut idle: Vec<(u64, PictureKey)> = self
+            .pictures
+            .iter()
+            .filter(|(_, cached)| cached.last_used < now)
+            .map(|(key, cached)| (cached.last_used, *key))
+            .collect();
+        idle.sort_unstable();
+        for (_, key) in idle {
+            if bytes <= PICTURE_CACHE_BYTES {
+                break;
+            }
+            if let Some(cached) = self.pictures.remove(&key) {
+                bytes -= picture_bytes(cached.image);
+                self.images.remove(cached.image);
+            }
+        }
+    }
+
     /// True if a font of the family called `name` has been added.
     pub fn has_font_family(&self, name: &str) -> bool {
         self.text.has_family(name)
@@ -416,6 +700,10 @@ impl Frame {
     }
 }
 
+fn picture_bytes(image: Image) -> usize {
+    image.width() as usize * image.height() as usize * 4
+}
+
 impl Default for Frame {
     fn default() -> Self {
         Self::new()
@@ -426,9 +714,30 @@ impl Default for Frame {
 pub struct Setup<'a> {
     text: &'a mut TextContext,
     images: &'a mut ImageStore,
+    host: &'a HostState,
 }
 
 impl Setup<'_> {
+    /// An identifier for this installation of the app: 32 lower-case
+    /// hexadecimal digits (128 bits). The host generates it once, with the
+    /// platform's secure random source, and keeps it in the app's private
+    /// storage, so it is the same on every launch and gone when the app is
+    /// uninstalled or its data cleared. It identifies neither the device
+    /// nor the user. Without a host (tests, screenshot tools) it is 32
+    /// zeros, unless the test supplied one
+    /// ([`Frame::for_app_with_host`]).
+    pub fn install_id(&self) -> &str {
+        self.host.install_id()
+    }
+
+    /// The value stored under `key` on an earlier run (see
+    /// [`ServiceRequest::Store`](morningstar_core::ServiceRequest::Store)),
+    /// as it was when the app started. This is how an app knows something
+    /// before its first frame without waiting for an answer.
+    pub fn stored(&self, key: &str) -> Option<&str> {
+        self.host.stored(key)
+    }
+
     /// Registers a TrueType/OpenType font from its file contents, typically
     /// `include_bytes!`. All text is drawn with these fonts: the first one
     /// that has a character wins, so add the primary font first and fonts
@@ -515,5 +824,39 @@ pub trait App: Send + 'static {
     /// frame always follows. The default ignores it.
     fn text_input(&mut self, event: &TextInputEvent) {
         let _ = event;
+    }
+
+    /// The system's back gesture or key (Android's Back; on iOS whatever
+    /// the host maps to it). Return `true` if the app handled it, for
+    /// example by going to its previous screen: a frame then follows.
+    /// Return `false` to let the system do what it does when an app has
+    /// nothing to go back to, which on Android is leaving the app. The
+    /// default handles nothing.
+    fn back(&mut self) -> bool {
+        false
+    }
+
+    /// Moves the requests the app wants to make of the platform (an HTTP
+    /// request, a recording, a stored value; see
+    /// [`ServiceRequest`](morningstar_core::ServiceRequest)) into `out`,
+    /// each with an id of the app's choosing that is not zero and not
+    /// reused. Called after setup and after every other call into the app.
+    /// What is handed over is in the host's hands: each request that
+    /// [expects a result](morningstar_core::ServiceRequest::expects_result)
+    /// is answered exactly once through
+    /// [`service_result`](Self::service_result). The default asks for
+    /// nothing.
+    fn service_requests(&mut self, out: &mut Vec<ServiceCall>) {
+        let _ = out;
+    }
+
+    /// The platform's answer to the request the app gave `id`. Called
+    /// between frames, on the thread everything else is called on. Return
+    /// `true` if the app was waiting for it: a frame then follows. An
+    /// answer the app is not waiting for (it gave up on the request) must
+    /// be ignored and `false` returned, which is what the default does.
+    fn service_result(&mut self, id: ServiceId, result: ServiceResult) -> bool {
+        let _ = (id, result);
+        false
     }
 }

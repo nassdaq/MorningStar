@@ -286,6 +286,37 @@ impl ImageStore {
         Ok(Image { id, width, height })
     }
 
+    /// Registers an image whose pixels are already in the form the store
+    /// keeps them in (see [`ImagePixels::pixels`]): `width * height * 4`
+    /// bytes of RGBA, sRGB-encoded colour premultiplied by alpha in linear
+    /// light. [`srgb_encode`] produces such bytes from linear values. For
+    /// pictures composited on the CPU, which would lose precision going
+    /// through straight alpha and back.
+    ///
+    /// Unlike [`add_rgba8`](Self::add_rgba8) the image is not scaled down:
+    /// a side longer than [`MAX_IMAGE_DIMENSION`] is refused with
+    /// [`ImageError::TooLarge`].
+    pub fn add_premultiplied_rgba8_vec(
+        &mut self,
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    ) -> Result<Image, ImageError> {
+        check(width, height, pixels.len())?;
+        if width.max(height) > MAX_IMAGE_DIMENSION {
+            return Err(ImageError::TooLarge { width, height });
+        }
+        let id = ImageId(next());
+        self.images.push(Stored {
+            id,
+            width,
+            height,
+            pixels,
+        });
+        self.generation = next();
+        Ok(Image { id, width, height })
+    }
+
     /// Releases an image and its pixels. Returns false if it was not
     /// registered here (for example, already removed). A renderer frees the
     /// image's texture the next time it renders with this store.
@@ -404,6 +435,13 @@ fn encode(tables: &Tables, linear: f32) -> u8 {
         byte -= 1;
     }
     byte as u8
+}
+
+/// The sRGB byte that encodes a linear value in `0..=1`, as stored images
+/// hold their colour channels (see [`ImagePixels::pixels`]). Out-of-range
+/// values clamp; NaN encodes as 0.
+pub fn srgb_encode(linear: f32) -> u8 {
+    encode(tables(), linear)
 }
 
 /// Converts straight-alpha sRGB pixels to premultiplied in place: each
@@ -606,6 +644,38 @@ impl ImageFit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn premultiplied_pixels_are_stored_as_given() {
+        let mut store = ImageStore::new();
+        let pixels = vec![srgb_encode(0.5), 0, 0, 128, 0, 0, 0, 0];
+        let image = store
+            .add_premultiplied_rgba8_vec(2, 1, pixels.clone())
+            .unwrap();
+        assert_eq!((image.width(), image.height()), (2, 1));
+        assert_eq!(store.view().get(image.id()).unwrap().pixels, &pixels[..]);
+        // Half in linear light is byte 188 in sRGB.
+        assert_eq!(pixels[0], 188);
+        assert_eq!((srgb_encode(0.0), srgb_encode(1.0)), (0, 255));
+        assert_eq!((srgb_encode(-1.0), srgb_encode(7.0)), (0, 255));
+        assert_eq!(srgb_encode(f32::NAN), 0);
+
+        assert_eq!(
+            store.add_premultiplied_rgba8_vec(1, 1, vec![0; 3]),
+            Err(ImageError::WrongLength {
+                expected: 4,
+                actual: 3
+            })
+        );
+        let side = MAX_IMAGE_DIMENSION + 1;
+        assert_eq!(
+            store.add_premultiplied_rgba8_vec(side, 1, vec![0; side as usize * 4]),
+            Err(ImageError::TooLarge {
+                width: side,
+                height: 1
+            })
+        );
+    }
 
     const RED: [u8; 4] = [255, 0, 0, 255];
 

@@ -1,4 +1,4 @@
-use crate::{Color, Image, ImageFit, Point, Rect};
+use crate::{Color, Image, ImageFit, Point, Rect, Transform};
 
 /// A stroke along the inside of a rectangle's edge.
 ///
@@ -288,6 +288,12 @@ pub enum DrawOp {
     PushClip { rect: Rect, corner_radius: f32 },
     /// Ends the innermost clip.
     PopClip,
+    /// Draws every following operation, of any kind, through `transform`
+    /// until the matching [`PopTransform`](Self::PopTransform). See
+    /// [`DisplayList::push_transform`].
+    PushTransform { transform: Transform },
+    /// Ends the innermost transform.
+    PopTransform,
 }
 
 /// Which rows of a glyph atlas changed recently, so a renderer that already
@@ -659,6 +665,50 @@ impl DisplayList {
     pub fn pop_clip(&mut self) {
         self.ops.push(DrawOp::PopClip);
     }
+
+    /// Draws everything until the matching
+    /// [`pop_transform`](Self::pop_transform) through `transform`: rotated,
+    /// slanted, scaled or moved.
+    ///
+    /// The transform is in the same physical-pixel space as rectangles: an
+    /// operation's geometry is given as if there were no transform, and
+    /// each of its points then goes through it. To turn something about its
+    /// own centre use [`Transform::about`]. Every kind of operation is
+    /// transformed whole: rounded corners, borders, dashes, gradients,
+    /// shadows, glyphs and images turn with their rectangle and keep their
+    /// anti-aliased edges.
+    ///
+    /// Transforms nest: one pushed inside another applies first. Pushes and
+    /// pops of transforms and clips must be properly nested with each
+    /// other.
+    ///
+    /// # Clips
+    ///
+    /// * A transform inside a clip: the clip stays where it is on screen
+    ///   and cuts the transformed content. Exact, for square and rounded
+    ///   clips.
+    /// * A clip pushed inside a transform is transformed with the content
+    ///   (a rotated card that clips its children). One such clip is exact
+    ///   at a time, the innermost, whether square or rounded; square ones
+    ///   directly inside one another intersect exactly. It takes the place
+    ///   of the one exact rounded clip (see
+    ///   [`push_rounded_clip`](Self::push_rounded_clip)): an enclosing
+    ///   rounded clip, a transformed clip that has another nested in it,
+    ///   and a transformed clip with a further transform pushed inside it,
+    ///   each act as their bounding rectangle on screen meanwhile.
+    ///
+    /// A transform that is not finite, or that flattens everything onto a
+    /// line (a zero scale), draws nothing until it is popped.
+    pub fn push_transform(&mut self, transform: Transform) {
+        self.ops.push(DrawOp::PushTransform { transform });
+    }
+
+    /// Ends the transform started by the most recent unmatched
+    /// [`push_transform`](Self::push_transform). Without one, this does
+    /// nothing. Transforms still open at the end of the list end with it.
+    pub fn pop_transform(&mut self) {
+        self.ops.push(DrawOp::PopTransform);
+    }
 }
 
 #[cfg(test)]
@@ -905,6 +955,18 @@ mod tests {
             matches!(list.ops()[1], DrawOp::PushClip { corner_radius, .. } if corner_radius == 2.0)
         );
         assert_eq!(list.ops()[3], DrawOp::PopClip);
+    }
+
+    #[test]
+    fn transforms_are_recorded_as_given() {
+        let mut list = DisplayList::new();
+        let turn = Transform::rotate(-8.0).about(Point::new(4.0, 4.0));
+        list.push_transform(turn);
+        list.fill_rect(Rect::new(0.0, 0.0, 8.0, 8.0), Color::WHITE);
+        list.pop_transform();
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.ops()[0], DrawOp::PushTransform { transform: turn });
+        assert_eq!(list.ops()[2], DrawOp::PopTransform);
     }
 
     #[test]

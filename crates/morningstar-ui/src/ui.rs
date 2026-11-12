@@ -6,16 +6,18 @@ use std::hash::Hash;
 use std::time::Duration;
 
 use morningstar_core::{
-    Border, Dash, ImeAction, LinearGradient, Point, PointerEvent, PointerPhase, Rect, Shadow, Size,
-    TextInputEvent, TextInputRequest, TextInputTraits,
+    AudioError, Border, Dash, HttpError, HttpResponse, ImeAction, LinearGradient, Point,
+    PointerEvent, PointerPhase, Recording, Rect, ServiceCall, ServiceId, ServiceRequest,
+    ServiceResult, Shadow, Size, TextInputEvent, TextInputRequest, TextInputTraits, Transform,
 };
 use morningstar_layout::{Edges, LayoutTree, NodeId, Sizing};
 use morningstar_runtime::{App, Frame, FrameInfo, Setup, TextAlign, TextSpan, TextStyle};
 
 use crate::edit::{self, EditConfig, EditState};
+use crate::effects::{EffectState, Effects};
 use crate::element::{
     Axis, BoxNode, DashKind, Element, Fill, IconNode, ImageNode, InputHandler, InputNode, Kind,
-    LineHeight, SpacerKind, TextNode, key_hash,
+    LineHeight, PictureSource, SpacerKind, TextNode, key_hash,
 };
 use crate::theme::Theme;
 
@@ -41,6 +43,9 @@ const MAX_FONT_PIXELS: f32 = 2048.0;
 const MAX_TEXT_ORIGIN: f32 = 1.0e7;
 /// The path of the root element.
 const ROOT_PATH: u64 = 0;
+/// Stands in for "not clipped" inside a transformed subtree, whose clips
+/// from outside are not rectangles in its own space.
+const EVERYWHERE: Rect = Rect::new(-1.0e7, -1.0e7, 2.0e7, 2.0e7);
 /// How long a caret is shown, and then hidden, while it blinks.
 const CARET_BLINK: Duration = Duration::from_millis(500);
 /// Width of a caret, dp.
@@ -127,6 +132,96 @@ pub trait Application: Send + 'static {
     /// Changes the state in response to a message. Messages arrive in the
     /// order the taps completed, one at a time, never during `view`.
     fn update(&mut self, message: Self::Message);
+
+    /// The system back gesture or key. Return `true` if the app handled it
+    /// (for example, went to the previous screen), `false` to let the
+    /// system leave the app. A frame follows a `true`, so the change shows
+    /// without asking. The default handles nothing, so Back leaves the app.
+    ///
+    /// Back first closes an open keyboard; that never reaches here.
+    ///
+    /// ```ignore
+    /// fn back(&mut self) -> bool {
+    ///     self.stack.pop().is_some() // false on the first screen
+    /// }
+    /// ```
+    fn back(&mut self) -> bool {
+        false
+    }
+
+    /// A repeating timer. While this returns `Some((interval, message))`,
+    /// the runtime delivers `message` to [`update`](Self::update) every
+    /// `interval` (not faster than once per frame), and keeps frames
+    /// coming only as needed for that: a one-second tick costs one frame a
+    /// second. Returning `None` stops it, and the app goes fully idle
+    /// again.
+    ///
+    /// It is asked at the start of every frame, and again after a tick was
+    /// delivered, so it follows the state: a countdown returns `Some`
+    /// while it is running and `None` once it has reached zero. The first
+    /// message arrives one interval after the first frame that saw `Some`;
+    /// a different interval starts the wait again.
+    ///
+    /// Time here is the frame's `elapsed`: foreground time, which stops
+    /// while the app is in the background. A tick is never delivered more
+    /// than once per frame, and ticks that were missed (the app was
+    /// hidden, or a frame took longer than the interval) are dropped, not
+    /// delivered in a burst: after a long gap one message arrives and the
+    /// next follows a full interval later. So count ticks only for what
+    /// may pause with the app; for a deadline on the wall clock, keep a
+    /// `std::time::Instant` in the state and read it in `update`.
+    ///
+    /// ```ignore
+    /// fn tick(&self) -> Option<(Duration, Message)> {
+    ///     (self.seconds_left > 0).then_some((Duration::from_secs(1), Message::Second))
+    /// }
+    /// ```
+    fn tick(&self) -> Option<(Duration, Self::Message)> {
+        None
+    }
+
+    /// Starts work whose result comes back later as a message: an HTTP
+    /// request, a recording, playing a sound, a value kept between
+    /// launches. See [`Effects`] for what can be asked.
+    ///
+    /// `update` cannot do any of these itself: it must return at once, and
+    /// the work belongs to the platform. So `update` only records, in the
+    /// state, that the work is wanted; the runtime then calls this, **once
+    /// after `setup` and once after every `update`** (and after
+    /// [`back`](Self::back)), and the application moves what it recorded
+    /// into `out`. Each result arrives as an ordinary message to `update`,
+    /// between frames, and a frame follows it.
+    ///
+    /// ```ignore
+    /// fn update(&mut self, message: Message) {
+    ///     match message {
+    ///         Message::Send => self.outgoing = Some(self.draft.clone()),
+    ///         Message::Replied(Ok(response)) => self.reply = response.text().map(str::to_owned),
+    ///         Message::Replied(Err(error)) => self.error = Some(error.to_string()),
+    ///     }
+    /// }
+    ///
+    /// fn effects(&mut self, out: &mut Effects<Message>) {
+    ///     if let Some(text) = self.outgoing.take() {
+    ///         out.http(HttpRequest::post(URL).json_body(text), Message::Replied);
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// The method takes `&mut self` so that it can `take()` what was
+    /// recorded; it must not change anything `view` shows. The default
+    /// starts nothing.
+    fn effects(&mut self, out: &mut Effects<Self::Message>) {
+        let _ = out;
+    }
+}
+
+/// The repeating timer of [`Application::tick`], while it runs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Tick {
+    interval: Duration,
+    /// The `FrameInfo::elapsed` at which the next message is due.
+    due: Duration,
 }
 
 /// What a touch region does.
@@ -142,12 +237,25 @@ enum RegionKind {
     Block,
 }
 
+/// The space a transformed subtree's touch regions are in.
+#[derive(Clone, Copy, Debug)]
+struct HitSpace {
+    /// From the screen to that space: undoes the transforms around it.
+    inverse: Transform,
+    /// What the clips outside the outermost transform leave visible, on
+    /// the screen.
+    clip: Rect,
+}
+
 /// A rectangle of the last frame that reacts to touch, in physical pixels,
 /// already cut down to what its clips leave visible.
 #[derive(Clone, Copy, Debug)]
 struct Region {
     id: u64,
     rect: Rect,
+    /// Set if the region is inside a transformed widget: `rect` is then in
+    /// that widget's space, not on the screen.
+    space: Option<HitSpace>,
     kind: RegionKind,
     /// The innermost scroll view containing this region.
     scroll: Option<u64>,
@@ -177,6 +285,18 @@ struct Focus {
     tap: Option<Point>,
     /// Scroll the field into view at the next frame.
     reveal: bool,
+}
+
+impl Region {
+    /// True if the screen position `point` is on the region.
+    fn contains(&self, point: Point) -> bool {
+        match self.space {
+            None => self.rect.contains(point),
+            Some(space) => {
+                space.clip.contains(point) && self.rect.contains(space.inverse.apply(point))
+            }
+        }
+    }
 }
 
 impl Focus {
@@ -319,11 +439,101 @@ pub struct Ui<A: Application> {
     scale: f32,
     last_elapsed: Option<Duration>,
     generation: u64,
+    /// The application's timer, as of the last frame.
+    tick: Option<Tick>,
+    /// Requests to the platform and the handlers waiting for answers.
+    effects: EffectState<A::Message>,
 }
 
 impl<A: Application> Ui<A> {
     /// Wraps an application.
     pub fn new(app: A) -> Self {
+        Self::with_effects(app, EffectState::new())
+    }
+
+    /// Wraps an application for a test, with nothing behind it: every
+    /// request it makes of the platform ([`Application::effects`]) is held
+    /// until the test answers it.
+    ///
+    /// * [`pending_effects`](Self::pending_effects) lists what is waiting;
+    ///   [`answer_http`](Self::answer_http),
+    ///   [`answer_recording_started`](Self::answer_recording_started),
+    ///   [`answer_recording`](Self::answer_recording) and
+    ///   [`answer_playback`](Self::answer_playback) answer the oldest
+    ///   request of their kind, and [`resolve`](Self::resolve) any request
+    ///   by id. The message is delivered at once, as [`send`](Self::send)
+    ///   delivers one.
+    /// * Stored values are kept in memory: `store` and `load` work without
+    ///   being answered ([`stored`](Self::stored),
+    ///   [`set_stored`](Self::set_stored)). What `load` read, and anything
+    ///   else that needs no answer from the test, is delivered at the
+    ///   start of the next frame, or by
+    ///   [`deliver_effects`](Self::deliver_effects).
+    /// * Playback behaves as on a device: `stop_playback`, or a second
+    ///   `play`, ends a clip that is still pending with
+    ///   [`AudioError::Interrupted`].
+    ///
+    /// ```
+    /// use morningstar_ui::prelude::*;
+    ///
+    /// #[derive(Default)]
+    /// struct Ping { wanted: bool, status: Option<u16> }
+    ///
+    /// #[derive(Clone)]
+    /// enum Message { Ping, Replied(Result<HttpResponse, HttpError>) }
+    ///
+    /// impl Application for Ping {
+    ///     type Message = Message;
+    ///     fn view(&self) -> Element<Message> { col![].into() }
+    ///     fn update(&mut self, message: Message) {
+    ///         match message {
+    ///             Message::Ping => self.wanted = true,
+    ///             Message::Replied(result) => self.status = result.ok().map(|r| r.status),
+    ///         }
+    ///     }
+    ///     fn effects(&mut self, out: &mut Effects<Message>) {
+    ///         if std::mem::take(&mut self.wanted) {
+    ///             out.http(HttpRequest::get("https://example.com/ping"), Message::Replied);
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// let mut ui = Ui::testing(Ping::default());
+    /// ui.send(Message::Ping);
+    /// assert_eq!(ui.pending_effects().len(), 1);
+    /// assert!(ui.answer_http(Ok(HttpResponse::new(204))));
+    /// assert_eq!(ui.app().status, Some(204));
+    /// ```
+    pub fn testing(app: A) -> Self {
+        Self::with_services(app, |_| None)
+    }
+
+    /// As [`testing`](Self::testing), with a stand-in for the host: `fake`
+    /// is shown every request that needs an answer (except `load`, which
+    /// is answered from memory) and returns the answer, or `None` to leave
+    /// that request pending for the test. Its answers are delivered at the
+    /// start of the next frame or by
+    /// [`deliver_effects`](Self::deliver_effects), never inside the
+    /// `update` that made the request, so the state in between ("loading")
+    /// can be looked at.
+    ///
+    /// ```ignore
+    /// let mut ui = Ui::with_services(app, |request| match request {
+    ///     ServiceRequest::Http(request) if request.url.ends_with("/turn") => {
+    ///         Some(ServiceResult::Http(Ok(HttpResponse::new(200).with_body(REPLY))))
+    ///     }
+    ///     ServiceRequest::StartRecording => Some(ServiceResult::RecordingStarted(Ok(()))),
+    ///     _ => None,
+    /// });
+    /// ```
+    pub fn with_services(
+        app: A,
+        fake: impl FnMut(&ServiceRequest) -> Option<ServiceResult> + Send + 'static,
+    ) -> Self {
+        Self::with_effects(app, EffectState::with_driver(Box::new(fake)))
+    }
+
+    fn with_effects(app: A, effects: EffectState<A::Message>) -> Self {
         Self {
             app,
             tree: LayoutTree::new(),
@@ -343,6 +553,130 @@ impl<A: Application> Ui<A> {
             scale: 1.0,
             last_elapsed: None,
             generation: 0,
+            tick: None,
+            effects,
+        }
+    }
+
+    /// The requests the application has made that are waiting for the test
+    /// to answer them, oldest first. Empty unless the `Ui` was made with
+    /// [`testing`](Self::testing) or [`with_services`](Self::with_services).
+    pub fn pending_effects(&self) -> &[ServiceCall] {
+        self.effects.held()
+    }
+
+    /// How many requests the application is still waiting for an answer
+    /// to, whoever is carrying them out.
+    pub fn effects_in_flight(&self) -> usize {
+        self.effects.waiting()
+    }
+
+    /// Answers the request with this id: the application gets its message
+    /// at once. Returns false, and does nothing, if the application is not
+    /// waiting for that id (it was answered already, or given up on).
+    /// `result` should be of the request's kind; one that is not reaches
+    /// the application as a failure.
+    pub fn resolve(&mut self, id: ServiceId, result: ServiceResult) -> bool {
+        self.deliver_result(id, result)
+    }
+
+    /// Answers the oldest pending HTTP request: "the server replies this".
+    /// Returns false if none is pending.
+    pub fn answer_http(&mut self, result: Result<HttpResponse, HttpError>) -> bool {
+        self.answer_oldest(
+            |request| matches!(request, ServiceRequest::Http(_)),
+            ServiceResult::Http(result),
+        )
+    }
+
+    /// Answers the oldest pending `start_recording`. Returns false if none
+    /// is pending.
+    pub fn answer_recording_started(&mut self, result: Result<(), AudioError>) -> bool {
+        self.answer_oldest(
+            |request| matches!(request, ServiceRequest::StartRecording),
+            ServiceResult::RecordingStarted(result),
+        )
+    }
+
+    /// Answers the oldest pending `stop_recording`: "the recording is
+    /// these bytes". Returns false if none is pending.
+    pub fn answer_recording(&mut self, result: Result<Recording, AudioError>) -> bool {
+        self.answer_oldest(
+            |request| matches!(request, ServiceRequest::StopRecording),
+            ServiceResult::Recording(result),
+        )
+    }
+
+    /// Answers the oldest pending `play`: the clip finished, or failed.
+    /// Returns false if none is pending.
+    pub fn answer_playback(&mut self, result: Result<(), AudioError>) -> bool {
+        self.answer_oldest(
+            |request| matches!(request, ServiceRequest::Play(_)),
+            ServiceResult::Played(result),
+        )
+    }
+
+    fn answer_oldest(
+        &mut self,
+        wanted: impl Fn(&ServiceRequest) -> bool,
+        result: ServiceResult,
+    ) -> bool {
+        match self.effects.oldest_held(wanted) {
+            Some(id) => self.deliver_result(id, result),
+            None => false,
+        }
+    }
+
+    /// Delivers every answer that is known and has not reached the
+    /// application yet, and those that become known as a result, until
+    /// none is left: what a `load` read, what the stand-in host of
+    /// [`with_services`](Self::with_services) answered, and, when there is
+    /// neither a host nor a test driver, the `Unsupported` failure of each
+    /// request. A frame does one round of this at its start; tests that
+    /// build no frames call it. Returns how many messages were delivered.
+    pub fn deliver_effects(&mut self) -> usize {
+        let mut delivered = 0;
+        // Bounded, so that an application answering every answer with a
+        // new request cannot hang a test.
+        while delivered < 10_000 {
+            self.effects.fail_unattached();
+            let Some((id, result)) = self.effects.next_ready() else {
+                break;
+            };
+            delivered += usize::from(self.deliver_result(id, result));
+        }
+        delivered
+    }
+
+    /// The value the application has stored under `key`, in the memory of
+    /// the test driver. `None` without a driver.
+    pub fn stored(&self, key: &str) -> Option<&str> {
+        self.effects.stored(key)
+    }
+
+    /// Puts a value into the test driver's memory, for the application to
+    /// `load`. Returns false, and does nothing, without a driver. What
+    /// `Setup::stored` sees at setup is separate: that comes from
+    /// `Frame::for_app_with_host`.
+    pub fn set_stored(&mut self, key: impl Into<String>, value: impl Into<String>) -> bool {
+        self.effects.set_stored(key.into(), value.into())
+    }
+
+    /// Asks the application what it wants started and takes it in.
+    fn collect_effects(&mut self) {
+        self.app.effects(self.effects.scratch());
+        self.effects.collect();
+    }
+
+    /// Hands the application the message an answer becomes, if it is
+    /// still waiting for that answer.
+    fn deliver_result(&mut self, id: ServiceId, result: ServiceResult) -> bool {
+        match self.effects.message_for(id, result) {
+            Some(message) => {
+                self.deliver(message);
+                true
+            }
+            None => false,
         }
     }
 
@@ -434,8 +768,60 @@ impl<A: Application> Ui<A> {
             .collect()
     }
 
+    /// Delivers the system back gesture or key to the application
+    /// ([`Application::back`]) and returns its answer. The engine calls
+    /// this for the host and draws a frame after a `true`; tests call it
+    /// directly and build the next frame themselves. An interaction in
+    /// progress is abandoned if the application handled it.
+    pub fn back(&mut self) -> bool {
+        let handled = self.app.back();
+        self.collect_effects();
+        if handled {
+            self.gesture = None;
+            // As after a message: the screen may have been replaced.
+            self.regions.clear();
+            self.messages.clear();
+        }
+        handled
+    }
+
+    /// Runs the application's timer for a frame at `elapsed`: delivers its
+    /// message if one is due, at most once, and leaves in `self.tick` when
+    /// the next is due, or `None` if the application wants no timer.
+    fn run_tick(&mut self, elapsed: Duration) {
+        let Some((interval, message)) = self.app.tick() else {
+            self.tick = None;
+            return;
+        };
+        let due = match self.tick {
+            Some(tick) if tick.interval == interval => tick.due,
+            // Just started, or its pace changed: a full interval from now.
+            _ => elapsed.saturating_add(interval),
+        };
+        if elapsed < due {
+            self.tick = Some(Tick { interval, due });
+            return;
+        }
+        self.app.update(message);
+        self.collect_effects();
+        // The update may have stopped the timer or changed its pace.
+        self.tick = self.app.tick().map(|(interval, _)| {
+            // Keep the rhythm (no drift from frames arriving a little
+            // late) unless a whole interval or more was missed; then what
+            // was missed is dropped and the rhythm starts again from now.
+            let on_beat = due.saturating_add(interval);
+            let due = if on_beat > elapsed {
+                on_beat
+            } else {
+                elapsed.saturating_add(interval)
+            };
+            Tick { interval, due }
+        });
+    }
+
     fn deliver(&mut self, message: A::Message) {
         self.app.update(message);
+        self.collect_effects();
         // The regions describe a screen the update may have replaced. Until
         // the next frame has been laid out there is nothing to hit.
         self.regions.clear();
@@ -445,7 +831,7 @@ impl<A: Application> Ui<A> {
     /// The press target and scroll view under `point`.
     fn hit(&self, point: Point) -> (Option<u64>, Option<u64>) {
         for region in self.regions.iter().rev() {
-            if !region.rect.contains(point) {
+            if !region.contains(point) {
                 continue;
             }
             return match region.kind {
@@ -462,7 +848,7 @@ impl<A: Application> Ui<A> {
     fn target_at(&self, id: u64, point: Point) -> Option<(RegionKind, Option<u64>)> {
         self.regions.iter().find_map(|region| match region.kind {
             RegionKind::Press(_) | RegionKind::Focus(_)
-                if region.id == id && region.rect.contains(point) =>
+                if region.id == id && region.contains(point) =>
             {
                 Some((region.kind, region.field))
             }
@@ -712,9 +1098,38 @@ impl<A: Application> Ui<A> {
 impl<A: Application> App for Ui<A> {
     fn setup(&mut self, setup: &mut Setup<'_>) {
         self.app.setup(setup);
+        self.collect_effects();
+    }
+
+    fn service_requests(&mut self, out: &mut Vec<ServiceCall>) {
+        self.effects.take_for_host(out);
+    }
+
+    fn service_result(&mut self, id: ServiceId, result: ServiceResult) -> bool {
+        self.deliver_result(id, result)
     }
 
     fn frame(&mut self, info: &FrameInfo, frame: &mut Frame) {
+        // Answers that did not come from a host (there is none, or a test
+        // driver stands in for it) are delivered here, one round per
+        // frame. With a host this finds nothing: its answers arrive
+        // between frames.
+        self.effects.fail_unattached();
+        for _ in 0..self.effects.ready_len() {
+            if let Some((id, result)) = self.effects.next_ready() {
+                self.deliver_result(id, result);
+            }
+        }
+        if self.effects.has_ready() {
+            // Those answers led to requests that are answered already.
+            frame.request_redraw();
+        }
+        // The timer next, so that this frame shows what its message did.
+        self.run_tick(info.elapsed);
+        if let Some(tick) = self.tick {
+            // One frame when the next message is due and none before it.
+            frame.request_redraw_after(tick.due.saturating_sub(info.elapsed));
+        }
         let theme = self.app.theme();
         let root = self.app.view();
         let scale = info.scale;
@@ -889,6 +1304,7 @@ impl<A: Application> App for Ui<A> {
                 cull: None,
                 scroll: None,
                 field: None,
+                space: None,
             },
         );
         if painter.animating {
@@ -944,6 +1360,10 @@ impl<A: Application> App for Ui<A> {
 
     fn text_input(&mut self, event: &TextInputEvent) {
         self.text_event(event);
+    }
+
+    fn back(&mut self) -> bool {
+        Ui::back(self)
     }
 }
 
@@ -1033,6 +1453,8 @@ fn text_style(text: &TextNode, theme: &Theme, scale: f32) -> TextStyle {
         align: text.align,
         family: text.family.unwrap_or(theme.font(text.role)),
         letter_spacing: text.letter_spacing * scale,
+        italic: text.italic,
+        tabular_nums: text.tabular_nums,
     }
 }
 
@@ -1060,6 +1482,7 @@ fn text_spans<'a>(text: &'a TextNode, theme: &Theme) -> Vec<TextSpan<'a>> {
             weight: span.weight,
             color: span.color.map(|color| color.resolve(theme)),
             family: span.family,
+            italic: span.italic.then_some(true),
         })
         .collect()
 }
@@ -1302,6 +1725,9 @@ struct Context {
     scroll: Option<u64>,
     /// The text input whose frame encloses this element.
     field: Option<u64>,
+    /// Inside a transformed widget: how to get from the screen to the
+    /// space `clip` and the rectangles painted here are in.
+    space: Option<HitSpace>,
 }
 
 /// Walks the element tree again, in the same order as [`Lowering`], and
@@ -1359,7 +1785,7 @@ impl<M: Clone> Painter<'_, M> {
         )
     }
 
-    fn paint(&mut self, element: &Element<M>, context: Context) {
+    fn paint(&mut self, element: &Element<M>, mut context: Context) {
         let Some(record) = self.records.get(self.node_cursor).copied() else {
             return;
         };
@@ -1368,9 +1794,54 @@ impl<M: Clone> Painter<'_, M> {
         let Some(node) = record.node else {
             return;
         };
+
+        // The element's transform, with its lengths in pixels. One that
+        // only moves is the same as a scroll translation: whole pixels,
+        // no display-list transform, and clipping, culling and hit-testing
+        // carry on as they are.
+        let mut transform = element
+            .transform
+            .map(|transform| transform.with_translation_scaled(self.scale))
+            .filter(|transform| !transform.is_identity());
+        if let Some(moved) = transform.filter(Transform::is_translation) {
+            if moved.is_finite() {
+                context.dx += moved.tx.round();
+                context.dy += moved.ty.round();
+            }
+            transform = None;
+        }
+
         let rect = self.pixels(self.tree.rect(node), &context);
         if element.key.is_some() {
             self.keyed.push((context.id, rect));
+        }
+
+        if let Some(transform) = transform {
+            // About the element's centre, as CSS does by default.
+            let transform = transform.about(rect.center());
+            let Some(inverse) = transform.inverse() else {
+                // Flattened to nothing (a zero scale): the subtree is
+                // neither seen nor touched.
+                self.node_cursor = record.end_node as usize;
+                self.text_cursor = record.end_text as usize;
+                return;
+            };
+            self.frame.list.push_transform(transform);
+            // Clips and the cull rectangle from outside are not rectangles
+            // in the turned space. The display list still clips what is
+            // drawn; here they are kept only for hit-testing, on screen.
+            context.space = Some(match context.space {
+                None => HitSpace {
+                    inverse,
+                    clip: context.clip,
+                },
+                Some(outer) => HitSpace {
+                    inverse: outer.inverse.then(inverse),
+                    clip: outer.clip,
+                },
+            });
+            context.clip = EVERYWHERE;
+            context.cull = None;
         }
 
         match &element.kind {
@@ -1379,7 +1850,7 @@ impl<M: Clone> Painter<'_, M> {
                 self.text_cursor += 1;
                 self.paint_text(text, index, rect, &context);
             }
-            Kind::Image(image) => self.paint_image(image, rect),
+            Kind::Image(image) => self.paint_image(image, rect, &context),
             Kind::Icon(icon) => self.paint_icon(icon, rect, &context),
             Kind::Input(input) => {
                 let index = self.text_cursor;
@@ -1387,6 +1858,10 @@ impl<M: Clone> Painter<'_, M> {
                 self.paint_input(input, index, rect, &context);
             }
             Kind::Box(node_data) => self.paint_box(node_data, node, slot, rect, context),
+        }
+
+        if transform.is_some() {
+            self.frame.list.pop_transform();
         }
     }
 
@@ -1403,6 +1878,7 @@ impl<M: Clone> Painter<'_, M> {
                 kind: RegionKind::Focus(context.id),
                 scroll: context.scroll,
                 field: Some(context.id),
+                space: context.space,
             });
         }
         let Some(meta) = self.text_meta.get(index).copied() else {
@@ -1437,6 +1913,9 @@ impl<M: Clone> Painter<'_, M> {
         let caret_width = (CARET_WIDTH * self.scale).round().max(1.0);
 
         if let Some(tap) = focus.tap.take() {
+            // In a transformed widget the finger is where the turned text
+            // is drawn; bring it back to the space the text is laid out in.
+            let tap = context.space.map_or(tap, |space| space.inverse.apply(tap));
             let local = Point::new(tap.x - origin_x + focus.scroll_x, tap.y - origin_y);
             let at = self
                 .frame
@@ -1560,13 +2039,57 @@ impl<M: Clone> Painter<'_, M> {
         if cut {
             self.frame.list.push_clip(rect);
         }
-        if text.spans.is_empty() {
-            self.frame
-                .draw_text(&text.content, &style, origin, meta.constraint);
+        if text.shadow.is_none() && text.outline.is_none() {
+            // The common case, with no list of spans to build for a text
+            // in one style.
+            if text.spans.is_empty() {
+                self.frame
+                    .draw_text(&text.content, &style, origin, meta.constraint);
+            } else {
+                let spans = text_spans(text, self.theme);
+                self.frame
+                    .draw_text_spans(&spans, &style, origin, meta.constraint);
+            }
         } else {
-            let spans = text_spans(text, self.theme);
-            self.frame
-                .draw_text_spans(&spans, &style, origin, meta.constraint);
+            let mut spans = if text.spans.is_empty() {
+                vec![TextSpan::new(&text.content)]
+            } else {
+                text_spans(text, self.theme)
+            };
+            if let Some((x, y, color)) = text.shadow {
+                // The same glyphs once more, behind, all in one colour.
+                let shadow = TextStyle {
+                    color: color.resolve(self.theme),
+                    ..style
+                };
+                let offset = Point::new(
+                    origin.x + (x * self.scale).round(),
+                    origin.y + (y * self.scale).round(),
+                );
+                let colors: Vec<_> = spans.iter().map(|span| span.color).collect();
+                spans.iter_mut().for_each(|span| span.color = None);
+                self.frame
+                    .draw_text_spans(&spans, &shadow, offset, meta.constraint);
+                for (span, color) in spans.iter_mut().zip(colors) {
+                    span.color = color;
+                }
+            }
+            match text.outline {
+                Some((width, color)) => {
+                    self.frame.draw_text_outlined(
+                        &spans,
+                        &style,
+                        origin,
+                        meta.constraint,
+                        width * self.scale,
+                        color.resolve(self.theme),
+                    );
+                }
+                None => {
+                    self.frame
+                        .draw_text_spans(&spans, &style, origin, meta.constraint);
+                }
+            }
         }
         if cut {
             self.frame.list.pop_clip();
@@ -1586,14 +2109,22 @@ impl<M: Clone> Painter<'_, M> {
         );
     }
 
-    fn paint_image(&mut self, data: &ImageNode, rect: Rect) {
-        self.frame.list.draw_image_fit(
-            data.image,
-            rect,
-            data.fit,
-            data.radius * self.scale,
-            data.tint.resolve(self.theme),
-        );
+    fn paint_image(&mut self, data: &ImageNode, rect: Rect, context: &Context) {
+        let radius = data.radius * self.scale;
+        let tint = data.tint.resolve(self.theme);
+        match data.source {
+            PictureSource::Image(image) => {
+                self.frame
+                    .list
+                    .draw_image_fit(image, rect, data.fit, radius, tint);
+            }
+            PictureSource::Vector(picture) => {
+                // Pictures scrolled out of view cost no rasterisation.
+                if !intersect(rect, context.clip).is_empty() {
+                    self.frame.draw_picture(&picture, rect, radius, tint);
+                }
+            }
+        }
     }
 
     fn paint_box(
@@ -1721,6 +2252,7 @@ impl<M: Clone> Painter<'_, M> {
                     kind: RegionKind::Press(self.messages.len() - 1),
                     scroll: context.scroll,
                     field: context.field,
+                    space: context.space,
                 });
             } else if let Some(input) = field {
                 self.regions.push(Region {
@@ -1729,6 +2261,7 @@ impl<M: Clone> Painter<'_, M> {
                     kind: RegionKind::Focus(input),
                     scroll: context.scroll,
                     field,
+                    space: context.space,
                 });
             } else if data.block {
                 self.regions.push(Region {
@@ -1737,6 +2270,7 @@ impl<M: Clone> Painter<'_, M> {
                     kind: RegionKind::Block,
                     scroll: context.scroll,
                     field: context.field,
+                    space: context.space,
                 });
             }
         }
@@ -1755,6 +2289,7 @@ impl<M: Clone> Painter<'_, M> {
                     kind: RegionKind::Scroll,
                     scroll: context.scroll,
                     field: context.field,
+                    space: context.space,
                 });
             }
         }
