@@ -1,0 +1,23 @@
+[package]
+name = "services-check"
+description = "A device smoke test for platform services: one button per service, each showing its result."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The name under the home-screen icon (ADR 0020). No icon of its own: the
+# built-in Morningstar one.
+[package.metadata.morningstar]
+name = "Services check"
+
+[lib]
+# cdylib for Android; tools/build-ios.sh requests the static library itself.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+morningstar.workspace = true
+
+[dev-dependencies]
+morningstar-devtools.workspace = true
