@@ -82,6 +82,10 @@
 //! | A bold or coloured phrase inside a sentence | [`Text::rich`] with [`span`]s |
 //! | Font family, letter spacing, capitals | [`Text::family`] (defaults in [`Fonts`]), [`Text::letter_spacing`], [`Text::uppercase`] |
 //! | Dashed outline | [`Container::border_dashed`] |
+//! | Chips or tags that wrap (`flex-wrap`) | [`Container::wrap`] with [`Container::line_gap`] ([`Wrap`]) |
+//! | A layout that depends on the screen | [`Application::view_in`] and its [`Viewport`] |
+//! | A change that should be seen happening | [`Container::animate`]; appearing and disappearing: [`Container::transition`] |
+//! | Screens and Back | [`Navigator`] |
 //!
 //! # Layout rules worth knowing
 //!
@@ -94,6 +98,9 @@
 //! * In a row, **the text that should wrap or give way must
 //!   `fill_width()`**. Two long hugging texts in one row overflow.
 //! * A [`ScrollView`] needs a height from its parents (it fills by default).
+//! * A row **wraps** only if told to ([`Container::wrap`]); then a child
+//!   that does not fit starts the next line, and the row is as tall as its
+//!   lines.
 //! * Children are placed at the **top-left** unless the parent says
 //!   otherwise (`.center()`, `.cross_align(..)`, `.content_align(..)`).
 //! * There is no right-to-left mode: `Start` is left. Arabic text is shaped
@@ -103,11 +110,13 @@
 //!
 //! # State and identity
 //!
-//! The tree returned by `view` is thrown away after each frame. Three
+//! The tree returned by `view` is thrown away after each frame. Four
 //! pieces of widget state outlive it: **which pressable a finger is
-//! holding**, **each scroll view's position and motion**, and **which
-//! [`TextInput`] has focus, with its caret**. They are kept in [`Ui`], keyed
-//! by the widget's identity:
+//! holding**, **each scroll view's position and motion** (a
+//! [`TextInput`] that scrolls inside itself counts as one), **which
+//! [`TextInput`] has focus, with its caret**, and **what an animated
+//! widget is on its way from**. They are kept in [`Ui`], keyed by the
+//! widget's identity:
 //!
 //! 1. A widget's identity is its **position in the tree**: the chain of
 //!    child indices from the root.
@@ -127,6 +136,62 @@
 //! something appears or disappears above it. An input that leaves the tree
 //! loses focus, and the keyboard goes away.
 //!
+//! # The screen: size, insets, keyboard
+//!
+//! An application that needs to know what it is drawn on implements
+//! [`Application::view_in`] instead of `view`. Its [`Viewport`] gives the
+//! surface's size, the safe-area insets and the keyboard's height in dp,
+//! says which field has focus, and measures text
+//! ([`Viewport::measure`], [`Viewport::measure_wrapped`],
+//! [`Viewport::line_count`]) exactly as layout will, so a view can choose
+//! between two layouts instead of guessing from a character count. It
+//! costs nothing if `view` is all an application implements.
+//!
+//! # Scrolling
+//!
+//! A [`ScrollView`]'s position belongs to the widget, by identity. The
+//! rule: **while a scroll view with the same identity is in consecutive
+//! frames, its position is kept**, whatever `view` rebuilds around or
+//! inside it. Content that grows leaves the position where it is (there
+//! is then further to scroll); content that shrinks under it brings it
+//! back to the new end. So give a scroll view whose content changes an
+//! `.id(..)`, and keep that id.
+//!
+//! The application moves a scroll view by asking, from
+//! [`Application::effects`]: [`Effects::scroll`] with a [`ScrollTo`] (the
+//! top, the end, an offset, or as far as brings a widget into view; at
+//! once or gliding). The request is carried out in the next frame, after
+//! its layout, so "the end" is the end of the content that frame has.
+//!
+//! [`Ui::rect_of`] is where a widget was laid out, also when it is
+//! scrolled out of sight; [`Ui::visible_rect_of`] is the part that shows.
+//!
+//! # Animation
+//!
+//! `view` always describes the screen as it should be. A widget shows a
+//! change gradually only if it asks to:
+//!
+//! * [`Container::animate`]`(duration, easing)`: when a later `view` gives
+//!   the same widget another opacity, transform, offset, solid background
+//!   or fixed size, it is drawn on the way from the old value to the new.
+//! * [`Container::transition`]: how a widget enters in the first frame its
+//!   identity is in the tree, and leaves in the first frame it is not (it
+//!   is then still drawn, over the screen and outside its layout, until
+//!   it is gone).
+//! * [`ScrollTo::animated`]: a scroll that glides.
+//!
+//! Frames are produced only while something is on its way; when the last
+//! animation ends the app is as idle as it was. [`Ui::set_reduce_motion`]
+//! makes every one of these take no time. A widget that asks for none of
+//! this costs one comparison per frame.
+//!
+//! # Navigation
+//!
+//! [`Navigator`] is the stack of screens as plain application state:
+//! `push`, `replace`, `pop`, and `back()` for [`Application::back`].
+//! `navigator.transition()` on each screen's root, beside its `.id(..)`,
+//! slides screens in and out in the direction of the last change.
+//!
 //! # Text input
 //!
 //! [`TextInput`] is an editable text. The application owns the string: the
@@ -136,9 +201,12 @@
 //! [`Container::focused_border`] its focused look. A tap focuses it and
 //! raises the platform keyboard; tapping elsewhere, or the keyboard's Done
 //! key, lets go. While the keyboard is up, boxes that pad for the bottom
-//! safe area pad for the keyboard instead, and a focused field inside a
-//! [`ScrollView`] is scrolled into view. There is no selection, copy or
-//! paste yet. `docs/building-screens.md` has a worked form.
+//! safe area pad for the keyboard instead, and the focused field is kept in
+//! view: every [`ScrollView`] around it scrolls, and what scrolling cannot
+//! do the screen makes up by shifting. A multi-line field can be bounded
+//! ([`TextInput::max_lines`]) and then scrolls inside itself. There is no
+//! selection, copy or paste yet. `docs/building-screens.md` has a worked
+//! form.
 //!
 //! # Talking to a server, sound, and remembering things
 //!
@@ -169,6 +237,8 @@
 //! Per rebuild: the element tree itself (one `Vec` per box that has
 //! children, plus whatever `String`s the application formats; a
 //! `&'static str` label is not copied) and one `Vec` of text references.
+//! While a widget with a [`Container::transition`] is on screen, the
+//! element tree is freed one frame later than otherwise.
 //! The layout tree, the hit regions, the message table and the display
 //! list are reused and stop allocating once they have reached their
 //! working size. Text shaping is cached by the text engine for as long as
@@ -181,18 +251,26 @@ mod color;
 mod edit;
 mod effects;
 mod element;
+mod motion;
+mod navigator;
+mod scroll;
 mod theme;
 mod ui;
+mod viewport;
 
 pub use color::{ColorRef, ThemeColor, hex, hexa, rgb8, with_alpha};
 pub use effects::Effects;
 pub use element::{
     Avatar, Button, Column, Container, Divider, Element, Gradient, Icon, Picture, Pressable, Row,
-    SafeArea, SafeEdges, ScrollView, Spacer, Span, Stack, Text, TextInput, elevation, icon, span,
-    text,
+    SafeArea, SafeEdges, ScrollView, Spacer, Span, Stack, Text, TextInput, Wrap, elevation, icon,
+    span, text,
 };
+pub use motion::{Animation, Easing, Transition};
+pub use navigator::{Navigation, Navigator};
+pub use scroll::ScrollTo;
 pub use theme::{Colors, Fonts, Radii, Spacing, TextRole, TextSpec, Theme, TypeScale};
 pub use ui::{Application, Overflow, Ui};
+pub use viewport::Viewport;
 
 pub use morningstar_core::{
     AudioClip, AudioError, HostState, HttpError, HttpMethod, HttpRequest, HttpResponse, Recording,
@@ -222,4 +300,5 @@ pub mod prelude {
         AudioClip, AudioError, Effects, HttpError, HttpMethod, HttpRequest, HttpResponse,
         Recording, ServiceRequest, ServiceResult,
     };
+    pub use crate::{Easing, Navigation, Navigator, ScrollTo, Transition, Viewport, Wrap};
 }

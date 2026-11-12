@@ -44,6 +44,33 @@
 //! correctly. Two long hugging texts in one row each take the lot and
 //! overflow; make the one that should give way `Fill`.
 //!
+//! # Wrapping rows
+//!
+//! A row with [`Style::wrap`] continues on a new line when its children do
+//! not fit (CSS `flex-wrap: wrap`); [`Style::gap`] separates neighbours on
+//! a line and [`Style::line_gap`] separates lines.
+//!
+//! * Lines are broken with the children's final widths: fixed as given;
+//!   hugging children offered the whole line each (a long text wraps
+//!   inside itself before anything overflows); a `Fill` child counts as
+//!   its minimum width and then grows into what its line has left.
+//! * A child moves to the next line when it does not fit after the ones
+//!   before it. The first child of a line stays even if it is too wide,
+//!   and that is the only way a wrapping row overflows horizontally.
+//! * A line is as tall as its tallest child; the row's hugging height is
+//!   the lines plus the gaps between them, so what follows the row, and a
+//!   scroll view around it, see the wrapped height.
+//! * `main_align`, `cross_align` and `align_self` act within each line.
+//! * A row taller than its lines shares the spare height equally among
+//!   them, so **a wrapping row whose children fit on one line is laid out
+//!   exactly as a row that does not wrap**.
+//! * Its natural width is that of a single line: a hugging wrapping row
+//!   is as wide as its parent offers once it wraps, not as its widest
+//!   line.
+//!
+//! Columns and stacks ignore `wrap`. Nothing is allocated for it, and a
+//! row that does not wrap pays one branch.
+//!
 //! **Units are whatever the caller uses.** The engine works in plain `f32`
 //! and never rounds. [`LayoutTree::rounded_rect`], [`round_rect`] and
 //! [`snap_rect`] round edges on the way out.

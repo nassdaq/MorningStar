@@ -97,6 +97,9 @@ struct Node {
     natural: [f32; 2],
     share: f32,
     frozen: bool,
+    /// As a child of a wrapping row: this child starts a line other than
+    /// the first. Set in sweep 2, read in sweeps 3 and 4.
+    line_break: bool,
     measured: Measured,
     /// Width constraint of the last measure call (infinity for `None`).
     measured_query: f32,
@@ -411,6 +414,7 @@ impl LayoutTree {
             natural: [0.0; 2],
             share: 0.0,
             frozen: false,
+            line_break: false,
             measured: Measured::No,
             measured_query: 0.0,
             measured_size: [0.0; 2],
@@ -536,6 +540,10 @@ impl LayoutTree {
     /// axis, the largest child otherwise.
     fn content_size(&self, index: usize, axis: usize) -> f32 {
         let node = &self.nodes[index];
+        if axis == Y && node.kind == Kind::Row && node.style.wrap {
+            let (lines_height, _) = self.wrapped_lines(index);
+            return (lines_height.max(0.0) + node.style.pad_sum(Y)).min(MAX_LENGTH);
+        }
         let is_main = matches!((node.kind, axis), (Kind::Row, X) | (Kind::Column, Y));
         let mut total = 0.0_f32;
         let mut child = node.first_child;
@@ -657,6 +665,7 @@ impl LayoutTree {
                     child = self.nodes[child_index].next_sibling;
                 }
             }
+            Kind::Row if style.wrap => self.assign_wrapped_widths(index, measure),
             Kind::Row => {
                 let gaps = style.gap * node.child_count.saturating_sub(1) as f32;
 
@@ -689,13 +698,97 @@ impl LayoutTree {
                     child = self.nodes[child_index].next_sibling;
                 }
 
-                self.distribute_fill(index, X, inner - gaps - used);
+                self.distribute_fill(first_child, NONE, X, inner - gaps - used);
             }
         }
     }
 
-    /// Shares `space` among the children of `index` that fill along `axis`
-    /// (the container's main axis), in proportion to their weights and
+    /// Sweep 2 for a wrapping row: settles the children's widths, breaks
+    /// them into lines and shares what each line has left among its `Fill`
+    /// children.
+    ///
+    /// A fixed child keeps its width; a hugging child is offered the whole
+    /// line (a long text wraps inside itself before the row overflows); a
+    /// `Fill` child counts as its minimum width when deciding where lines
+    /// break and then grows into what its line has left. A child goes to
+    /// the next line when it does not fit after the ones before it; the
+    /// first child of a line always stays, however wide.
+    fn assign_wrapped_widths(&mut self, index: usize, measure: &mut MeasureFn<'_>) {
+        let node = &self.nodes[index];
+        let style = node.style;
+        let first_child = node.first_child;
+        let inner = (node.size[X] - style.pad_sum(X)).max(0.0);
+        // Widths that sum to exactly the line (a hugging row given its
+        // natural width) must not be tipped over by rounding.
+        let limit = inner + 1.0e-3_f32.max(inner * 1.0e-5);
+
+        let mut line_start = first_child;
+        // Of the line being filled: every width plus gaps, the part of it
+        // that `Fill` children do not own, and the number of children.
+        let (mut used, mut rigid, mut count) = (0.0_f32, 0.0_f32, 0_u32);
+        let mut child = first_child;
+        while child != NONE {
+            let child_index = child as usize;
+            let child_style = self.nodes[child_index].style;
+            let fills = matches!(child_style.width, Sizing::Fill(_));
+            let width = match child_style.width {
+                Sizing::Fixed(_) => self.nodes[child_index].natural[X],
+                Sizing::Fill(_) => child_style.min_width,
+                Sizing::Hug if child_style.ratio_for(X).is_some() => {
+                    self.nodes[child_index].natural[X]
+                }
+                Sizing::Hug => self.hug_width(child_index, inner, measure),
+            };
+            let breaks = count > 0 && used + style.gap + width > limit;
+            if breaks {
+                let gaps = style.gap * count.saturating_sub(1) as f32;
+                self.distribute_fill(line_start, child, X, inner - gaps - rigid);
+                line_start = child;
+                (used, rigid, count) = (0.0, 0.0, 0);
+            }
+            let node = &mut self.nodes[child_index];
+            node.size[X] = width;
+            node.line_break = breaks;
+            if count > 0 {
+                used += style.gap;
+            }
+            used += width;
+            if !fills {
+                rigid += width;
+            }
+            count += 1;
+            child = node.next_sibling;
+        }
+        let gaps = style.gap * count.saturating_sub(1) as f32;
+        self.distribute_fill(line_start, NONE, X, inner - gaps - rigid);
+    }
+
+    /// The lines of a wrapping row, as sweep 2 broke them: the sum of their
+    /// natural heights plus the gaps between them, and how many there are.
+    /// A line is as tall as its tallest child (a `Fill`-height child counts
+    /// as its minimum).
+    fn wrapped_lines(&self, index: usize) -> (f32, u32) {
+        let node = &self.nodes[index];
+        let (mut total, mut line, mut lines) = (0.0_f32, 0.0_f32, 0_u32);
+        let mut child = node.first_child;
+        while child != NONE {
+            let child_node = &self.nodes[child as usize];
+            if lines == 0 {
+                lines = 1;
+            } else if child_node.line_break {
+                total += line + node.style.line_gap;
+                line = 0.0;
+                lines += 1;
+            }
+            line = line.max(self.contribution(child as usize, Y));
+            child = child_node.next_sibling;
+        }
+        (total + line, lines)
+    }
+
+    /// Shares `space` among the siblings from `first_child` up to but not
+    /// including `end` (`NONE` for all of them) that fill along `axis` (the
+    /// container's main axis), in proportion to their weights and
     /// respecting their min/max sizes.
     ///
     /// When a child's share violates its min or max it is frozen at the
@@ -703,11 +796,9 @@ impl LayoutTree {
     /// flexbox. Each round freezes at least one child, so this is at worst
     /// quadratic in the number of fill children with *active* bounds;
     /// without such bounds it is a single round.
-    fn distribute_fill(&mut self, index: usize, axis: usize, space: f32) {
-        let first_child = self.nodes[index].first_child;
-
+    fn distribute_fill(&mut self, first_child: u32, end: u32, axis: usize, space: f32) {
         let mut child = first_child;
-        while child != NONE {
+        while child != end {
             let node = &mut self.nodes[child as usize];
             node.frozen = false;
             child = node.next_sibling;
@@ -718,7 +809,7 @@ impl LayoutTree {
             let mut frozen_size = 0.0_f32;
             let mut any_flexible = false;
             let mut child = first_child;
-            while child != NONE {
+            while child != end {
                 let node = &self.nodes[child as usize];
                 if let Sizing::Fill(weight) = node.style.sizing(axis) {
                     if node.frozen {
@@ -739,7 +830,7 @@ impl LayoutTree {
             // their shares (minimums dominate), negative if smaller.
             let mut violation = 0.0_f32;
             let mut child = first_child;
-            while child != NONE {
+            while child != end {
                 let node = &mut self.nodes[child as usize];
                 if let (Sizing::Fill(weight), false) = (node.style.sizing(axis), node.frozen) {
                     let share = if total_weight > 0.0 {
@@ -759,7 +850,7 @@ impl LayoutTree {
             }
 
             let mut child = first_child;
-            while child != NONE {
+            while child != end {
                 let node = &mut self.nodes[child as usize];
                 if matches!(node.style.sizing(axis), Sizing::Fill(_)) && !node.frozen {
                     let size = node.size[axis];
@@ -839,6 +930,15 @@ impl LayoutTree {
             return;
         }
 
+        if kind == Kind::Row && style.wrap {
+            let overflow = self.place_wrapped(index, &style, origin, inner);
+            self.nodes[index].overflow = [
+                significant(overflow[X], inner[X]),
+                significant(overflow[Y], inner[Y]),
+            ];
+            return;
+        }
+
         // Heights. Widths were settled in sweep 2.
         match kind {
             Kind::Leaf | Kind::Measured => return,
@@ -871,7 +971,7 @@ impl LayoutTree {
                     }
                     child = child_node.next_sibling;
                 }
-                self.distribute_fill(index, Y, inner[Y] - gaps - used);
+                self.distribute_fill(first_child, NONE, Y, inner[Y] - gaps - used);
             }
         }
 
@@ -935,19 +1035,8 @@ impl LayoutTree {
             child = node.next_sibling;
         }
 
-        let count = child_count as f32;
         let free = inner[main] - used;
-        let spare = free.max(0.0);
-        // (space before the first child, extra space between neighbours)
-        let (lead, between) = match style.main_align {
-            MainAlign::Start => (0.0, 0.0),
-            MainAlign::Center => (free / 2.0, 0.0),
-            MainAlign::End => (free, 0.0),
-            MainAlign::SpaceBetween if child_count > 1 => (0.0, spare / (count - 1.0)),
-            MainAlign::SpaceBetween => (0.0, 0.0),
-            MainAlign::SpaceAround => (spare / count / 2.0, spare / count),
-            MainAlign::SpaceEvenly => (spare / (count + 1.0), spare / (count + 1.0)),
-        };
+        let (lead, between) = spread(style.main_align, free, child_count);
 
         let mut overflow = [0.0_f32; 2];
         overflow[main] = -free;
@@ -974,6 +1063,93 @@ impl LayoutTree {
             child = node.next_sibling;
         }
         overflow
+    }
+}
+
+impl LayoutTree {
+    /// Sweep 4 for a wrapping row: heights and positions, line by line.
+    /// Returns the raw overflow.
+    ///
+    /// Each line is as tall as its tallest child. If the row is taller
+    /// than its lines need, the spare height is shared equally among the
+    /// lines (CSS `align-content: stretch`), so a row that fits on one
+    /// line is laid out exactly as if it did not wrap. `main_align` and
+    /// the cross alignment apply within each line.
+    fn place_wrapped(
+        &mut self,
+        index: usize,
+        style: &Style,
+        origin: [f32; 2],
+        inner: [f32; 2],
+    ) -> [f32; 2] {
+        let (lines_height, lines) = self.wrapped_lines(index);
+        let spare = (inner[Y] - lines_height).max(0.0) / lines.max(1) as f32;
+        let mut overflow = [0.0_f32, lines_height - inner[Y]];
+
+        let mut top = origin[Y];
+        let mut line_start = self.nodes[index].first_child;
+        while line_start != NONE {
+            // Measure the line: where it ends, how tall and how full it is.
+            let (mut height, mut used, mut count) = (0.0_f32, 0.0_f32, 0_u32);
+            let mut end = line_start;
+            while end != NONE && (count == 0 || !self.nodes[end as usize].line_break) {
+                height = height.max(self.contribution(end as usize, Y));
+                used += self.nodes[end as usize].size[X];
+                count += 1;
+                end = self.nodes[end as usize].next_sibling;
+            }
+            used += style.gap * count.saturating_sub(1) as f32;
+            let height = height + spare;
+            let free = inner[X] - used;
+            overflow[X] = overflow[X].max(-free);
+            let (lead, between) = spread(style.main_align, free, count);
+
+            let mut cursor = origin[X] + lead;
+            let mut child = line_start;
+            while child != end {
+                let node = &mut self.nodes[child as usize];
+                let child_style = node.style;
+                node.size[Y] = match child_style.height {
+                    Sizing::Fill(_) => child_style.clamp(Y, height),
+                    Sizing::Hug if Self::stretches(style, &child_style, Y) => {
+                        child_style.clamp(Y, height)
+                    }
+                    _ => node.natural[Y],
+                };
+                let cross_free = height - node.size[Y];
+                let shift = match child_style.align_self.unwrap_or(style.cross_align) {
+                    CrossAlign::Start | CrossAlign::Stretch => 0.0,
+                    CrossAlign::Center => cross_free / 2.0,
+                    CrossAlign::End => cross_free,
+                };
+                node.pos[X] = cursor + child_style.offset_on(X);
+                node.pos[Y] = top + shift + child_style.offset_on(Y);
+                cursor += node.size[X];
+                cursor += style.gap + between;
+                child = node.next_sibling;
+            }
+            top += height + style.line_gap;
+            line_start = end;
+        }
+        overflow
+    }
+}
+
+/// How `free` space along the main axis is given to `count` children:
+/// (space before the first child, extra space between neighbours). When
+/// the children do not fit (`free` is negative), `Center` and `End` still
+/// apply and the `Space*` modes fall back to `Start`.
+fn spread(align: MainAlign, free: f32, count: u32) -> (f32, f32) {
+    let spare = free.max(0.0);
+    let children = count as f32;
+    match align {
+        MainAlign::Start => (0.0, 0.0),
+        MainAlign::Center => (free / 2.0, 0.0),
+        MainAlign::End => (free, 0.0),
+        MainAlign::SpaceBetween if count > 1 => (0.0, spare / (children - 1.0)),
+        MainAlign::SpaceBetween => (0.0, 0.0),
+        MainAlign::SpaceAround => (spare / children / 2.0, spare / children),
+        MainAlign::SpaceEvenly => (spare / (children + 1.0), spare / (children + 1.0)),
     }
 }
 

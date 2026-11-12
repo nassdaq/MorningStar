@@ -6,20 +6,24 @@ use std::hash::Hash;
 use std::time::Duration;
 
 use morningstar_core::{
-    AudioError, Border, Dash, HttpError, HttpResponse, ImeAction, LinearGradient, Point,
+    AudioError, Border, Color, Dash, HttpError, HttpResponse, ImeAction, LinearGradient, Point,
     PointerEvent, PointerPhase, Recording, Rect, ServiceCall, ServiceId, ServiceRequest,
     ServiceResult, Shadow, Size, TextInputEvent, TextInputRequest, TextInputTraits, Transform,
 };
 use morningstar_layout::{Edges, LayoutTree, NodeId, Sizing};
 use morningstar_runtime::{App, Frame, FrameInfo, Setup, TextAlign, TextSpan, TextStyle};
 
+use crate::color::ColorRef;
 use crate::edit::{self, EditConfig, EditState};
 use crate::effects::{EffectState, Effects};
 use crate::element::{
-    Axis, BoxNode, DashKind, Element, Fill, IconNode, ImageNode, InputHandler, InputNode, Kind,
-    LineHeight, PictureSource, SpacerKind, TextNode, key_hash,
+    Axis, BoxNode, Container, DashKind, Element, Fill, IconNode, ImageNode, InputHandler,
+    InputNode, Kind, LineHeight, PictureSource, SpacerKind, TextNode, key_hash,
 };
+use crate::motion::{Animation, Easing, Ghost, Motions, Props};
+use crate::scroll::{ScrollTarget, ScrollTo};
 use crate::theme::Theme;
+use crate::viewport::Viewport;
 
 /// A finger must travel this far (dp) before a press turns into a scroll.
 const TOUCH_SLOP: f32 = 8.0;
@@ -55,6 +59,10 @@ const CARET_WIDTH: f32 = 1.5;
 /// own frame; above it, a little less.
 const REVEAL_BELOW: f32 = 28.0;
 const REVEAL_ABOVE: f32 = 20.0;
+/// How an animated [`ScrollTo`] moves.
+const GLIDE: Animation = Animation::new(Duration::from_millis(250), Easing::EaseOut);
+/// The identity given as the parent of a tree's root.
+const NO_PARENT: u64 = 0;
 
 /// A Morningstar application written with the declarative UI layer.
 ///
@@ -127,7 +135,35 @@ pub trait Application: Send + 'static {
     /// not at every display refresh. The root element always fills the
     /// screen, edge to edge; wrap content in a
     /// [`SafeArea`](crate::SafeArea).
-    fn view(&self) -> Element<Self::Message>;
+    ///
+    /// Every application implements this or [`view_in`](Self::view_in),
+    /// which is the same with the screen's measurements at hand. (The
+    /// default here is an empty screen, so that an application which
+    /// implements `view_in` need not write a `view` as well.)
+    fn view(&self) -> Element<Self::Message> {
+        Container::empty().into()
+    }
+
+    /// [`view`](Self::view), for a screen that depends on what it is shown
+    /// on: `viewport` gives the surface's size in dp, the safe-area
+    /// insets, how much the keyboard covers, whether a field has focus,
+    /// and measures text, so that a view can choose a layout that fits
+    /// instead of guessing (see [`Viewport`]). The default ignores it and
+    /// calls `view`.
+    ///
+    /// It is called exactly when `view` would be: once per frame. A frame
+    /// is produced whenever what `viewport` reports changes (rotation, the
+    /// keyboard coming or going), so what is read here is never stale.
+    ///
+    /// ```ignore
+    /// fn view_in(&self, viewport: &Viewport) -> Element<Message> {
+    ///     if viewport.width() >= 600.0 { self.two_panes() } else { self.one_pane() }
+    /// }
+    /// ```
+    fn view_in(&self, viewport: &Viewport<'_>) -> Element<Self::Message> {
+        let _ = viewport;
+        self.view()
+    }
 
     /// Changes the state in response to a message. Messages arrive in the
     /// order the taps completed, one at a time, never during `view`.
@@ -285,6 +321,12 @@ struct Focus {
     tap: Option<Point>,
     /// Scroll the field into view at the next frame.
     reveal: bool,
+    /// How far (dp) the screen is shifted up for this field, where
+    /// scrolling could not bring it clear of the keyboard.
+    pan: f32,
+    /// The caret may have moved: a field that scrolls inside itself
+    /// brings it into view at the next frame.
+    caret_moved: bool,
 }
 
 impl Region {
@@ -315,7 +357,16 @@ impl Focus {
             blink_from: None,
             tap,
             reveal: true,
+            pan: 0.0,
+            caret_moved: true,
         }
+    }
+
+    /// The field's text, caret or place may have changed: bring both the
+    /// field and its caret into view at the next frame.
+    fn touched(&mut self) {
+        self.reveal = true;
+        self.caret_moved = true;
     }
 }
 
@@ -325,8 +376,8 @@ struct InputRecord<M> {
     id: u64,
     /// Its record in `Ui::records`.
     slot: u32,
-    /// The innermost scroll view around it: identity and record.
-    scroll: Option<(u64, u32)>,
+    /// The innermost scroll view around it, in `Ui::scroll_table`.
+    scroll: Option<u32>,
     /// Its value, brought up to date by edits made since the frame.
     value: String,
     config: EditConfig,
@@ -375,17 +426,79 @@ struct ScrollState {
     released: bool,
     /// Frame generation in which the widget was last seen.
     seen: u64,
+    /// An animated move asked for by the application.
+    glide: Option<Glide>,
+}
+
+/// An animated move of a scroll view to an offset (dp).
+#[derive(Clone, Copy, Debug)]
+struct Glide {
+    from: f32,
+    to: f32,
+    /// The frame time it started at; `None` until its first frame.
+    start: Option<Duration>,
+}
+
+impl ScrollState {
+    /// Moves to `to` (dp), at once or gliding. Whatever motion there was
+    /// ends.
+    fn go(&mut self, to: f32, glide: bool) {
+        self.flinging = false;
+        self.released = false;
+        self.velocity = 0.0;
+        if glide && to != self.offset {
+            self.glide = Some(Glide {
+                from: self.offset,
+                to,
+                start: None,
+            });
+        } else {
+            self.glide = None;
+            self.offset = to;
+        }
+    }
+}
+
+/// A scroll view of the frame, in tree order.
+#[derive(Clone, Copy, Debug)]
+struct ScrollRecord {
+    id: u64,
+    /// Its record in `Ui::records`.
+    slot: u32,
+    /// The scroll view around it, in the same table.
+    parent: Option<u32>,
+}
+
+/// An element of the frame with an explicit `.id(..)`, in tree order.
+#[derive(Clone, Copy, Debug)]
+struct KeyedRecord {
+    id: u64,
+    slot: u32,
+    /// The innermost scroll view around it, in `Ui::scroll_table`.
+    scroll: Option<u32>,
+}
+
+/// Where an element with an explicit id was painted, in pixels.
+#[derive(Clone, Copy, Debug)]
+struct KeyedRect {
+    id: u64,
+    /// As laid out and scrolled.
+    rect: Rect,
+    /// The part of it its clips leave to be seen; empty if none.
+    visible: Rect,
 }
 
 /// What the layout pass learned about one text.
 #[derive(Clone, Copy, Debug, Default)]
-struct TextMeta {
+pub(crate) struct TextMeta {
     /// The wrap width (px) of the layout that will be drawn.
-    constraint: Option<f32>,
+    pub constraint: Option<f32>,
     /// Size (px) of that layout, before any `max_lines` cut.
-    measured: Size,
+    pub measured: Size,
     /// The unwrapped size (px), if it was asked for.
-    natural: Option<Size>,
+    pub natural: Option<Size>,
+    /// Height of one line (px).
+    pub line_height: f32,
 }
 
 /// One element in pre-order: its layout node and where its subtree ends.
@@ -417,8 +530,9 @@ pub struct Overflow {
 /// It can also be driven directly, which is how tests and screenshot tools
 /// use it: `frame` builds a frame, `pointer` delivers a touch, and
 /// [`send`](Self::send), [`rect_of`](Self::rect_of),
-/// [`scroll_offset`](Self::scroll_offset) and
-/// [`overflows`](Self::overflows) reach in from outside.
+/// [`visible_rect_of`](Self::visible_rect_of),
+/// [`scroll_offset`](Self::scroll_offset), [`scroll_to`](Self::scroll_to)
+/// and [`overflows`](Self::overflows) reach in from outside.
 pub struct Ui<A: Application> {
     app: A,
     tree: LayoutTree,
@@ -427,7 +541,12 @@ pub struct Ui<A: Application> {
     text_meta: Vec<TextMeta>,
     regions: Vec<Region>,
     messages: Vec<A::Message>,
-    keyed: Vec<(u64, Rect)>,
+    keyed: Vec<KeyedRect>,
+    /// The frame's elements with explicit ids, and its scroll views.
+    keyed_table: Vec<KeyedRecord>,
+    scroll_table: Vec<ScrollRecord>,
+    /// What the application asked to be scrolled, until the next frame.
+    scroll_requests: Vec<ScrollTo>,
     scroll_nodes: Vec<NodeId>,
     scrolls: HashMap<u64, ScrollState>,
     gesture: Option<Gesture>,
@@ -443,6 +562,15 @@ pub struct Ui<A: Application> {
     tick: Option<Tick>,
     /// Requests to the platform and the handlers waiting for answers.
     effects: EffectState<A::Message>,
+    /// Animations in progress.
+    motions: Motions,
+    /// Elements that have left the tree and are still seen leaving, and
+    /// for each its layout node and first record and text of this frame.
+    ghosts: Vec<Ghost<Element<A::Message>>>,
+    ghost_roots: Vec<(NodeId, u32, u32)>,
+    /// The last frame's tree, kept only while it holds a widget with a
+    /// transition (which may be found to have left in the next frame).
+    last_root: Option<Element<A::Message>>,
 }
 
 impl<A: Application> Ui<A> {
@@ -543,6 +671,9 @@ impl<A: Application> Ui<A> {
             regions: Vec::new(),
             messages: Vec::new(),
             keyed: Vec::new(),
+            keyed_table: Vec::new(),
+            scroll_table: Vec::new(),
+            scroll_requests: Vec::new(),
             scroll_nodes: Vec::new(),
             scrolls: HashMap::new(),
             gesture: None,
@@ -555,6 +686,10 @@ impl<A: Application> Ui<A> {
             generation: 0,
             tick: None,
             effects,
+            motions: Motions::new(),
+            ghosts: Vec::new(),
+            ghost_roots: Vec::new(),
+            last_root: None,
         }
     }
 
@@ -665,7 +800,7 @@ impl<A: Application> Ui<A> {
     /// Asks the application what it wants started and takes it in.
     fn collect_effects(&mut self) {
         self.app.effects(self.effects.scratch());
-        self.effects.collect();
+        self.effects.collect(&mut self.scroll_requests);
     }
 
     /// Hands the application the message an answer becomes, if it is
@@ -698,16 +833,65 @@ impl<A: Application> Ui<A> {
         self.deliver(message);
     }
 
-    /// Where the widget with this explicit `.id(..)` was in the last
-    /// frame, in physical pixels, or `None` if it was not on screen. For a
-    /// widget inside a scroll view this is its scrolled position, not cut
-    /// down to the viewport.
+    /// Where the widget with this explicit `.id(..)` was laid out in the
+    /// last frame, in physical pixels, or `None` if it was not in that
+    /// frame's tree. For a widget inside a scroll view this is its
+    /// scrolled position, whether or not that is inside the viewport: a
+    /// row far down a list has a rectangle below the screen. Ask
+    /// [`visible_rect_of`](Self::visible_rect_of) for what can be seen.
+    ///
+    /// Two approximations: for a widget in a subtree that was skipped
+    /// because it is far outside its scroll view, a scroll view or a
+    /// moving transform *between* the two is not counted; and a widget
+    /// that is leaving (see [`Container::transition`]) has no rectangle.
     pub fn rect_of(&self, id: impl Hash) -> Option<Rect> {
         let key = key_hash(id);
         self.keyed
             .iter()
-            .find(|(candidate, _)| *candidate == key)
-            .map(|(_, rect)| *rect)
+            .find(|keyed| keyed.id == key)
+            .map(|keyed| keyed.rect)
+    }
+
+    /// The part of the widget with this explicit `.id(..)` that the last
+    /// frame showed: [`rect_of`](Self::rect_of) cut down to the scroll
+    /// views and clipping boxes around it and to the screen. `None` if
+    /// nothing of it showed (it is scrolled out of view, or not in the
+    /// tree). Something drawn over it does not count: this is about
+    /// clipping, not covering. Inside a turned or scaled widget, clips
+    /// outside that widget are not counted either.
+    pub fn visible_rect_of(&self, id: impl Hash) -> Option<Rect> {
+        let key = key_hash(id);
+        self.keyed
+            .iter()
+            .find(|keyed| keyed.id == key)
+            .map(|keyed| keyed.visible)
+            .filter(|visible| !visible.is_empty())
+    }
+
+    /// Asks for a scroll as [`Effects::scroll`] does; carried out in the
+    /// next frame. For tests and tools.
+    pub fn scroll_to(&mut self, to: ScrollTo) {
+        self.scroll_requests.push(to);
+    }
+
+    /// Tells the layer that the user has asked the system for less motion
+    /// (Android's "remove animations", iOS's "reduce motion"). While set,
+    /// [`animate`](Container::animate), [`transition`](Container::transition)
+    /// and animated [`ScrollTo`]s take no time: every change shows at
+    /// once. Flings, which follow the finger, are unaffected.
+    ///
+    /// The hosts do not report the setting yet (ADR 0021): until they do,
+    /// nothing calls this but tests and an entry point that sets it before
+    /// handing the `Ui` to `app!`.
+    pub fn set_reduce_motion(&mut self, reduce: bool) {
+        self.motions.reduce = reduce;
+    }
+
+    /// True if something was still animating in the last frame (an
+    /// [`animate`](Container::animate)d change, a transition, or a widget
+    /// leaving). For tests.
+    pub fn is_animating(&self) -> bool {
+        self.motions.moving || !self.ghosts.is_empty()
     }
 
     /// The scroll position, in dp, of the scroll view with this explicit
@@ -863,7 +1047,7 @@ impl<A: Application> Ui<A> {
             Some(focus) if focus.id == id => {
                 focus.tap = tap;
                 focus.blink_from = None;
-                focus.reveal = true;
+                focus.touched();
             }
             _ => self.focus = Some(Focus::new(id, tap)),
         }
@@ -928,7 +1112,7 @@ impl<A: Application> Ui<A> {
         }
         focus.edit.caret = edit::snap(&record.value, focus.edit.caret);
         focus.blink_from = None;
-        focus.reveal = true;
+        focus.touched();
         focus.tap = None;
 
         let (config, value) = (&record.config, record.value.as_str());
@@ -1000,6 +1184,8 @@ impl<A: Application> Ui<A> {
             state.released = false;
             state.tracking = false;
             state.velocity = 0.0;
+            // A glide the application asked for stops under a finger.
+            state.glide = None;
         }
         if press.is_none() && scroll.is_none() {
             // A touch on nothing: whatever was being edited is done.
@@ -1131,10 +1317,22 @@ impl<A: Application> App for Ui<A> {
             frame.request_redraw_after(tick.due.saturating_sub(info.elapsed));
         }
         let theme = self.app.theme();
-        let root = self.app.view();
         let scale = info.scale;
+        // The tree of the last frame, if something in it may be leaving.
+        let mut previous = self.last_root.take();
+        let root = {
+            let viewport = Viewport::new(
+                info,
+                frame,
+                theme,
+                self.focus.as_ref().map(|focus| focus.id),
+                self.motions.reduce,
+            );
+            self.app.view_in(&viewport)
+        };
         self.scale = scale;
         self.generation += 1;
+        let (generation, now) = (self.generation, info.elapsed);
         frame.clear = theme.colors.background;
         if info.keyboard_inset != self.keyboard_inset {
             self.keyboard_inset = info.keyboard_inset;
@@ -1151,6 +1349,10 @@ impl<A: Application> App for Ui<A> {
         self.records.clear();
         self.scratch.clear();
         self.fields.clear();
+        self.keyed_table.clear();
+        self.scroll_table.clear();
+        self.ghost_roots.clear();
+        self.motions.begin_frame();
         let mut lowering = Lowering {
             tree: &mut self.tree,
             records: &mut self.records,
@@ -1170,8 +1372,40 @@ impl<A: Application> App for Ui<A> {
             fields: &mut self.fields,
             open_fields: Vec::new(),
             open_scrolls: Vec::new(),
+            keyed: &mut self.keyed_table,
+            scrolls: &mut self.scroll_table,
+            motions: &mut self.motions,
+            generation,
+            now,
+            ghost: false,
         };
-        let root_node = lowering.lower(&root, None, root.key.unwrap_or(ROOT_PATH));
+        let root_node = lowering.lower(&root, None, root.key.unwrap_or(ROOT_PATH), NO_PARENT);
+
+        // Widgets with a transition that are no longer in the tree are
+        // taken out of the last frame's tree and drawn from there, on top
+        // of the screen and outside its layout, until they are out of
+        // sight. With no animated widget anywhere this is one test.
+        if !lowering.motions.is_idle() {
+            let ghosts = &mut self.ghosts;
+            lowering.motions.sweep(generation, now, |id, rect| {
+                match take_element(&mut previous, id) {
+                    Some(element) => {
+                        ghosts.push(Ghost { id, element, rect });
+                        true
+                    }
+                    None => false,
+                }
+            });
+            // One that has gone, or is back in the tree, is a ghost no more.
+            ghosts.retain(|ghost| lowering.motions.is_leaving(ghost.id, now));
+        }
+        drop(previous);
+        lowering.ghost = true;
+        for ghost in &self.ghosts {
+            let (slot, text) = (lowering.records.len(), lowering.texts.len());
+            let node = lowering.lower(&ghost.element, None, ghost.id, NO_PARENT);
+            self.ghost_roots.push((node, slot as u32, text as u32));
+        }
         let texts = lowering.texts;
         let input_count = lowering.input_count;
         self.inputs.truncate(input_count);
@@ -1190,7 +1424,7 @@ impl<A: Application> App for Ui<A> {
                     } else if focus.expected != record.value {
                         focus.expected.clone_from(&record.value);
                         focus.edit.composing = None;
-                        focus.reveal = true;
+                        focus.touched();
                     }
                     focus.edit.caret = edit::snap(&record.value, focus.edit.caret);
                 }
@@ -1202,26 +1436,84 @@ impl<A: Application> App for Ui<A> {
         self.text_meta.resize(texts.len(), TextMeta::default());
         let meta = &mut self.text_meta;
         let logical = info.logical_size();
+        let mut measure = |key: u64, max_width: Option<f32>| {
+            let index = key as usize;
+            let (Some(text), Some(meta)) = (texts.get(index), meta.get_mut(index)) else {
+                return Size::ZERO;
+            };
+            measure_text(frame, text, meta, &theme, scale, max_width)
+        };
         self.tree.compute(
             root_node,
             Rect::new(0.0, 0.0, logical.width, logical.height),
-            |key, max_width| {
-                let index = key as usize;
-                let (Some(text), Some(meta)) = (texts.get(index), meta.get_mut(index)) else {
-                    return Size::ZERO;
-                };
-                measure_text(frame, text, meta, &theme, scale, max_width)
-            },
+            &mut measure,
         );
+        // A leaving widget keeps the rectangle it had.
+        for (ghost, (node, _, _)) in self.ghosts.iter().zip(&self.ghost_roots) {
+            let rect = ghost.rect;
+            self.tree.compute(
+                *node,
+                Rect::new(
+                    rect.x / scale,
+                    rect.y / scale,
+                    rect.width / scale,
+                    rect.height / scale,
+                ),
+                &mut measure,
+            );
+        }
+        drop(texts);
 
         // Keep the field being edited clear of the keyboard and in view.
         let logical_height = logical.height;
         let keyboard_top =
             (info.keyboard_inset > 0.0).then(|| logical_height - info.keyboard_inset / scale);
-        // A field inside a scroll view is scrolled into view, once per
-        // change (the user may scroll it away again). A field on a screen
-        // that does not scroll cannot be: while the keyboard covers it, the
-        // whole screen is drawn shifted up by `pan`.
+        // What the application asked to be scrolled, now that this
+        // frame's layout says where things are.
+        if !self.scroll_requests.is_empty() {
+            let reduce = self.motions.reduce;
+            for request in self.scroll_requests.drain(..) {
+                let glide = request.animated && !reduce;
+                match request.target {
+                    ScrollTarget::Offset(id, dp) => {
+                        if let Some(record) = self.scroll_table.iter().find(|r| r.id == id)
+                            && let Some(node) = node_of(&self.records, record.slot)
+                        {
+                            let max = scroll_max(&self.tree, node, keyboard_top);
+                            let state = self.scrolls.entry(id).or_default();
+                            state.go(clamp_offset(dp, max), glide);
+                        }
+                    }
+                    ScrollTarget::Reveal(id, margin) => {
+                        if let Some(keyed) = self.keyed_table.iter().find(|k| k.id == id)
+                            && let Some(node) = node_of(&self.records, keyed.slot)
+                            && let Some(scroll) = keyed.scroll
+                        {
+                            Reveal {
+                                tree: &self.tree,
+                                records: &self.records,
+                                table: &self.scroll_table,
+                                scrolls: &mut self.scrolls,
+                                keyboard_top,
+                            }
+                            .run(
+                                self.tree.rect(node),
+                                scroll,
+                                margin,
+                                margin,
+                                glide,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // The focused field is kept in view the same way wherever it is:
+        // every scroll view around it is scrolled, the innermost first,
+        // once per change (the user may scroll it away again); and if the
+        // keyboard still covers it after that, or there is no scroll view
+        // at all, the whole screen is drawn shifted up by `pan`.
         let mut pan = 0.0;
         if let Some(focus) = self.focus.as_mut()
             && let Some(record) = self.inputs.iter().find(|record| record.id == focus.id)
@@ -1229,27 +1521,33 @@ impl<A: Application> App for Ui<A> {
         {
             let reveal = std::mem::take(&mut focus.reveal);
             let field = self.tree.rect(field);
+            let safe_top = info.insets.top / scale;
             match record.scroll {
-                Some((scroll_id, scroll_slot)) => {
-                    if reveal && let Some(scroll_node) = node_of(&self.records, scroll_slot) {
-                        let state = self.scrolls.entry(scroll_id).or_default();
-                        let offset = reveal_offset(
-                            field,
-                            self.tree.rect(scroll_node),
-                            keyboard_top.unwrap_or(f32::INFINITY),
-                            state.offset,
-                            scroll_max(&self.tree, scroll_node, keyboard_top),
-                        );
-                        if offset != state.offset {
-                            state.offset = offset;
-                            state.flinging = false;
-                            state.velocity = 0.0;
+                Some(scroll) => {
+                    if reveal {
+                        let shown = Reveal {
+                            tree: &self.tree,
+                            records: &self.records,
+                            table: &self.scroll_table,
+                            scrolls: &mut self.scrolls,
+                            keyboard_top,
                         }
+                        .run(
+                            field,
+                            scroll,
+                            REVEAL_ABOVE,
+                            REVEAL_BELOW,
+                            false,
+                        );
+                        focus.pan = keyboard_top.map_or(0.0, |top| pan_for(shown, top, safe_top));
+                    }
+                    if keyboard_top.is_some() {
+                        pan = focus.pan;
                     }
                 }
                 None => {
                     if let Some(top) = keyboard_top {
-                        pan = pan_for(field, top, info.insets.top / scale);
+                        pan = pan_for(field, top, safe_top);
                     }
                 }
             }
@@ -1276,6 +1574,10 @@ impl<A: Application> App for Ui<A> {
             keyed: &mut self.keyed,
             scrolls: &mut self.scrolls,
             scroll_nodes: &mut self.scroll_nodes,
+            keyed_table: &self.keyed_table,
+            motions: &mut self.motions,
+            shown_cursor: 0,
+            inert: false,
             generation: self.generation,
             pressed: self
                 .gesture
@@ -1305,11 +1607,37 @@ impl<A: Application> App for Ui<A> {
                 scroll: None,
                 field: None,
                 space: None,
+                alpha: 1.0,
             },
         );
-        if painter.animating {
+        // What is leaving, over the screen, where it last was; it reacts
+        // to nothing.
+        painter.inert = true;
+        for (ghost, &(_, slot, text)) in self.ghosts.iter().zip(&self.ghost_roots) {
+            painter.node_cursor = slot as usize;
+            painter.text_cursor = text as usize;
+            painter.paint(
+                &ghost.element,
+                Context {
+                    id: ghost.id,
+                    dx: 0.0,
+                    dy: 0.0,
+                    clip: surface,
+                    cull: None,
+                    scroll: None,
+                    field: None,
+                    space: None,
+                    alpha: 1.0,
+                },
+            );
+        }
+        let animating = painter.animating;
+        self.motions.end_frame(generation);
+        // Frames keep coming only while something is on its way.
+        if animating || self.motions.moving {
             frame.request_redraw();
         }
+        self.last_root = self.motions.transitions.then_some(root);
         self.last_elapsed = Some(info.elapsed);
 
         // Ask for the keyboard for as long as a field has focus.
@@ -1407,23 +1735,103 @@ fn pan_for(field: Rect, keyboard_top: f32, safe_top: f32) -> f32 {
 ///
 /// `field` and `viewport` are layout rectangles (the field's as laid out,
 /// before scrolling); `visible_bottom` is the top of the keyboard, or
-/// infinity. The field, with a margin, is kept above the lower of the
+/// infinity. The field, with a margin (`above` and `below` it), is kept
+/// above the lower of the
 /// viewport's bottom and the keyboard, and below the viewport's top; when
 /// it cannot be both, its top wins. The result is within `0..=max`, and is
 /// `offset` unchanged when the field is already in view.
-fn reveal_offset(field: Rect, viewport: Rect, visible_bottom: f32, offset: f32, max: f32) -> f32 {
+fn reveal_offset(
+    field: Rect,
+    viewport: Rect,
+    visible_bottom: f32,
+    offset: f32,
+    max: f32,
+    above: f32,
+    below: f32,
+) -> f32 {
     let top = viewport.y;
     let bottom = (viewport.y + viewport.height).min(visible_bottom);
     let mut target = offset;
-    let field_bottom = field.y + field.height + REVEAL_BELOW - target;
+    let field_bottom = field.y + field.height + below - target;
     if field_bottom > bottom {
         target += field_bottom - bottom;
     }
-    let field_top = field.y - REVEAL_ABOVE - target;
+    let field_top = field.y - above - target;
     if field_top < top {
         target -= top - field_top;
     }
     clamp_offset(target, max)
+}
+
+/// Brings a rectangle into view by scrolling the scroll views around it.
+struct Reveal<'a> {
+    tree: &'a LayoutTree,
+    records: &'a [NodeRecord],
+    table: &'a [ScrollRecord],
+    scrolls: &'a mut HashMap<u64, ScrollState>,
+    keyboard_top: Option<f32>,
+}
+
+impl Reveal<'_> {
+    /// Scrolls every scroll view from `innermost` outwards as little as
+    /// brings `rect` (a layout rectangle, dp) into its viewport with
+    /// `above` and `below` to spare, and returns where `rect` then is on
+    /// the screen. The keyboard, while it is up, lowers what counts as
+    /// visible in the outermost scroll view, the one on the screen itself.
+    fn run(self, mut rect: Rect, innermost: u32, above: f32, below: f32, glide: bool) -> Rect {
+        let mut next = Some(innermost);
+        while let Some(record) = next.and_then(|index| self.table.get(index as usize)) {
+            next = record.parent;
+            let Some(node) = node_of(self.records, record.slot) else {
+                continue;
+            };
+            let bottom = match (next, self.keyboard_top) {
+                (None, Some(top)) => top,
+                _ => f32::INFINITY,
+            };
+            let state = self.scrolls.entry(record.id).or_default();
+            let offset = reveal_offset(
+                rect,
+                self.tree.rect(node),
+                bottom,
+                state.offset,
+                scroll_max(self.tree, node, self.keyboard_top),
+                above,
+                below,
+            );
+            if offset != state.offset {
+                state.go(offset, glide);
+            }
+            rect.y -= offset;
+        }
+        rect
+    }
+}
+
+/// Takes the element with identity `id` out of the tree at `root`,
+/// leaving an empty box where it was. Identities are worked out as
+/// lowering does.
+fn take_element<M>(root: &mut Option<Element<M>>, id: u64) -> Option<Element<M>> {
+    fn within<M>(element: &mut Element<M>, own: u64, id: u64) -> Option<Element<M>> {
+        let Kind::Box(node) = &mut element.kind else {
+            return None;
+        };
+        for (index, child) in node.children.iter_mut().enumerate() {
+            let child_id = child.key.unwrap_or_else(|| child_path(own, index));
+            if child_id == id {
+                return Some(std::mem::replace(child, Container::empty().into()));
+            }
+            if let Some(found) = within(child, child_id, id) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    let own = root.as_ref()?.key.unwrap_or(ROOT_PATH);
+    if own == id {
+        return root.take();
+    }
+    within(root.as_mut()?, own, id)
 }
 
 fn clamp_offset(offset: f32, max: f32) -> f32 {
@@ -1469,18 +1877,18 @@ fn measure_node(
     if text.spans.is_empty() {
         frame.measure_text(&text.content, style, constraint)
     } else {
-        frame.measure_text_spans(&text_spans(text, theme), style, constraint)
+        frame.measure_text_spans(&text_spans(text, theme, 1.0), style, constraint)
     }
 }
 
 /// The spans of a rich text, with theme colours resolved.
-fn text_spans<'a>(text: &'a TextNode, theme: &Theme) -> Vec<TextSpan<'a>> {
+fn text_spans<'a>(text: &'a TextNode, theme: &Theme, alpha: f32) -> Vec<TextSpan<'a>> {
     text.spans
         .iter()
         .map(|span| TextSpan {
             text: &span.content,
             weight: span.weight,
-            color: span.color.map(|color| color.resolve(theme)),
+            color: span.color.map(|color| fade(color.resolve(theme), alpha)),
             family: span.family,
             italic: span.italic.then_some(true),
         })
@@ -1489,7 +1897,7 @@ fn text_spans<'a>(text: &'a TextNode, theme: &Theme) -> Vec<TextSpan<'a>> {
 
 /// The layout engine's measure callback for one text. Constraints arrive
 /// and sizes leave in dp; the text engine works in pixels.
-fn measure_text(
+pub(crate) fn measure_text(
     frame: &mut Frame,
     text: &TextNode,
     meta: &mut TextMeta,
@@ -1520,13 +1928,15 @@ fn measure_text(
     };
     meta.measured = measured;
 
+    let line = style.size * style.line_height.max(0.0);
+    meta.line_height = line;
     let mut height = measured.height;
     if let Some(lines) = text.max_lines {
-        let line = style.size * style.line_height.max(0.0);
         height = height.min(line * lines as f32);
     }
-    // Whole pixels wide, so the box never cuts into the last glyph.
-    let mut width = measured.width.ceil() / scale;
+    // The width the glyphs advance over, fractions included, as a browser
+    // measures: rounding it up moved every later sibling (ADR 0022).
+    let mut width = measured.width / scale;
     if text.no_wrap
         && let Some(max_width) = max_width
     {
@@ -1553,15 +1963,32 @@ struct Lowering<'a, 't, M> {
     fields: &'a mut Vec<(u32, u64)>,
     /// Input frames being lowered that have no input yet: their records.
     open_fields: Vec<(u32, bool)>,
-    /// Scroll views being lowered: identity and record.
-    open_scrolls: Vec<(u64, u32)>,
+    /// Scroll views being lowered, in `scrolls`.
+    open_scrolls: Vec<u32>,
+    /// Every element with an explicit id, and every scroll view.
+    keyed: &'a mut Vec<KeyedRecord>,
+    scrolls: &'a mut Vec<ScrollRecord>,
+    motions: &'a mut Motions,
+    generation: u64,
+    /// The frame's time.
+    now: Duration,
+    /// Lowering a widget that has left the tree: it is drawn, and takes
+    /// part in nothing else.
+    ghost: bool,
 }
 
 impl<'t, M: Clone> Lowering<'_, 't, M> {
     /// Adds `element` and its subtree; `parent` is the axis of the box it
     /// sits in, `None` for the root; `id` is the element's identity, the
-    /// same one painting gives it.
-    fn lower(&mut self, element: &'t Element<M>, parent: Option<Axis>, id: u64) -> NodeId {
+    /// same one painting gives it, and `parent_id` that of the box it is
+    /// in.
+    fn lower(
+        &mut self,
+        element: &'t Element<M>,
+        parent: Option<Axis>,
+        id: u64,
+        parent_id: u64,
+    ) -> NodeId {
         let slot = self.records.len();
         self.records.push(NodeRecord {
             node: None,
@@ -1570,10 +1997,65 @@ impl<'t, M: Clone> Lowering<'_, 't, M> {
         });
 
         let mut style = element.layout;
+        if element.key.is_some() && !self.ghost {
+            self.keyed.push(KeyedRecord {
+                id,
+                slot: slot as u32,
+                scroll: self.open_scrolls.last().copied(),
+            });
+        }
+        if !element.motion.is_stateless() {
+            // What the view asks for, and what is shown on the way there.
+            // A size or offset on its way takes part in this layout.
+            let fixed = |sizing: Sizing| match sizing {
+                Sizing::Fixed(length) if length.is_finite() => Some(length),
+                _ => None,
+            };
+            let finite = |value: f32| if value.is_finite() { value } else { 0.0 };
+            let target = Props {
+                opacity: element.motion.opacity,
+                transform: element
+                    .transform
+                    .filter(Transform::is_finite)
+                    .unwrap_or(Transform::IDENTITY),
+                offset: Point::new(finite(style.offset.x), finite(style.offset.y)),
+                fill: match &element.kind {
+                    Kind::Box(node) => match node.fill {
+                        Some(Fill::Solid(color)) => Some(color.resolve(self.theme)),
+                        _ => None,
+                    },
+                    _ => None,
+                },
+                width: fixed(style.width),
+                height: fixed(style.height),
+            };
+            let shown = self.motions.resolve(
+                id,
+                parent_id,
+                slot as u32,
+                &element.motion,
+                target,
+                self.generation,
+                self.now,
+                self.ghost,
+            );
+            if let Some(width) = shown.width {
+                style.width = Sizing::Fixed(width);
+            }
+            if let Some(height) = shown.height {
+                style.height = Sizing::Fixed(height);
+            }
+            style.offset = shown.offset;
+        }
         if parent.is_none() {
             // The root always covers the surface.
             style.width = Sizing::FILL;
             style.height = Sizing::FILL;
+            if self.ghost {
+                // A leaving widget is laid out in the rectangle it had,
+                // which its offset had already moved.
+                style.offset = Point::new(0.0, 0.0);
+            }
         }
 
         let node = match &element.kind {
@@ -1595,26 +2077,35 @@ impl<'t, M: Clone> Lowering<'_, 't, M> {
                         style.min_height = style.min_height.max(line);
                     }
                 }
-                self.record_input(input, id, slot as u32);
+                if !self.ghost {
+                    self.record_input(input, id, slot as u32);
+                }
                 self.tree.measured(style, key)
             }
             Kind::Box(node) => {
-                if node.field {
+                let is_field = node.field && !self.ghost;
+                let is_scroll = node.scroll && !self.ghost;
+                if is_field {
                     self.open_fields.push((slot as u32, false));
                 }
-                if node.scroll {
-                    self.open_scrolls.push((id, slot as u32));
+                if is_scroll {
+                    self.open_scrolls.push(self.scrolls.len() as u32);
+                    self.scrolls.push(ScrollRecord {
+                        id,
+                        slot: slot as u32,
+                        parent: self.open_scrolls.iter().rev().nth(1).copied(),
+                    });
                 }
                 let start = self.scratch.len();
                 for (index, child) in node.children.iter().enumerate() {
                     let child_id = child.key.unwrap_or_else(|| child_path(id, index));
-                    let child = self.lower(child, Some(node.axis), child_id);
+                    let child = self.lower(child, Some(node.axis), child_id, id);
                     self.scratch.push(child);
                 }
-                if node.field {
+                if is_field {
                     self.open_fields.pop();
                 }
-                if node.scroll {
+                if is_scroll {
                     self.open_scrolls.pop();
                 }
 
@@ -1728,6 +2219,18 @@ struct Context {
     /// Inside a transformed widget: how to get from the screen to the
     /// space `clip` and the rectangles painted here are in.
     space: Option<HitSpace>,
+    /// The product of the opacities of the element and the boxes around
+    /// it, multiplied into every colour drawn.
+    alpha: f32,
+}
+
+/// `color` at `alpha` times its own opacity.
+fn fade(color: Color, alpha: f32) -> Color {
+    if alpha >= 1.0 {
+        color
+    } else {
+        Color::rgba(color.r, color.g, color.b, color.a * alpha.max(0.0))
+    }
 }
 
 /// Walks the element tree again, in the same order as [`Lowering`], and
@@ -1743,9 +2246,17 @@ struct Painter<'a, M> {
     dt: Option<f32>,
     regions: &'a mut Vec<Region>,
     messages: &'a mut Vec<M>,
-    keyed: &'a mut Vec<(u64, Rect)>,
+    keyed: &'a mut Vec<KeyedRect>,
     scrolls: &'a mut HashMap<u64, ScrollState>,
     scroll_nodes: &'a mut Vec<NodeId>,
+    /// The elements with explicit ids, in tree order.
+    keyed_table: &'a [KeyedRecord],
+    motions: &'a mut Motions,
+    /// Where painting has got to in `motions.shown`.
+    shown_cursor: usize,
+    /// Painting a widget that has left the tree: no touch regions, no
+    /// focus, and its scroll views stay where they were.
+    inert: bool,
     generation: u64,
     pressed: Option<u64>,
     dragging: Option<u64>,
@@ -1795,14 +2306,44 @@ impl<M: Clone> Painter<'_, M> {
             return;
         };
 
+        // What the element is shown as, if it is animated: its own
+        // properties on their way, and how far it has entered or left.
+        let mut own = element.transform;
+        let mut fill = None;
+        let mut presence = None;
+        if element.motion.opacity < 1.0 || !element.motion.is_stateless() {
+            let mut opacity = element.motion.opacity;
+            if !element.motion.is_stateless()
+                && let Some(index) = self.motions.index_at(slot, &mut self.shown_cursor)
+            {
+                // Where it is without its own or the transition's
+                // movement: where it is drawn from if it leaves.
+                let at = self.pixels(self.tree.rect(node), &context);
+                let shown = &mut self.motions.shown[index];
+                shown.rect = at;
+                opacity = shown.props.opacity * shown.presence.opacity;
+                own = Some(shown.props.transform);
+                fill = shown.props.fill;
+                presence = Some((shown.presence, shown.rect));
+            }
+            context.alpha *= opacity;
+        }
+
         // The element's transform, with its lengths in pixels. One that
         // only moves is the same as a scroll translation: whole pixels,
         // no display-list transform, and clipping, culling and hit-testing
         // carry on as they are.
-        let mut transform = element
-            .transform
-            .map(|transform| transform.with_translation_scaled(self.scale))
-            .filter(|transform| !transform.is_identity());
+        let mut transform = own.map(|transform| transform.with_translation_scaled(self.scale));
+        if let Some((hidden, at)) = presence
+            && (hidden.scale != 1.0 || hidden.shift != (0.0, 0.0))
+        {
+            let entering = Transform::scale(hidden.scale, hidden.scale).then(Transform::translate(
+                hidden.shift.0 * at.width,
+                hidden.shift.1 * at.height,
+            ));
+            transform = Some(transform.unwrap_or(Transform::IDENTITY).then(entering));
+        }
+        let mut transform = transform.filter(|transform| !transform.is_identity());
         if let Some(moved) = transform.filter(Transform::is_translation) {
             if moved.is_finite() {
                 context.dx += moved.tx.round();
@@ -1812,8 +2353,12 @@ impl<M: Clone> Painter<'_, M> {
         }
 
         let rect = self.pixels(self.tree.rect(node), &context);
-        if element.key.is_some() {
-            self.keyed.push((context.id, rect));
+        if element.key.is_some() && !self.inert {
+            self.keyed.push(KeyedRect {
+                id: context.id,
+                rect,
+                visible: intersect(rect, context.clip),
+            });
         }
 
         if let Some(transform) = transform {
@@ -1848,7 +2393,15 @@ impl<M: Clone> Painter<'_, M> {
             Kind::Text(text) => {
                 let index = self.text_cursor;
                 self.text_cursor += 1;
-                self.paint_text(text, index, rect, &context);
+                // Text is placed where layout put it, not at its box's
+                // snapped corner: the text engine keeps the fraction
+                // across and rounds each line's top itself (ADR 0022).
+                let exact = self.tree.rect(node);
+                let exact = Point::new(
+                    exact.x * self.scale + context.dx,
+                    exact.y * self.scale + context.dy,
+                );
+                self.paint_text(text, index, rect, exact, &context);
             }
             Kind::Image(image) => self.paint_image(image, rect, &context),
             Kind::Icon(icon) => self.paint_icon(icon, rect, &context),
@@ -1857,7 +2410,7 @@ impl<M: Clone> Painter<'_, M> {
                 self.text_cursor += 1;
                 self.paint_input(input, index, rect, &context);
             }
-            Kind::Box(node_data) => self.paint_box(node_data, node, slot, rect, context),
+            Kind::Box(node_data) => self.paint_box(node_data, node, slot, rect, fill, context),
         }
 
         if transform.is_some() {
@@ -1868,36 +2421,67 @@ impl<M: Clone> Painter<'_, M> {
     /// A text input: exactly its text while it is not being edited; with
     /// focus, also the caret, the composing underline and, for a single
     /// line wider than the field, a sideways scroll that keeps the caret
-    /// in view.
+    /// in view. A multi-line field whose text is taller than its box
+    /// (`max_lines`, `max_height`) scrolls inside it: it is a scroll view
+    /// of its own text, with the same state, drag and fling.
     fn paint_input(&mut self, input: &InputNode<M>, index: usize, rect: Rect, context: &Context) {
+        let Some(meta) = self.text_meta.get(index).copied() else {
+            return;
+        };
+        // How far (px) the text can scroll up inside the field.
+        let range = meta.measured.height - rect.height;
+        let tall = range > 0.5 && !input.text.no_wrap;
+        let mut scroll_y = 0.0;
+        if tall {
+            let offset = if self.inert {
+                self.rest_scroll(context.id)
+            } else {
+                self.advance_scroll(context.id, range / self.scale)
+            };
+            scroll_y = (offset * self.scale).round();
+        }
         let visible = intersect(rect, context.clip);
-        if !visible.is_empty() {
+        if !visible.is_empty() && !self.inert {
             self.regions.push(Region {
                 id: context.id,
                 rect: visible,
                 kind: RegionKind::Focus(context.id),
-                scroll: context.scroll,
+                // A drag on a field that scrolls inside itself scrolls it.
+                scroll: if tall {
+                    Some(context.id)
+                } else {
+                    context.scroll
+                },
                 field: Some(context.id),
                 space: context.space,
             });
         }
-        let Some(meta) = self.text_meta.get(index).copied() else {
-            return;
-        };
         // Only a single line can be wider than its box.
         let overflow = meta.measured.width > rect.width + 0.5;
-        let Some(mut focus) = self.focus.take_if(|focus| focus.id == context.id) else {
-            if overflow {
+        let focused = if self.inert {
+            None
+        } else {
+            self.focus.take_if(|focus| focus.id == context.id)
+        };
+        let Some(mut focus) = focused else {
+            if overflow || tall {
                 self.frame.list.push_clip(rect);
             }
-            self.paint_text(&input.text, index, rect, context);
-            if overflow {
+            // The whole text, moved up by the scroll; the clip cuts it.
+            let all = if tall {
+                Rect::new(rect.x, rect.y - scroll_y, rect.width, meta.measured.height)
+            } else {
+                rect
+            };
+            self.paint_text(&input.text, index, all, Point::new(all.x, all.y), context);
+            if overflow || tall {
                 self.frame.list.pop_clip();
             }
             return;
         };
 
-        let style = text_style(&input.text, self.theme, self.scale);
+        let mut style = text_style(&input.text, self.theme, self.scale);
+        style.color = fade(style.color, context.alpha);
         // The placeholder is what was laid out for an empty field; the
         // caret belongs at its start.
         let shown: &str = if input.empty { "" } else { &input.text.content };
@@ -1916,7 +2500,10 @@ impl<M: Clone> Painter<'_, M> {
             // In a transformed widget the finger is where the turned text
             // is drawn; bring it back to the space the text is laid out in.
             let tap = context.space.map_or(tap, |space| space.inverse.apply(tap));
-            let local = Point::new(tap.x - origin_x + focus.scroll_x, tap.y - origin_y);
+            let local = Point::new(
+                tap.x - origin_x + focus.scroll_x,
+                tap.y - origin_y + scroll_y,
+            );
             let at = self
                 .frame
                 .text_index_at(shown, &style, meta.constraint, local);
@@ -1943,6 +2530,32 @@ impl<M: Clone> Painter<'_, M> {
         } else {
             focus.scroll_x = 0.0;
         }
+        if tall && std::mem::take(&mut focus.caret_moved) {
+            // Bring the caret's line into the field, with a line of
+            // context above and below it where the field has the room:
+            // a tap on the first or last visible line then brings the
+            // next one in.
+            let context_lines = caret
+                .height
+                .min((rect.height - caret.height) / 2.0)
+                .max(0.0);
+            let mut wanted = scroll_y;
+            if caret.y + caret.height + context_lines > wanted + rect.height {
+                wanted = caret.y + caret.height + context_lines - rect.height;
+            }
+            if caret.y - context_lines < wanted {
+                wanted = caret.y - context_lines;
+            }
+            let wanted = wanted.clamp(0.0, range).round();
+            if wanted != scroll_y {
+                scroll_y = wanted;
+                if let Some(state) = self.scrolls.get_mut(&context.id) {
+                    state.go(wanted / self.scale, false);
+                    state.frame_offset = state.offset;
+                }
+            }
+        }
+        focus.caret_moved = false;
 
         let clip = overflow || meta.measured.height > rect.height + 0.5;
         if clip {
@@ -1953,7 +2566,7 @@ impl<M: Clone> Painter<'_, M> {
                 rect.height,
             ));
         }
-        let origin = Point::new(origin_x - focus.scroll_x, origin_y);
+        let origin = Point::new(origin_x - focus.scroll_x, origin_y - scroll_y);
         self.frame
             .draw_text(&input.text.content, &style, origin, meta.constraint);
 
@@ -1999,7 +2612,7 @@ impl<M: Clone> Painter<'_, M> {
                     height.round(),
                 ),
                 0.0,
-                input.caret_color.resolve(self.theme),
+                fade(input.caret_color.resolve(self.theme), context.alpha),
             );
         }
         let next = CARET_BLINK
@@ -2014,14 +2627,23 @@ impl<M: Clone> Painter<'_, M> {
         *self.focus = Some(focus);
     }
 
-    fn paint_text(&mut self, text: &TextNode, index: usize, rect: Rect, context: &Context) {
+    fn paint_text(
+        &mut self,
+        text: &TextNode,
+        index: usize,
+        rect: Rect,
+        exact: Point,
+        context: &Context,
+    ) {
         let Some(meta) = self.text_meta.get(index) else {
             return;
         };
         if intersect(rect, context.clip).is_empty() {
             return;
         }
-        let style = text_style(text, self.theme, self.scale);
+        let alpha = context.alpha;
+        let mut style = text_style(text, self.theme, self.scale);
+        style.color = fade(style.color, alpha);
         // The lines were aligned within the width the text was laid out
         // at, which is not always the width of its box.
         let layout_width = meta.constraint.unwrap_or(meta.measured.width);
@@ -2032,8 +2654,8 @@ impl<M: Clone> Painter<'_, M> {
             TextAlign::End => slack,
         };
         let origin = Point::new(
-            (rect.x + shift).clamp(-MAX_TEXT_ORIGIN, MAX_TEXT_ORIGIN),
-            rect.y.clamp(-MAX_TEXT_ORIGIN, MAX_TEXT_ORIGIN),
+            (exact.x + shift).clamp(-MAX_TEXT_ORIGIN, MAX_TEXT_ORIGIN),
+            exact.y.clamp(-MAX_TEXT_ORIGIN, MAX_TEXT_ORIGIN),
         );
         let cut = meta.measured.height > rect.height + 0.5;
         if cut {
@@ -2046,7 +2668,7 @@ impl<M: Clone> Painter<'_, M> {
                 self.frame
                     .draw_text(&text.content, &style, origin, meta.constraint);
             } else {
-                let spans = text_spans(text, self.theme);
+                let spans = text_spans(text, self.theme, alpha);
                 self.frame
                     .draw_text_spans(&spans, &style, origin, meta.constraint);
             }
@@ -2054,12 +2676,12 @@ impl<M: Clone> Painter<'_, M> {
             let mut spans = if text.spans.is_empty() {
                 vec![TextSpan::new(&text.content)]
             } else {
-                text_spans(text, self.theme)
+                text_spans(text, self.theme, alpha)
             };
             if let Some((x, y, color)) = text.shadow {
                 // The same glyphs once more, behind, all in one colour.
                 let shadow = TextStyle {
-                    color: color.resolve(self.theme),
+                    color: fade(color.resolve(self.theme), alpha),
                     ..style
                 };
                 let offset = Point::new(
@@ -2082,7 +2704,7 @@ impl<M: Clone> Painter<'_, M> {
                         origin,
                         meta.constraint,
                         width * self.scale,
-                        color.resolve(self.theme),
+                        fade(color.resolve(self.theme), alpha),
                     );
                 }
                 None => {
@@ -2104,14 +2726,14 @@ impl<M: Clone> Painter<'_, M> {
         self.frame.draw_icon(
             &data.icon,
             rect,
-            data.color.resolve(self.theme),
+            fade(data.color.resolve(self.theme), context.alpha),
             data.stroke_width,
         );
     }
 
     fn paint_image(&mut self, data: &ImageNode, rect: Rect, context: &Context) {
         let radius = data.radius * self.scale;
-        let tint = data.tint.resolve(self.theme);
+        let tint = fade(data.tint.resolve(self.theme), context.alpha);
         match data.source {
             PictureSource::Image(image) => {
                 self.frame
@@ -2133,9 +2755,12 @@ impl<M: Clone> Painter<'_, M> {
         node: NodeId,
         slot: u32,
         rect: Rect,
+        // A solid background on its way from one colour to another.
+        animated_fill: Option<Color>,
         context: Context,
     ) {
         let scale = self.scale;
+        let alpha = context.alpha;
         let radius = data.radius * scale;
         let pressed = data.on_press.is_some() && self.pressed == Some(context.id);
         // The input this box is the frame of, and whether it has focus.
@@ -2155,7 +2780,7 @@ impl<M: Clone> Painter<'_, M> {
                     offset_y: shadow.offset_y * scale,
                     blur: shadow.blur * scale,
                     spread: shadow.spread * scale,
-                    color: shadow.color,
+                    color: fade(shadow.color, alpha),
                 },
             );
         }
@@ -2172,12 +2797,15 @@ impl<M: Clone> Painter<'_, M> {
             } else {
                 0.0
             };
-            Border::new(width, color.resolve(self.theme))
+            Border::new(width, fade(color.resolve(self.theme), alpha))
         });
         let fill = match (pressed, data.pressed_fill) {
             (true, Some(color)) => Some(Fill::Solid(color)),
             _ if focused && data.focused_fill.is_some() => data.focused_fill.map(Fill::Solid),
-            _ => data.fill,
+            _ => match (data.fill, animated_fill) {
+                (Some(Fill::Solid(_)), Some(color)) => Some(Fill::Solid(ColorRef::Value(color))),
+                (fill, _) => fill,
+            },
         };
         // The dash pattern in pixels. An invalid one draws a solid border.
         let dash = border.zip(data.dash).map(|(border, kind)| match kind {
@@ -2187,7 +2815,7 @@ impl<M: Clone> Painter<'_, M> {
         let clear = morningstar_core::Color::rgba(0.0, 0.0, 0.0, 0.0);
         match (fill, border) {
             (Some(Fill::Solid(color)), Some(border)) => {
-                let fill = color.resolve(self.theme);
+                let fill = fade(color.resolve(self.theme), alpha);
                 match dash {
                     Some(dash) => self
                         .frame
@@ -2200,9 +2828,11 @@ impl<M: Clone> Painter<'_, M> {
                 }
             }
             (Some(Fill::Solid(color)), None) => {
-                self.frame
-                    .list
-                    .fill_rounded_rect(rect, radius, color.resolve(self.theme));
+                self.frame.list.fill_rounded_rect(
+                    rect,
+                    radius,
+                    fade(color.resolve(self.theme), alpha),
+                );
             }
             (Some(Fill::Gradient(gradient)), border) => {
                 self.frame.list.fill_gradient_rect(
@@ -2211,8 +2841,8 @@ impl<M: Clone> Painter<'_, M> {
                     LinearGradient::angled(
                         rect,
                         gradient.degrees,
-                        gradient.from.resolve(self.theme),
-                        gradient.to.resolve(self.theme),
+                        fade(gradient.from.resolve(self.theme), alpha),
+                        fade(gradient.to.resolve(self.theme), alpha),
                     ),
                 );
                 match (border, dash) {
@@ -2236,14 +2866,16 @@ impl<M: Clone> Painter<'_, M> {
             (None, None) => {}
         }
         if pressed && data.pressed_fill.is_none() {
-            self.frame
-                .list
-                .fill_rounded_rect(rect, radius, self.theme.colors.pressed_overlay);
+            self.frame.list.fill_rounded_rect(
+                rect,
+                radius,
+                fade(self.theme.colors.pressed_overlay, alpha),
+            );
         }
 
         let visible = intersect(rect, context.clip);
         let mut inner = context;
-        if !visible.is_empty() {
+        if !visible.is_empty() && !self.inert {
             if let Some(message) = &data.on_press {
                 self.messages.push(message.clone());
                 self.regions.push(Region {
@@ -2279,10 +2911,16 @@ impl<M: Clone> Painter<'_, M> {
         }
 
         if data.scroll {
-            let offset = self.scroll(node, context.id);
+            self.scroll_nodes.push(node);
+            let offset = if self.inert {
+                self.rest_scroll(context.id)
+            } else {
+                let max = scroll_max(self.tree, node, self.keyboard_top);
+                self.advance_scroll(context.id, max)
+            };
             inner.dy -= (offset * scale).round();
             inner.scroll = Some(context.id);
-            if !visible.is_empty() {
+            if !visible.is_empty() && !self.inert {
                 self.regions.push(Region {
                     id: context.id,
                     rect: visible,
@@ -2319,9 +2957,14 @@ impl<M: Clone> Painter<'_, M> {
                 && let Some(child_node) = record.node
                 && intersect(self.pixels(self.tree.rect(child_node), &inner), cull).is_empty()
             {
-                // Off screen: skip the subtree without painting it.
+                // Off screen: skip the subtree without painting it. What
+                // has an explicit id in it is still reported as laid out.
+                let (from, to) = (self.node_cursor as u32, record.end_node);
                 self.node_cursor = record.end_node as usize;
                 self.text_cursor = record.end_text as usize;
+                if !self.inert {
+                    self.note_skipped(from, to, &inner);
+                }
                 continue;
             }
             self.paint(child, child_context);
@@ -2332,15 +2975,61 @@ impl<M: Clone> Painter<'_, M> {
         }
     }
 
-    /// Advances the scroll view `id` to this frame and returns its offset
-    /// in dp.
-    fn scroll(&mut self, node: NodeId, id: u64) -> f32 {
-        self.scroll_nodes.push(node);
-        let max = scroll_max(self.tree, node, self.keyboard_top);
+    /// Records where the elements with explicit ids are in the records
+    /// `from..to`, a subtree that is not painted because it is outside its
+    /// scroll view: as laid out and moved by `context`, with nothing of
+    /// them visible. This is what lets [`Ui::rect_of`] answer for a row
+    /// far down a list. It costs a binary search per skipped subtree and
+    /// a step per id in it.
+    fn note_skipped(&mut self, from: u32, to: u32, context: &Context) {
+        let first = self.keyed_table.partition_point(|keyed| keyed.slot < from);
+        for keyed in &self.keyed_table[first..] {
+            if keyed.slot >= to {
+                break;
+            }
+            if let Some(node) = node_of(self.records, keyed.slot) {
+                self.keyed.push(KeyedRect {
+                    id: keyed.id,
+                    rect: self.pixels(self.tree.rect(node), context),
+                    visible: Rect::default(),
+                });
+            }
+        }
+    }
 
+    /// The offset (dp) of the scroll view `id` inside a widget that has
+    /// left the tree: where it was, kept for as long as it is drawn.
+    fn rest_scroll(&mut self, id: u64) -> f32 {
+        match self.scrolls.get_mut(&id) {
+            Some(state) => {
+                state.seen = self.generation;
+                state.offset
+            }
+            None => 0.0,
+        }
+    }
+
+    /// Advances the scroll view `id`, which can scroll `max` dp, to this
+    /// frame and returns its offset in dp.
+    fn advance_scroll(&mut self, id: u64, max: f32) -> f32 {
         let state = self.scrolls.entry(id).or_default();
         state.seen = self.generation;
         state.max = max;
+
+        if let Some(mut glide) = state.glide.take()
+            && self.dragging != Some(id)
+        {
+            // An animated move the application asked for. Its end is kept
+            // within what can be scrolled now.
+            let start = *glide.start.get_or_insert(self.elapsed);
+            let t = GLIDE.progress(start, self.elapsed);
+            let to = clamp_offset(glide.to, max);
+            state.offset = glide.from + (to - glide.from) * GLIDE.easing.apply(t);
+            if t < 1.0 {
+                state.glide = Some(glide);
+                self.animating = true;
+            }
+        }
 
         let step = self.dt.filter(|dt| *dt > 0.0);
         if self.dragging == Some(id) {
@@ -2422,6 +3111,19 @@ mod tests {
     use super::*;
 
     const VIEWPORT: Rect = Rect::new(0.0, 100.0, 360.0, 600.0);
+
+    /// With the margins a focused field is given.
+    fn reveal_offset(field: Rect, viewport: Rect, bottom: f32, offset: f32, max: f32) -> f32 {
+        super::reveal_offset(
+            field,
+            viewport,
+            bottom,
+            offset,
+            max,
+            REVEAL_ABOVE,
+            REVEAL_BELOW,
+        )
+    }
 
     fn field(y: f32) -> Rect {
         Rect::new(20.0, y, 320.0, 22.0)

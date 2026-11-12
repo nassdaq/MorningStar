@@ -12,6 +12,8 @@ use morningstar_core::{
     ServiceRequest, ServiceResult,
 };
 
+use crate::scroll::ScrollTo;
+
 /// Turns the platform's answer into the application's message.
 type Handler<M> = Box<dyn FnOnce(ServiceResult) -> M + Send>;
 
@@ -42,12 +44,14 @@ enum Entry<M> {
 /// be carried out; a request never fails by staying silent.
 pub struct Effects<M> {
     entries: Vec<Entry<M>>,
+    scrolls: Vec<ScrollTo>,
 }
 
 impl<M> Effects<M> {
     pub(crate) fn new() -> Self {
         Self {
             entries: Vec::new(),
+            scrolls: Vec::new(),
         }
     }
 
@@ -205,9 +209,18 @@ impl<M> Effects<M> {
         self.entries.push(Entry::Forget);
     }
 
+    /// Asks a scroll view to move: to its top or end, to an offset, or as
+    /// far as brings a widget into view; at once or gliding. See
+    /// [`ScrollTo`]. Unlike the other requests this one is not for the
+    /// platform and has no answer: it is carried out in the next frame,
+    /// with that frame's layout.
+    pub fn scroll(&mut self, to: ScrollTo) {
+        self.scrolls.push(to);
+    }
+
     /// True if nothing has been asked for since the runtime last looked.
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.entries.is_empty() && self.scrolls.is_empty()
     }
 }
 
@@ -274,8 +287,10 @@ impl<M> EffectState<M> {
 
     /// Takes in what the application just asked for: numbers each request,
     /// remembers its handler, and passes it on to whoever carries requests
-    /// out.
-    pub(crate) fn collect(&mut self) {
+    /// out. Requests to scroll are for the UI layer itself and go to
+    /// `scrolls`.
+    pub(crate) fn collect(&mut self, scrolls: &mut Vec<ScrollTo>) {
+        scrolls.append(&mut self.scratch.scrolls);
         if self.scratch.entries.is_empty() {
             return;
         }

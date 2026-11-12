@@ -13,6 +13,7 @@ use morningstar_runtime::{FontFamily, TextAlign, TextWeight, VectorIcon, VectorP
 
 use crate::color::{ColorRef, ThemeColor};
 use crate::edit::{self, EditConfig};
+use crate::motion::{Animation, Easing, Motion, Transition};
 use crate::theme::TextRole;
 
 /// Hashes an explicit widget id. Deterministic across runs and platforms.
@@ -185,6 +186,87 @@ macro_rules! layout_methods {
     };
 }
 
+/// Opacity and animation methods, for [`Container`] and [`Element`]. Expects
+/// the type to have a `motion: Motion` field.
+macro_rules! motion_methods {
+    () => {
+        /// Draws the widget and everything inside it at this opacity:
+        /// `0.0` invisible, `1.0` (the default) as given. It is multiplied
+        /// into every colour drawn (fills, borders, text, shadows, image
+        /// tints), so children that overlap each other show through one
+        /// another while faded: right for fading something in or out, not
+        /// a group opacity. An invisible widget still takes its room and
+        /// its touches.
+        pub fn opacity(mut self, opacity: f32) -> Self {
+            self.motion.opacity = if opacity.is_nan() {
+                1.0
+            } else {
+                opacity.clamp(0.0, 1.0)
+            };
+            self
+        }
+
+        /// Shows changes of this widget's own properties over `duration`
+        /// instead of at once: when a later `view` gives the same widget
+        /// (the same identity; give it an `.id(..)`) a different
+        /// [`opacity`](Self::opacity), [`transform`](Self::transform) or
+        /// [`offset`](Self::offset), solid background colour, or fixed
+        /// width or height, it is drawn on the way from the old value to
+        /// the new one. A change that arrives mid-way starts from where
+        /// the widget has got to.
+        ///
+        /// Nothing else is animated: not children, not a gradient, and not
+        /// a size that hugs or fills (the layout engine decides those). A
+        /// width or height that is animated moves its neighbours with it,
+        /// frame by frame. Frames are produced only while something is on
+        /// its way.
+        ///
+        /// ```
+        /// use std::time::Duration;
+        /// use morningstar_ui::prelude::*;
+        ///
+        /// fn toggle(on: bool) -> Container<()> {
+        ///     let knob = Container::empty()
+        ///         .size(24.0, 24.0)
+        ///         .radius(12.0)
+        ///         .background(hex(0xFFFFFF))
+        ///         .offset(if on { 20.0 } else { 0.0 }, 0.0)
+        ///         .id("knob")
+        ///         .animate(Duration::from_millis(160), Easing::EaseOut);
+        ///     Container::new(knob)
+        ///         .size(48.0, 28.0)
+        ///         .padding(2.0)
+        ///         .radius(14.0)
+        ///         .background(if on { hex(0x34C759) } else { hex(0xC7C7CC) })
+        ///         .id("track")
+        ///         .animate(Duration::from_millis(160), Easing::EaseOut)
+        /// }
+        /// # let _ = toggle(true);
+        /// ```
+        pub fn animate(mut self, duration: std::time::Duration, easing: Easing) -> Self {
+            self.motion.animate = Some(Animation::new(duration, easing));
+            self
+        }
+
+        /// How the widget appears in the first frame it is in the tree and
+        /// disappears in the first frame it is not: see [`Transition`].
+        /// Identity is what "the same widget" means, so give it an
+        /// `.id(..)`.
+        ///
+        /// A widget that has left is still drawn, where it last was and on
+        /// top of the screen, until its transition has run; it takes no
+        /// room and no touches while it goes. If, in the frame it leaves,
+        /// another widget with a transition enters the same box, the
+        /// leaving widget goes the way that newcomer's transition says
+        /// (its exit), not its own: that is what lets a screen pushed
+        /// from the right send the previous one off to the left.
+        pub fn transition(mut self, transition: Transition) -> Self {
+            self.motion.transition = Some(transition);
+            self
+        }
+    };
+}
+
 /// `size(width, height)` for widgets where "size" means the box (on
 /// [`Text`] it means the font size).
 macro_rules! box_size_method {
@@ -206,6 +288,7 @@ pub struct Element<M> {
     pub(crate) key: Option<u64>,
     /// In dp, about the element's centre.
     pub(crate) transform: Option<Transform>,
+    pub(crate) motion: Motion,
     pub(crate) kind: Kind<M>,
 }
 
@@ -223,6 +306,7 @@ pub(crate) enum Kind<M> {
 impl<M> Element<M> {
     layout_methods!();
     box_size_method!();
+    motion_methods!();
 
     /// Converts the messages this subtree produces, so a view written for
     /// one message type can be embedded in a parent with another:
@@ -241,6 +325,7 @@ impl<M> Element<M> {
             layout: self.layout,
             key: self.key,
             transform: self.transform,
+            motion: self.motion,
             kind: match self.kind {
                 Kind::Text(text) => Kind::Text(text),
                 Kind::Image(image) => Kind::Image(image),
@@ -637,6 +722,7 @@ pub struct Container<M> {
     layout: Style,
     key: Option<u64>,
     transform: Option<Transform>,
+    motion: Motion,
     node: BoxNode<M>,
 }
 
@@ -646,6 +732,7 @@ impl<M> Container<M> {
             layout: Style::new(),
             key: None,
             transform: None,
+            motion: Motion::PLAIN,
             node: BoxNode::new(axis),
         }
     }
@@ -665,6 +752,7 @@ impl<M> Container<M> {
 
     layout_methods!();
     box_size_method!();
+    motion_methods!();
 
     /// Adds a child after the existing ones.
     pub fn push(mut self, child: impl Into<Element<M>>) -> Self {
@@ -712,6 +800,51 @@ impl<M> Container<M> {
     /// values overlap them. Ignored by stacks.
     pub fn gap(mut self, dp: f32) -> Self {
         self.layout.gap = dp;
+        self
+    }
+
+    /// Makes a row wrap: children that do not fit on a line continue on
+    /// the next, as CSS `flex-wrap: wrap` does. [`gap`](Self::gap) stays
+    /// the space between neighbours on a line;
+    /// [`line_gap`](Self::line_gap) is the space between lines. Ignored by
+    /// columns and stacks.
+    ///
+    /// ```
+    /// use morningstar_ui::prelude::*;
+    /// let tags = ["Screen", "Battery", "Water damage", "Charging port"];
+    /// let chips: Container<()> = Row::new()
+    ///     .extend(tags.map(|tag| {
+    ///         Container::new(text(tag).caption())
+    ///             .padding_xy(12.0, 6.0)
+    ///             .radius(999.0)
+    ///             .border(1.0, ThemeColor::Divider)
+    ///     }))
+    ///     .gap(8.0)
+    ///     .line_gap(8.0)
+    ///     .wrap()
+    ///     .fill_width();
+    /// # let _ = chips;
+    /// ```
+    ///
+    /// The rules are the layout engine's ("Wrapping rows" in
+    /// `morningstar-layout`): a child moves to the next line when it does
+    /// not fit after the ones before it; a hugging child is offered the
+    /// whole line, so a long label wraps inside its chip before anything
+    /// overflows; a `fill_width()` child takes what its line has left; a
+    /// line is as tall as its tallest child; alignment
+    /// ([`main_align`](Self::main_align), [`cross_align`](Self::cross_align))
+    /// acts within each line; and the row's height, when it hugs, is that
+    /// of all its lines, also inside a [`ScrollView`]. A row whose
+    /// children fit on one line is laid out exactly as without `wrap()`.
+    pub fn wrap(mut self) -> Self {
+        self.layout.wrap = true;
+        self
+    }
+
+    /// Space between the lines of a [`wrap`](Self::wrap)ping row, in dp
+    /// (CSS `row-gap`). Zero by default.
+    pub fn line_gap(mut self, dp: f32) -> Self {
+        self.layout.line_gap = dp;
         self
     }
 
@@ -787,8 +920,8 @@ impl<M> Container<M> {
 
     /// Breaks the border into dashes `length` dp long and `gap` dp apart,
     /// measured along the middle of the stroke (a design tool's "dash" and
-    /// "gap"). The pattern starts at the bottom of the left edge and runs
-    /// clockwise. Needs a [`border`](Self::border).
+    /// "gap"). The pattern starts at the top of the left edge and runs
+    /// down it. Needs a [`border`](Self::border).
     pub fn border_dash(mut self, length: f32, gap: f32) -> Self {
         self.node.dash = Some(DashKind::Pattern(length, gap));
         self
@@ -876,6 +1009,7 @@ impl<M> From<Container<M>> for Element<M> {
             layout: container.layout,
             key: container.key,
             transform: container.transform,
+            motion: container.motion,
             kind: Kind::Box(container.node),
         }
     }
@@ -902,6 +1036,19 @@ impl Row {
     #[allow(clippy::new_ret_no_self)]
     pub fn new<M>() -> Container<M> {
         Container::with_axis(Axis::Row)
+    }
+}
+
+/// Children laid out left to right, continuing on a new line when they do
+/// not fit: a group of chips or tags. `Wrap::new()` is
+/// `Row::new().wrap()`; see [`Container::wrap`].
+pub struct Wrap;
+
+impl Wrap {
+    /// An empty wrapping row that hugs its children.
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new<M>() -> Container<M> {
+        Container::with_axis(Axis::Row).wrap()
     }
 }
 
@@ -1028,7 +1175,7 @@ pub struct Text {
     layout: Style,
     key: Option<u64>,
     transform: Option<Transform>,
-    node: TextNode,
+    pub(crate) node: TextNode,
 }
 
 impl Text {
@@ -1271,6 +1418,7 @@ impl<M> From<Text> for Element<M> {
             layout: text.layout,
             key: text.key,
             transform: text.transform,
+            motion: Motion::PLAIN,
             kind: Kind::Text(text.node),
         }
     }
@@ -1362,8 +1510,10 @@ pub fn text(content: impl Into<Cow<'static, str>>) -> Text {
 /// an `.id(..)` when fields can appear or disappear around them.
 ///
 /// It fills the width it is given; [`hug_width`](Self::hug_width) makes
-/// it as wide as its text (a centred code box). Not supported: selection,
-/// copy and paste.
+/// it as wide as its text (a centred code box). A
+/// [`multiline`](Self::multiline) field grows with its text, up to
+/// [`max_lines`](Self::max_lines) if that is set, and then scrolls inside
+/// itself. Not supported: selection, copy and paste.
 pub struct TextInput<M> {
     layout: Style,
     key: Option<u64>,
@@ -1478,11 +1628,28 @@ impl<M> TextInput<M> {
     }
 
     /// Several lines: the text wraps at the field's width, the field grows
-    /// downwards with it, and the Return key inserts a line break.
+    /// downwards with it, and the Return key inserts a line break. Bound
+    /// the growth with [`max_lines`](Self::max_lines).
     pub fn multiline(mut self) -> Self {
         self.config.multiline = true;
         self.traits.multiline = true;
         self.style.no_wrap = false;
+        self
+    }
+
+    /// For a [`multiline`](Self::multiline) field: it grows to at most
+    /// this many lines and then scrolls inside itself. The layout never
+    /// sees more than that height, so nothing overflows; the text is
+    /// clipped to the field and scrolled so that the caret stays in view
+    /// (with a line of context where there is room, so tapping the first
+    /// or last visible line brings the next one in), and a drag on the
+    /// field scrolls it like a [`ScrollView`]. `.max_height(dp)` bounds it
+    /// by a length instead, and both may be given.
+    ///
+    /// The position is widget state kept by identity, like a scroll
+    /// view's: give the field an `.id(..)`.
+    pub fn max_lines(mut self, lines: u32) -> Self {
+        self.style.max_lines = Some(lines.max(1));
         self
     }
 
@@ -1515,10 +1682,11 @@ impl<M> TextInput<M> {
     /// can share a design's text style helper: `.style(body("", 15.0))`.
     pub fn style(mut self, text: Text) -> Self {
         let no_wrap = self.style.no_wrap;
+        let max_lines = self.style.max_lines;
         self.style = TextNode {
             content: Cow::Borrowed(""),
             spans: Vec::new(),
-            max_lines: None,
+            max_lines,
             no_wrap,
             ..text.node
         };
@@ -1612,6 +1780,7 @@ impl<M> From<TextInput<M>> for Element<M> {
             layout: input.layout,
             key: input.key,
             transform: input.transform,
+            motion: Motion::PLAIN,
             kind: Kind::Input(InputNode {
                 text,
                 value: input.value,
@@ -1765,6 +1934,7 @@ impl<M> From<Button<M>> for Element<M> {
             layout: button.layout,
             key: button.key,
             transform: button.transform,
+            motion: Motion::PLAIN,
             kind: Kind::Box(node),
         }
     }
@@ -2007,6 +2177,7 @@ impl<M> From<Picture> for Element<M> {
             layout,
             key: picture.key,
             transform: picture.transform,
+            motion: Motion::PLAIN,
             kind: Kind::Image(picture.node),
         }
     }
@@ -2252,6 +2423,7 @@ impl<M> From<Icon> for Element<M> {
                         layout: sized(icon.layout, icon.side),
                         key: icon.key,
                         transform: icon.transform,
+                        motion: Motion::PLAIN,
                         kind: Kind::Icon(node),
                     };
                 };
@@ -2259,6 +2431,7 @@ impl<M> From<Icon> for Element<M> {
                     layout: sized(Style::new(), icon.side / 2.0),
                     key: None,
                     transform: None,
+                    motion: Motion::PLAIN,
                     kind: Kind::Icon(node),
                 }
             }

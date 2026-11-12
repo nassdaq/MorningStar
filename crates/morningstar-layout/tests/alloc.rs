@@ -51,7 +51,8 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static GLOBAL: Counting = Counting;
 
-/// A list of `rows` rows, each an icon, two wrapped texts and a badge.
+/// A list of `rows` rows, each an icon, two wrapped texts and a badge, with
+/// a wrapping row of chips after every eighth.
 fn build(tree: &mut LayoutTree, rows: usize) -> NodeId {
     let list = tree.column(Style::new().fill(), &[]);
     for index in 0..rows {
@@ -75,6 +76,15 @@ fn build(tree: &mut LayoutTree, rows: usize) -> NodeId {
             &[icon, lines, badge],
         );
         tree.add_child(list, row);
+        if index % 8 == 0 {
+            // A wrapping row of five chips, three to a line.
+            let chips = tree.row(Style::new().fill_width().gap(8.0).line_gap(8.0).wrap(), &[]);
+            for _ in 0..5 {
+                let chip = tree.leaf(Style::fixed(100.0, 24.0));
+                tree.add_child(chips, chip);
+            }
+            tree.add_child(list, chips);
+        }
     }
     list
 }

@@ -303,7 +303,17 @@ pub struct Style {
     /// May be negative, which makes children overlap (overlapping avatars).
     /// NaN is treated as `0`.
     pub gap: f32,
-    /// Distribution of children along the main axis of a row or column.
+    /// Rows only: children that do not fit on one line continue on the
+    /// next, as CSS `flex-wrap: wrap` does. Default `false`. Ignored by
+    /// columns, stacks and leaves. See "Wrapping rows" in the crate
+    /// documentation for the exact rules.
+    pub wrap: bool,
+    /// Space between the lines of a wrapping row (CSS `row-gap`). Default
+    /// `0`; `gap` stays the space between neighbours on a line. May be
+    /// negative; NaN is treated as `0`. Ignored unless `wrap` is set.
+    pub line_gap: f32,
+    /// Distribution of children along the main axis of a row or column. In
+    /// a wrapping row it applies to each line separately.
     pub main_align: MainAlign,
     /// Placement of children along the cross axis of a row or column. A
     /// child can override it with `align_self`.
@@ -343,6 +353,8 @@ impl Style {
         aspect_ratio: None,
         padding: Edges::ZERO,
         gap: 0.0,
+        wrap: false,
+        line_gap: 0.0,
         main_align: MainAlign::Start,
         cross_align: CrossAlign::Start,
         content_align: Alignment::TOP_LEFT,
@@ -447,6 +459,18 @@ impl Style {
         self
     }
 
+    /// Makes a row wrap its children onto further lines.
+    pub const fn wrap(mut self) -> Self {
+        self.wrap = true;
+        self
+    }
+
+    /// Sets the gap between the lines of a wrapping row.
+    pub const fn line_gap(mut self, gap: f32) -> Self {
+        self.line_gap = gap;
+        self
+    }
+
     /// Sets the main-axis distribution of children.
     pub const fn main_align(mut self, align: MainAlign) -> Self {
         self.main_align = align;
@@ -501,6 +525,7 @@ impl Style {
                 .filter(|ratio| ratio.is_finite() && *ratio > 0.0),
             padding: self.padding.sanitized(),
             gap: clean_signed(self.gap),
+            line_gap: clean_signed(self.line_gap),
             offset: Point::new(clean_signed(self.offset.x), clean_signed(self.offset.y)),
             ..self
         }

@@ -863,7 +863,11 @@ fn a_scroll_view_clips_and_skips_what_is_off_screen() {
     // costs what is visible.
     assert!(harness.ui.rect_of(("row", 0)).is_some());
     assert!(harness.ui.rect_of(("row", 8)).is_some());
-    assert!(harness.ui.rect_of(("row", 20)).is_none());
+    assert!(harness.ui.visible_rect_of(("row", 0)).is_some());
+    assert!(harness.ui.visible_rect_of(("row", 20)).is_none());
+    // It is still known where they were laid out: below the screen.
+    let far = harness.ui.rect_of(("row", 20)).expect("laid out");
+    assert!(far.y > 2400.0, "{far:?}");
     let glyphs_at_top = harness.glyph_count();
     assert!(glyphs_at_top < 12 * 6, "{glyphs_at_top} glyphs for 9 rows");
 
@@ -872,8 +876,14 @@ fn a_scroll_view_clips_and_skips_what_is_off_screen() {
     harness.moved(180.0, 0.0);
     harness.up(180.0, 0.0);
     harness.step(1.0);
-    assert!(harness.ui.rect_of(("row", 0)).is_none());
-    assert!(harness.ui.rect_of(("row", 10)).is_some());
+    assert!(harness.ui.visible_rect_of(("row", 0)).is_none());
+    assert!(
+        harness
+            .ui
+            .rect_of(("row", 0))
+            .is_some_and(|rect| rect.y < 0.0)
+    );
+    assert!(harness.ui.visible_rect_of(("row", 10)).is_some());
 }
 
 #[test]
