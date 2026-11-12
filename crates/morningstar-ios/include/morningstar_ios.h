@@ -9,12 +9,26 @@
 #define MORNINGSTAR_IOS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 typedef struct MorningstarHost MorningstarHost;
 
-// Creates the host. Destroy with morningstar_ios_destroy.
+// Creates the host. Destroy with morningstar_ios_destroy. The application
+// is handed nothing at setup: no stored values, a placeholder installation
+// id. A host that offers platform services (below) uses
+// morningstar_ios_create_with_state instead.
 MorningstarHost *morningstar_ios_create(void);
+
+// Creates the host and hands the application what it may read when it is
+// set up: install_id, this installation's identifier (32 hexadecimal digits,
+// generated once with the system's secure random and kept by the host), and
+// the values the application stored on earlier runs, as stored_count
+// NUL-terminated UTF-8 strings that are keys and values in turn. Everything
+// is copied before the call returns.
+MorningstarHost *morningstar_ios_create_with_state(const char *install_id,
+                                                   const char *const *stored,
+                                                   size_t stored_count);
 
 // Attaches to a CAMetalLayer*. The layer must stay alive until
 // morningstar_ios_detach_layer or morningstar_ios_destroy. Sizes are in
@@ -59,6 +73,14 @@ enum {
 // down to up. Coordinates are in physical pixels relative to the layer.
 void morningstar_ios_pointer(MorningstarHost *host, uint32_t phase,
                              uint64_t pointer_id, float x_px, float y_px);
+
+// A "back" gesture, as the host defines one (iOS has no system Back; a
+// swipe from the leading edge is the usual choice). Returns true if the
+// application handled it (it went to its previous screen): a frame follows,
+// so ask morningstar_ios_needs_frame. Returns false if it had nowhere to go
+// back to; the host then does nothing. Answers at once: no frame is built
+// inside the call.
+bool morningstar_ios_back(MorningstarHost *host);
 
 // Produces one frame if one is needed. Call from a CADisplayLink callback,
 // then ask morningstar_ios_needs_frame whether to keep the link running.
@@ -143,6 +165,117 @@ bool morningstar_ios_take_text_input(MorningstarHost *host,
 // is false and this is not negative, arm a one-shot timer for that long and,
 // when it fires, ask morningstar_ios_needs_frame again.
 double morningstar_ios_redraw_delay(const MorningstarHost *host);
+
+// ---------------------------------------------------------- platform services
+//
+// The application asks for work that takes time: an HTTP request, a
+// recording, playing a clip, a stored value (ADR 0019). Requests appear only
+// inside calls into this interface, so after every call the host drains
+// morningstar_ios_take_service_request (as it asks morningstar_ios_needs_frame
+// and morningstar_ios_take_text_input), does the work off the main thread,
+// and answers ON THE MAIN THREAD with one of the *_result functions.
+//
+// Every request of a kind marked "answered" must be answered exactly once,
+// with an error if it cannot be carried out: the application is waiting.
+// Never call a *_result function after morningstar_ios_destroy: the host
+// must drop answers that arrive for a host it has destroyed.
+
+// MorningstarServiceRequest.kind.
+enum {
+  // Answered with morningstar_ios_http_result. text1: method ("GET", ...);
+  // text2: URL; text3: headers, "Name: value" lines each ended by '\n';
+  // data: body (empty for none); timeout_ms: for the whole exchange.
+  MORNINGSTAR_SERVICE_HTTP = 0,
+  // Answered with morningstar_ios_audio_result, kind STARTED, once the
+  // microphone is running or it is known why not.
+  MORNINGSTAR_SERVICE_START_RECORDING = 1,
+  // Answered with morningstar_ios_audio_result, kind RECORDING.
+  MORNINGSTAR_SERVICE_STOP_RECORDING = 2,
+  // Answered with morningstar_ios_audio_result, kind PLAYED, when the clip
+  // has finished or failed. text1: media type; data: the audio file.
+  MORNINGSTAR_SERVICE_PLAY = 3,
+  // Not answered; the clip that was playing is answered INTERRUPTED.
+  MORNINGSTAR_SERVICE_STOP_PLAYBACK = 4,
+  // Not answered. text1: key; text2: value.
+  MORNINGSTAR_SERVICE_STORE = 5,
+  // Not answered. text1: key.
+  MORNINGSTAR_SERVICE_REMOVE = 6,
+  // Answered with morningstar_ios_load_result. text1: key.
+  MORNINGSTAR_SERVICE_LOAD = 7,
+};
+
+// One request. Strings are NUL-terminated UTF-8 and never NULL (unused ones
+// are empty); data is NULL when data_len is 0. Everything pointed to stays
+// valid until the next morningstar_ios_take_service_request or
+// morningstar_ios_destroy: copy what must outlive that.
+typedef struct MorningstarServiceRequest {
+  uint64_t id; // give this back with the answer
+  uint32_t kind;
+  uint32_t timeout_ms;
+  const char *text1;
+  const char *text2;
+  const char *text3;
+  const uint8_t *data;
+  size_t data_len;
+} MorningstarServiceRequest;
+
+// Fills *out with the next request and returns true, or returns false (the
+// usual case) when there is none. Call in a loop until it returns false.
+bool morningstar_ios_take_service_request(MorningstarHost *host,
+                                          MorningstarServiceRequest *out);
+
+// morningstar_ios_http_result's error.
+enum {
+  MORNINGSTAR_HTTP_OK = 0,          // the server answered (any status)
+  MORNINGSTAR_HTTP_OFFLINE = 1,     // no network, no such host, refused
+  MORNINGSTAR_HTTP_TIMEOUT = 2,
+  MORNINGSTAR_HTTP_INVALID_URL = 3, // not an absolute http(s) URL
+  MORNINGSTAR_HTTP_TOO_LARGE = 4,   // body over 10 MB
+  MORNINGSTAR_HTTP_UNSUPPORTED = 5,
+  MORNINGSTAR_HTTP_FAILED = 6,      // anything else; message says what
+};
+
+// The answer to a MORNINGSTAR_SERVICE_HTTP request. With MORNINGSTAR_HTTP_OK:
+// status, headers ("Name: value" lines) and body. Otherwise those are
+// ignored and message (may be NULL) describes a MORNINGSTAR_HTTP_FAILED.
+// Everything is copied. Main thread; then ask morningstar_ios_needs_frame.
+void morningstar_ios_http_result(MorningstarHost *host, uint64_t id,
+                                 uint32_t error, uint32_t status,
+                                 const char *headers, const uint8_t *body,
+                                 size_t body_len, const char *message);
+
+// morningstar_ios_audio_result's kind: which request is being answered.
+enum {
+  MORNINGSTAR_AUDIO_KIND_STARTED = 0,
+  MORNINGSTAR_AUDIO_KIND_RECORDING = 1,
+  MORNINGSTAR_AUDIO_KIND_PLAYED = 2,
+};
+
+// morningstar_ios_audio_result's error.
+enum {
+  MORNINGSTAR_AUDIO_OK = 0,
+  MORNINGSTAR_AUDIO_PERMISSION_DENIED = 1,
+  MORNINGSTAR_AUDIO_BUSY = 2,          // already recording
+  MORNINGSTAR_AUDIO_UNSUPPORTED = 3,
+  MORNINGSTAR_AUDIO_NOT_RECORDING = 4, // stop with nothing to stop
+  MORNINGSTAR_AUDIO_INTERRUPTED = 5,   // playback ended before the clip did
+  MORNINGSTAR_AUDIO_FAILED = 6,        // anything else; message says what
+};
+
+// The answer to a recording or playback request. For a stopped recording
+// (kind RECORDING, error OK): data is the audio file, mime its media type
+// ("audio/mp4") and duration_ms its length. Everything is copied. Main
+// thread; then ask morningstar_ios_needs_frame.
+void morningstar_ios_audio_result(MorningstarHost *host, uint64_t id,
+                                  uint32_t kind, uint32_t error,
+                                  const char *message, const uint8_t *data,
+                                  size_t data_len, const char *mime,
+                                  uint64_t duration_ms);
+
+// The answer to a MORNINGSTAR_SERVICE_LOAD request: the value, or found
+// false when the key holds nothing. Main thread.
+void morningstar_ios_load_result(MorningstarHost *host, uint64_t id,
+                                 bool found, const char *value);
 
 void morningstar_ios_destroy(MorningstarHost *host);
 

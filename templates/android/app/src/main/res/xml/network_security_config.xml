@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Which servers the app may talk to without TLS: none, except this device
+     itself. See docs/architecture/0019-effects-and-platform-services.md.
+
+     The three names below all mean "the machine in front of the developer":
+     127.0.0.1 and localhost reach a development server through
+     `adb reverse tcp:PORT tcp:PORT`, and 10.0.2.2 is the emulator's name for
+     its host. None of them can name another machine on a network, so the
+     exception does not weaken a released app. Everything else must be
+     HTTPS, with the system's certificate authorities; user-installed
+     authorities are not trusted (the platform default for apps targeting
+     API 24 and later). -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

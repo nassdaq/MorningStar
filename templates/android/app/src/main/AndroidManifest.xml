@@ -1,8 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Platform services (ADR 0019). INTERNET is granted at install.
+         RECORD_AUDIO is asked of the user the first time the application
+         starts a recording, never before. An application that uses
+         neither loses nothing by their being declared, but a store
+         listing shows them: remove what the application does not use. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Declared by RECORD_AUDIO unless said otherwise: do not hide the
+         app from devices without a microphone. -->
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
+    <!-- enableOnBackInvokedCallback: from API 33 the system's Back goes to
+         the callback MorningstarActivity registers, on every release rather
+         than only where targetSdk 36 makes it the default (Android 16).
+         Ignored below API 33, where onBackPressed is used.
+         networkSecurityConfig: HTTPS only, except plain HTTP to this
+         device itself, for development against a server on the developer's
+         machine (res/xml/network_security_config.xml).
+         icon, roundIcon: the app's launcher icons (ADR 0020). They are not in
+         this template: tools/build-android.sh generates them from the app's
+         Cargo.toml into app/build/generated/morningstar/res. From API 26
+         both are the adaptive icon of mipmap-anydpi-v26. -->
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:enableOnBackInvokedCallback="true"
         android:label="${appName}"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 

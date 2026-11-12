@@ -5,18 +5,15 @@
 #   tools/build-android.sh --install  # also install and launch on the connected device
 #   MORNINGSTAR_APP=showcase tools/build-android.sh --install   # another example
 #
+# The app's name, application id and launcher icon come from the
+# [package.metadata.morningstar] table of its Cargo.toml (ADR 0020).
+#
 # Requires: the Android SDK + NDK (ANDROID_HOME), cargo-ndk, a JDK 17+.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 host="$root/templates/android"
 package="${MORNINGSTAR_APP:-hello-gpu}"
-lib_name="${package//-/_}"
-# Each example gets its own application id so they install side by side.
-case "$package" in
-    hello-gpu) app_id="dev.morningstar.hello"; app_name="Morningstar" ;;
-    *) app_id="dev.morningstar.${lib_name}"; app_name="Morningstar ${package}" ;;
-esac
 
 : "${ANDROID_HOME:?ANDROID_HOME must point at the Android SDK}"
 if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
@@ -30,6 +27,16 @@ if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
 fi
 
 cd "$root"
+# What the app declares about itself: its launcher icons, generated into the
+# build directory (never into the template's sources; files that have not
+# changed are left alone, so Gradle has nothing to redo), and its id, name
+# and library, one per line. Without an id each app gets
+# dev.morningstar.<lib>, so the examples install side by side.
+res_dir="$host/app/build/generated/morningstar/res"
+identity="$(cargo run --quiet --package morningstar-devtools --bin morningstar-icon -- \
+    "$package" --android "$res_dir" --print id --print name --print lib)"
+{ read -r app_id; read -r app_name; read -r lib_name; } <<<"$identity"
+
 # arm64 for devices, x86_64 for emulators on Intel hosts. Override with e.g.
 # MORNINGSTAR_ABIS="arm64-v8a" to build one, which halves build time and disk use.
 abis=()
@@ -48,7 +55,8 @@ cd "$host"
 ./gradlew --quiet assembleDebug \
     "-Pmorningstar.appId=$app_id" \
     "-Pmorningstar.appName=$app_name" \
-    "-Pmorningstar.libName=$lib_name"
+    "-Pmorningstar.libName=$lib_name" \
+    "-Pmorningstar.resDir=$res_dir"
 apk="$host/app/build/outputs/apk/debug/app-debug.apk"
 echo "APK: $apk"
 

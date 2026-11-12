@@ -172,8 +172,15 @@ final class MetalView: UIView, UIKeyInput {
 /// up changes only inside those calls. So every method that calls into the
 /// engine ends with `syncWithEngine()`; that is the one rule to keep when
 /// editing.
+///
+/// Platform services (HTTP, recording, playback, stored values; ADR 0019)
+/// follow the same rule: the application's requests appear only inside
+/// those calls, `syncWithEngine()` hands them to `HostServices`, and each
+/// answer comes back through `deliverServiceResult`. That part of the host
+/// has never been compiled; see the note at the top of HostServices.swift.
 final class HostViewController: UIViewController {
     private var engine: OpaquePointer?
+    private let services = HostServices()
     private var displayLink: CADisplayLink?
     private var attached = false
     private var active = false
@@ -213,7 +220,21 @@ final class HostViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        engine = morningstar_ios_create()
+        // The application is handed its installation id and the values it
+        // stored on earlier runs when it is set up, so it can know them
+        // before its first frame. The C strings only need to live for the
+        // call: Rust copies them.
+        let stored = HostServices.storedSnapshot().map { strdup($0) }
+        defer { stored.forEach { free($0) } }
+        let storedPointers = stored.map { UnsafePointer<CChar>($0) }
+        engine = HostServices.installID().withCString { installID in
+            storedPointers.withUnsafeBufferPointer { pointers in
+                morningstar_ios_create_with_state(installID, pointers.baseAddress, pointers.count)
+            }
+        }
+        services.owner = self
+        // Whatever the application asked for while it was being set up.
+        syncWithEngine()
         // Benchmarks pass this launch argument to get a steady frame stream.
         if ProcessInfo.processInfo.arguments.contains("-morningstar-continuous") {
             morningstar_ios_set_continuous(engine, true)
@@ -303,6 +324,17 @@ final class HostViewController: UIViewController {
         syncWithEngine()
     }
 
+    // TODO(ADR 0018): nothing calls morningstar_ios_back yet. The intended
+    // caller is a UIScreenEdgePanGestureRecognizer on the leading edge,
+    // added in viewDidLoad, whose action on `.ended` is
+    //
+    //     _ = morningstar_ios_back(engine)
+    //     syncWithEngine()
+    //
+    // It is left out until this host has been compiled and run: an edge
+    // recogniser delays or cancels the touches MetalView forwards near that
+    // edge, and how that feels can only be judged on a device.
+
     @objc private func onDisplayLink() {
         morningstar_ios_frame(engine)
         syncWithEngine()
@@ -318,10 +350,26 @@ final class HostViewController: UIViewController {
         syncing = true
         repeat {
             syncAgain = false
+            if let engine = engine {
+                // Starting work never calls back into the engine: answers
+                // arrive on a later turn of the run loop.
+                services.drain(engine)
+            }
             updateKeyboard()
             updateDisplayLink()
         } while syncAgain
         syncing = false
+    }
+
+    /// An answer from `HostServices`, on the main thread. `call` makes the
+    /// one `morningstar_ios_*_result` call. It is not run once the engine
+    /// is gone, which is how an answer that arrives too late is dropped.
+    func deliverServiceResult(_ call: (OpaquePointer) -> Void) {
+        guard let engine = engine else { return }
+        call(engine)
+        // The answer may want a frame, and the application may have asked
+        // for more work in response.
+        syncWithEngine()
     }
 
     /// Runs the display link exactly while there is a frame to produce. A
@@ -371,8 +419,11 @@ final class HostViewController: UIViewController {
         NotificationCenter.default.removeObserver(self)
         redrawTimer?.invalidate()
         displayLink?.invalidate()
+        // Before the engine goes: nothing may answer it afterwards.
+        services.shutDown()
         // Destroying the engine releases its reference to the layer before
         // the view (and the layer) is deallocated.
         morningstar_ios_destroy(engine)
+        engine = nil
     }
 }

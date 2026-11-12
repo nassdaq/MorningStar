@@ -1,15 +1,25 @@
 //! JNI entry points for `dev.morningstar.host.MorningstarNative`.
 //!
-//! Every function here is called on the Android main thread and returns
-//! quickly: it only posts a message to the render thread. The one exception
-//! is `nativeSurfaceDestroyed`, which Android requires to block until the
-//! surface is no longer in use.
+//! Every function here returns quickly: it only posts a message to the
+//! render thread. The one exception is `nativeSurfaceDestroyed`, which
+//! Android requires to block until the surface is no longer in use.
+//!
+//! They are called on the Android main thread, except the three that carry
+//! the answer to a platform service request (`nativeHttpResult`,
+//! `nativeAudioResult`, `nativeLoadResult`; ADR 0019), which the host calls
+//! from whichever worker thread finished the work. That is sound: each
+//! copies its arguments with the calling thread's own `JNIEnv*` and sends
+//! them through the channel to the render thread, whose sender may be used
+//! from any thread.
 
 use std::sync::mpsc;
 
+use std::time::Duration;
+
 use morningstar_runtime::{
-    ImeAction, Insets, Point, PointerEvent, PointerPhase, SurfaceSize, TextEditState,
-    TextInputEvent, utf16_to_byte_offset,
+    AudioError, HostState, HttpError, HttpResponse, ImeAction, Insets, Point, PointerEvent,
+    PointerPhase, Recording, ServiceId, ServiceResult, SurfaceSize, TextEditState, TextInputEvent,
+    utf16_to_byte_offset,
 };
 
 use crate::java;
@@ -17,20 +27,51 @@ use crate::log;
 use crate::render_thread::{self, Message};
 use crate::sys::{JObject, JniEnv, NativeWindow};
 
+/// Starts the runtime on the first call of the process; later calls change
+/// nothing. `install_id` is the host's identifier for this installation
+/// (32 hexadecimal digits) and `stored` the values kept on earlier runs, as
+/// keys and values in turn: both are handed to the application at setup.
+///
 /// # Safety
 /// Called by the JVM with a valid `JNIEnv*` and the `MorningstarNative`
-/// class, as for every static native method.
+/// class, as for every static native method, a `String` (or null) and a
+/// `String[]` (or null).
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeInit(
     env: JniEnv,
     class: JObject,
+    install_id: JObject,
+    stored: JObject,
 ) {
     log::install_panic_hook();
     // Before the render thread starts, so that it can attach to the JVM.
     // SAFETY: the JVM passes this thread's env and the class this static
     // method belongs to.
     unsafe { java::init(env, class) };
-    render_thread::start();
+    if render_thread::started() {
+        // The activity was recreated in a live process: the application
+        // was set up long ago.
+        return;
+    }
+    // SAFETY: the JVM passes this thread's env, a live String reference
+    // (or null) and a live String[] reference (or null).
+    let (install_id, stored) =
+        unsafe { (java::string(env, install_id), java::strings(env, stored)) };
+    let mut host = HostState::new().with_install_id(&install_id);
+    let mut pairs = stored.into_iter();
+    while let (Some(key), Some(value)) = (pairs.next(), pairs.next()) {
+        host = host.with_stored(key, value);
+    }
+    log::info(&format!(
+        "host state: install id {}, {} stored value(s)",
+        if host.install_id() == install_id {
+            "given"
+        } else {
+            "missing or malformed"
+        },
+        host.stored_len(),
+    ));
+    render_thread::start(host);
 }
 
 #[unsafe(no_mangle)]
@@ -167,6 +208,18 @@ pub extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativePointer
     }));
 }
 
+/// The system's Back gesture or key, which the host did not use to close a
+/// keyboard. Like every other entry point this only posts: the application
+/// answers on the render thread and the answer comes back through
+/// `MorningstarNative.onBackResult` (ADR 0018).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeBack(
+    _env: JniEnv,
+    _class: JObject,
+) {
+    render_thread::send(Message::Back);
+}
+
 /// How much of the bottom of the surface the soft keyboard covers, in
 /// pixels; zero when it is hidden.
 #[unsafe(no_mangle)]
@@ -257,5 +310,131 @@ pub extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeTextCom
     render_thread::send(Message::Text {
         serial: None,
         event,
+    });
+}
+
+// ------------------------------------------------------- platform services
+
+/// Splits the host's header block (`Name: value` lines) into pairs.
+fn parse_headers(block: &str) -> Vec<(String, String)> {
+    block
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .map(|(name, value)| (name.trim().to_owned(), value.trim().to_owned()))
+        .filter(|(name, _)| !name.is_empty())
+        .collect()
+}
+
+/// The answer to an HTTP request. `error` uses the `HTTP_*` constants of
+/// `MorningstarNative.java`: 0 means there is a response (`status`,
+/// `headers` as `Name: value` lines, `body`); anything else says why there
+/// is none, with `message` describing it for the log.
+///
+/// # Safety
+/// Called by the JVM with a valid `JNIEnv*`, two `String`s (or null) and a
+/// `byte[]` (or null). May be called on any thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeHttpResult(
+    env: JniEnv,
+    _class: JObject,
+    id: i64,
+    error: i32,
+    status: i32,
+    headers: JObject,
+    body: JObject,
+    message: JObject,
+) {
+    let result = match error {
+        // SAFETY: the JVM passes this thread's env and live references.
+        0 => Ok(HttpResponse {
+            status: u16::try_from(status).unwrap_or(0),
+            headers: parse_headers(&unsafe { java::string(env, headers) }),
+            body: unsafe { java::bytes(env, body) },
+        }),
+        1 => Err(HttpError::Offline),
+        2 => Err(HttpError::Timeout),
+        3 => Err(HttpError::InvalidUrl),
+        4 => Err(HttpError::TooLarge),
+        5 => Err(HttpError::Unsupported),
+        // 6, and whatever a newer host may add.
+        // SAFETY: as above.
+        _ => Err(HttpError::Failed(unsafe { java::string(env, message) })),
+    };
+    render_thread::send(Message::Service {
+        id: ServiceId(id.cast_unsigned()),
+        result: ServiceResult::Http(result),
+    });
+}
+
+/// The answer to an audio request. `kind` says which request (the
+/// `AUDIO_KIND_*` constants: 0 recording started, 1 recording stopped,
+/// 2 playback finished) and `error` how it went (`AUDIO_*`: 0 is success).
+/// For a stopped recording, `data` is the file, `mime` its type and
+/// `duration_millis` its length.
+///
+/// # Safety
+/// Called by the JVM with a valid `JNIEnv*`, two `String`s (or null) and a
+/// `byte[]` (or null). May be called on any thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeAudioResult(
+    env: JniEnv,
+    _class: JObject,
+    id: i64,
+    kind: i32,
+    error: i32,
+    message: JObject,
+    data: JObject,
+    mime: JObject,
+    duration_millis: i64,
+) {
+    let outcome = match error {
+        0 => Ok(()),
+        1 => Err(AudioError::PermissionDenied),
+        2 => Err(AudioError::Busy),
+        3 => Err(AudioError::Unsupported),
+        4 => Err(AudioError::NotRecording),
+        5 => Err(AudioError::Interrupted),
+        // 6, and whatever a newer host may add.
+        // SAFETY: the JVM passes this thread's env and a live reference.
+        _ => Err(AudioError::Failed(unsafe { java::string(env, message) })),
+    };
+    let result = match kind {
+        0 => ServiceResult::RecordingStarted(outcome),
+        1 => ServiceResult::Recording(outcome.map(|()| Recording {
+            // SAFETY: as above.
+            bytes: unsafe { java::bytes(env, data) },
+            // SAFETY: as above.
+            mime: unsafe { java::string(env, mime) },
+            duration: Duration::from_millis(u64::try_from(duration_millis).unwrap_or(0)),
+        })),
+        2 => ServiceResult::Played(outcome),
+        // A host newer than this library; ignoring is safer than guessing.
+        _ => return,
+    };
+    render_thread::send(Message::Service {
+        id: ServiceId(id.cast_unsigned()),
+        result,
+    });
+}
+
+/// The answer to a load: the stored value, or `found` false (zero) when
+/// the key holds nothing.
+///
+/// # Safety
+/// Called by the JVM with a valid `JNIEnv*` and a `String` (or null). May
+/// be called on any thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeLoadResult(
+    env: JniEnv,
+    _class: JObject,
+    id: i64,
+    found: u8,
+    value: JObject,
+) {
+    // SAFETY: the JVM passes this thread's env and a live String reference.
+    let value = (found != 0).then(|| unsafe { java::string(env, value) });
+    render_thread::send(Message::Service {
+        id: ServiceId(id.cast_unsigned()),
+        result: ServiceResult::Loaded(value),
     });
 }

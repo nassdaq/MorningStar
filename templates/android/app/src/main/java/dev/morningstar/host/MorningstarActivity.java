@@ -8,6 +8,8 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.Selection;
@@ -28,6 +30,8 @@ import android.view.inputmethod.ExtractedText;
 import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 
 /**
  * The entire Android host: one activity, one SurfaceView, and forwarding of
@@ -44,6 +48,17 @@ import android.view.inputmethod.InputMethodManager;
  * field's. The input method edits that copy; every change is reported to
  * Rust whole (nativeTextEdited), and Rust replaces the copy when the field
  * ends up holding something else. See docs/architecture/0016-text-input.md.
+ *
+ * Back: a Back that no keyboard absorbs is passed to Rust (nativeBack),
+ * which answers a moment later from its render thread
+ * (MorningstarNative.onBackResult): the application went back a screen, or
+ * it had nowhere to go and the host leaves the app. The main thread never
+ * waits for the answer. See docs/architecture/0018-back-and-timers.md.
+ *
+ * Platform services (HTTP, recording, playback, stored values) are in
+ * MorningstarServices; this class only tells it when the activity comes and
+ * goes and passes on the answer to the microphone permission. See
+ * docs/architecture/0019-effects-and-platform-services.md.
  */
 public final class MorningstarActivity extends Activity implements SurfaceHolder.Callback2 {
     private static final String LIB_NAME_KEY = "dev.morningstar.lib_name";
@@ -70,12 +85,37 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
     /** Whether the last insets showed the keyboard. */
     private boolean keyboardVisible;
 
+    /**
+     * How long Rust is given to answer a Back. It normally answers within a
+     * frame; if its render thread is stuck, Back must still leave the app.
+     */
+    private static final long BACK_ANSWER_TIMEOUT_MS = 1000;
+
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    /** Backs passed to Rust and not answered yet. Main thread only. */
+    private int backsPending;
+    /** The OnBackInvokedCallback registered on API 33 and later, or null. */
+    private Object backCallback;
+
+    private final Runnable backUnanswered =
+            () -> {
+                if (backsPending > 0) {
+                    backsPending = 0;
+                    Log.w(TAG, "back: no answer from Rust, leaving the app");
+                    leave();
+                }
+            };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         System.loadLibrary(applicationLibraryName());
-        MorningstarNative.nativeInit();
+        // Before Rust starts: the application is handed its installation id
+        // and its stored values when it is set up.
+        MorningstarServices.init(getApplicationContext());
+        MorningstarNative.nativeInit(
+                MorningstarServices.installId(), MorningstarServices.storedSnapshot());
         // The Rust runtime outlives the activity, so always state the mode.
         MorningstarNative.nativeSetContinuous(
                 getIntent().getBooleanExtra(CONTINUOUS_EXTRA, false));
@@ -103,6 +143,14 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
                     return true;
                 });
         setContentView(surfaceView);
+
+        // From API 33 Back is delivered to a registered callback; the
+        // manifest turns that on (enableOnBackInvokedCallback), and with
+        // targetSdk 36 on Android 16 it is the only way: onBackPressed is
+        // no longer called there. Below API 33 onBackPressed still is.
+        if (Build.VERSION.SDK_INT >= 33) {
+            backCallback = Api33.registerBack(this);
+        }
     }
 
     // Visibility, not focus, decides whether to render: in multi-window mode a
@@ -111,6 +159,7 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
     @Override
     protected void onStart() {
         super.onStart();
+        MorningstarServices.activityStarted();
         MorningstarNative.nativeResume();
     }
 
@@ -119,6 +168,9 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
         // Leaving the screen ends any editing: Android takes the keyboard
         // down by itself, and Rust must not go on believing it is up.
         giveUpTextInput("activity stopped");
+        // Sound stops with the screen: a clip ends as interrupted and a
+        // recording is closed and kept (ADR 0019).
+        MorningstarServices.activityStopped();
         MorningstarNative.nativePause();
         super.onStop();
     }
@@ -127,22 +179,112 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
     protected void onDestroy() {
         if (current == this) {
             current = null;
+            // A microphone question this activity was showing dies with it.
+            MorningstarServices.activityDestroyed();
+        }
+        mainHandler.removeCallbacks(backUnanswered);
+        backsPending = 0;
+        if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
+            Api33.unregisterBack(this, backCallback);
+            backCallback = null;
         }
         super.onDestroy();
     }
 
-    // Back with a field focused but no soft keyboard to absorb it (a
-    // hardware keyboard): end the editing instead of leaving the app. With a
-    // soft keyboard up the input method consumes Back itself; that is
-    // noticed through the insets (sendInsets).
+    // The user's answer to the microphone question MorningstarServices asked
+    // through this activity.
     @Override
-    @SuppressWarnings("deprecation") // The only hook on API 24 to 32.
+    public void onRequestPermissionsResult(
+            int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        MorningstarServices.onPermissionResult(requestCode, grantResults);
+    }
+
+    // The hook on API 24 to 32. From API 33 the callback registered in
+    // onCreate is called instead.
+    @Override
+    @SuppressWarnings("deprecation")
     public void onBackPressed() {
+        handleBack();
+    }
+
+    /**
+     * The system's Back gesture or key.
+     *
+     * With a field focused but no soft keyboard to absorb Back (a hardware
+     * keyboard), it ends the editing and goes no further. With a soft
+     * keyboard up the input method consumes Back itself and this is not
+     * called; that is noticed through the insets (sendInsets).
+     *
+     * Otherwise the application is asked, without waiting: nativeBack only
+     * posts to the render thread, and the answer arrives in onBackResult.
+     */
+    private void handleBack() {
         if (textSession != null) {
             giveUpTextInput("back");
             return;
         }
-        super.onBackPressed();
+        backsPending++;
+        MorningstarNative.nativeBack();
+        mainHandler.removeCallbacks(backUnanswered);
+        mainHandler.postDelayed(backUnanswered, BACK_ANSWER_TIMEOUT_MS);
+    }
+
+    /**
+     * Rust's answer to a nativeBack, on the main thread. Not handled means
+     * the application had nowhere to go back to: leave it. An answer nobody
+     * is waiting for (it came after the timeout, or was meant for an
+     * activity since destroyed) is dropped.
+     */
+    void onBackResult(boolean handled) {
+        if (backsPending == 0) {
+            return;
+        }
+        backsPending--;
+        if (backsPending == 0) {
+            mainHandler.removeCallbacks(backUnanswered);
+        }
+        if (!handled) {
+            leave();
+        }
+    }
+
+    /**
+     * What Activity.onBackPressed does when nothing handles Back: from
+     * Android 12 the root activity of a task is moved to the background
+     * rather than finished, so returning to the app is a warm start; before
+     * that, and for an activity that is not the root, it is finished.
+     */
+    private void leave() {
+        if (isFinishing()) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 31 && isTaskRoot()) {
+            moveTaskToBack(true);
+        } else {
+            finish();
+        }
+    }
+
+    /**
+     * Code that names classes added in API 33, kept in a class of its own
+     * so that MorningstarActivity loads cleanly on older releases.
+     */
+    private static final class Api33 {
+        private Api33() {}
+
+        static Object registerBack(MorningstarActivity activity) {
+            OnBackInvokedCallback callback = activity::handleBack;
+            activity.getOnBackInvokedDispatcher()
+                    .registerOnBackInvokedCallback(
+                            OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback);
+            return callback;
+        }
+
+        static void unregisterBack(MorningstarActivity activity, Object callback) {
+            activity.getOnBackInvokedDispatcher()
+                    .unregisterOnBackInvokedCallback((OnBackInvokedCallback) callback);
+        }
     }
 
     // Density changes (display size setting, moving to another display) are
