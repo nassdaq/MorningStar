@@ -79,6 +79,10 @@ Work top-down. Every region of the picture is one of these:
 | Hairline | `Divider::new()`, indented: `.inset(68.0)`; in a row: `Divider::vertical()` |
 | Fixed gap | `Spacer::fixed(24.0)` |
 | Scrolling area | `ScrollView::new(col![..])` |
+| Chips or tags that wrap onto more lines | `Row::new().extend(chips).gap(8.0).line_gap(8.0).wrap()` |
+| A text box that grows to a few lines | `TextInput::new(v).multiline().max_lines(3)` |
+| Something that fades or slides in and out | `.id("x").transition(Transition::fade())` on it |
+| A value that changes smoothly (a switch, a highlight) | `.id("x").animate(Duration::from_millis(160), Easing::EaseOut)` on the box that changes |
 | Status bar / home indicator margins | `SafeArea::new(screen)`; for a bar whose background runs under the system bar: `.safe_area(SafeEdges::TOP)` or `BOTTOM` on the bar |
 | Photo, illustration, logo | `Picture::new(image)` with `.size(..)`, `.radius(..)`, `.fit(ImageFit::Cover)`; register in `setup` with `setup.add_image_png(include_bytes!(..))` and keep the handle in the state |
 | Profile picture | `Avatar::new("Amina Juma").image_maybe(self.photo)` (initials when there is no image) |
@@ -245,15 +249,15 @@ What to know:
 
 ## Screens, Back, and time
 
-Two optional methods of `Application` ([ADR 0018](architecture/0018-back-and-timers.md)). Navigation is state: keep a stack of screens, push in `update`, and pop in `back`.
+Two optional methods of `Application` ([ADR 0018](architecture/0018-back-and-timers.md)). Navigation is state: keep a stack of screens, push in `update`, and pop in `back`. `Navigator<S>` is that stack ([ADR 0021](architecture/0021-viewport-wrap-scroll-animation-navigation.md)): a `Vec` that is never empty with `push`, `replace`, `pop`, `pop_to_root`, `reset` and `back() -> bool`.
 
 ```rust
 use std::time::Duration;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Hash)]
 enum Screen { Home, Code, Done }
 
-struct App { stack: Vec<Screen>, seconds_left: u32 }   // stack starts as vec![Screen::Home]
+struct App { screens: Navigator<Screen>, seconds_left: u32 }   // Navigator::new(Screen::Home)
 
 #[derive(Clone)]
 enum Message { Open(Screen), ResendCode, Second }
@@ -262,21 +266,24 @@ impl Application for App {
     type Message = Message;
 
     fn view(&self) -> Element<Message> {
-        match self.stack.last().copied().unwrap_or(Screen::Home) {
+        let screen = *self.screens.current();
+        let content: Element<Message> = match screen {
             Screen::Home => home(),
             Screen::Code => col![
                 text(format!("Resend in 0:{:02}", self.seconds_left)).tabular_nums(),
                 Button::new("Resend").on_press_maybe((self.seconds_left == 0).then_some(Message::ResendCode)),
             ].into(),
             Screen::Done => done(),
-        }
+        };
+        // Its own id per screen: its own scroll positions and focus.
+        content.id(screen)
     }
 
     fn update(&mut self, message: Message) {
         match message {
             Message::Open(screen) => {
                 if screen == Screen::Code { self.seconds_left = 30; }
-                self.stack.push(screen);
+                self.screens.push(screen);
             }
             Message::ResendCode => self.seconds_left = 30,
             Message::Second => self.seconds_left = self.seconds_left.saturating_sub(1),
@@ -285,22 +292,156 @@ impl Application for App {
 
     // The system back gesture or key. true: handled here. false: leave the app.
     fn back(&mut self) -> bool {
-        if self.stack.len() > 1 { self.stack.pop(); true } else { false }
+        self.screens.back()   // false on the first screen
     }
 
     // While this is Some, `Second` arrives every second, at one frame a second.
     fn tick(&self) -> Option<(Duration, Message)> {
-        let counting = self.stack.last() == Some(&Screen::Code) && self.seconds_left > 0;
+        let counting = *self.screens.current() == Screen::Code && self.seconds_left > 0;
         counting.then_some((Duration::from_secs(1), Message::Second))
     }
 }
 ```
 
-- **`back`** is also what an on-screen back arrow should do: give the arrow a message whose `update` arm pops the same stack. Back closes an open keyboard first, by itself; that Back does not reach the application. Without `back`, Back leaves the app from any screen.
+- **`back`** is also what an on-screen back arrow should do: give the arrow a message whose `update` arm calls the same `self.screens.back()`. A flow that should not be returned into ends with `replace` (login to home) or `reset`; a tab bar is `reset(tab_root)`. The navigator is only the stack: what a screen shows, and what it needs (`Screen::Repair(id)`), stay in your state and your `enum`.
+- **Screens that slide**: add `.transition(self.screens.transition())` beside the `.id(screen)`. A pushed screen comes in from the right while the one under it moves off; Back reverses it. See "Motion" below. Back closes an open keyboard first, by itself; that Back does not reach the application. Without `back`, Back leaves the app from any screen.
 - **`tick` is read from the state**, like `view`: there is nothing to start or stop. When it returns `None` (the countdown reached zero, or another screen is on top) the app draws nothing until the next touch.
 - **Ticks count foreground time and never arrive in a burst.** The timer pauses while the app is in the background, and after any long gap one message arrives, not one per missed interval. For a deadline on the wall clock, store a `std::time::Instant` and compare it in `update` when a tick arrives, rather than counting ticks.
 - **One timer per app.** For two rhythms, tick at the faster one and count.
 - **Testing**: `ui.back()` returns what the system would be told. For a timer, build frames at chosen times, `ui.frame(&info.with_elapsed(Duration::from_secs(3)), &mut frame)`, and assert on your state; `frame.redraw_after()` is how long the host would sleep, and `None` there means idle. `crates/morningstar-ui/tests/back_and_tick.rs` is the model.
+
+## Fitting the screen: the viewport, and rows that wrap
+
+All of this section and the next two is [ADR 0021](architecture/0021-viewport-wrap-scroll-animation-navigation.md).
+
+**A row of chips or tags wraps if you say so.** CSS `display: flex; flex-wrap: wrap; gap: 8px` is:
+
+```rust
+Row::new()
+    .extend(tags.iter().map(|tag| chip(tag)))
+    .gap(8.0)        // between neighbours on a line
+    .line_gap(8.0)   // between lines
+    .wrap()
+    .fill_width()
+```
+
+A chip goes to the next line when it does not fit after the ones before it; a line is as tall as its tallest chip; the row is as tall as its lines, so what follows moves down and a `ScrollView` around it scrolls the right amount. A hugging chip is offered the whole line, so a very long label wraps inside its chip rather than sticking out. `.cross_align(..)` and `.main_align(..)` act within each line. When everything fits on one line the row is exactly the row it would be without `.wrap()`. Columns do not wrap.
+
+**A view that depends on the screen implements `view_in` instead of `view`.** Its `Viewport` has the surface's `size`, the safe-area `insets` and the `keyboard_inset` in dp, says whether a field has focus, and measures text exactly as layout will:
+
+```rust
+fn view_in(&self, viewport: &Viewport) -> Element<Message> {
+    // Two panes on anything wide, one on a phone.
+    if viewport.width() >= 600.0 {
+        return row![self.list().width(320.0), self.detail().fill()].fill().into();
+    }
+    // A heading that drops a size rather than wrap.
+    let title = |size: f32| text(self.title.clone()).size(size).bold();
+    let room = viewport.width() - 48.0;
+    let title = if viewport.measure(&title(32.0)).width <= room { title(32.0) } else { title(24.0) };
+    // The promotion only where there is room for it above the keyboard.
+    let roomy = viewport.safe_size().height >= 560.0;
+    SafeArea::new(col![title, self.form()].push_maybe(roomy.then(|| self.promotion()))).into()
+}
+```
+
+- `viewport.measure(&text)` is the text on one line; `measure_wrapped(&text, width)` and `line_count(&text, width)` are for "does this fit in two lines". Pass the same `Text` you would show (size, weight, family); its own `.width(..)` plays no part. Do not estimate from the number of characters.
+- Pass `viewport` down to the functions that build parts of the screen, like any argument.
+- It is the **screen**, not the box your view ends up in. For "as wide as my parent", use `fill_width()` and let layout do it; for chips, `.wrap()`.
+- Prefer layout to arithmetic: most screens need none of this. Reach for the viewport when the *structure* changes (one pane or two, a different size of type, something left out).
+- In a test, the size is the `FrameInfo` you build frames with: change it and build another frame.
+
+## Scrolling: positions, and asking for a move
+
+A `ScrollView`'s position belongs to the widget and is kept **for as long as a scroll view with the same identity is in consecutive frames**. Give a scroll view whose content changes an `.id(..)` and keep it: content that grows leaves the reader where they are; content that shrinks under them brings them back to its end. A different id is a different scroll view, at its top.
+
+The application does not set a position; it asks for a move, once, from `effects`:
+
+```rust
+fn update(&mut self, message: Message) {
+    match message {
+        Message::Received(line) => {
+            self.lines.push(line);
+            self.show_latest = true;      // only recorded here
+        }
+        Message::JumpTo(row) => self.reveal = Some(row),
+        // ..
+    }
+}
+
+fn effects(&mut self, out: &mut Effects<Message>) {
+    if std::mem::take(&mut self.show_latest) {
+        out.scroll(ScrollTo::end("chat").animated());
+    }
+    if let Some(row) = self.reveal.take() {
+        out.scroll(ScrollTo::reveal(("row", row)).margin(12.0));
+    }
+}
+```
+
+- `ScrollTo::top(id)`, `::end(id)` and `::offset(id, dp)` name the scroll view; `::reveal(id)` names any widget and scrolls every scroll view around it, as little as needed (nothing moves if it is in view). `.animated()` glides for 250 ms; a touch stops it.
+- The move happens in the next frame, after its layout: `end` is the end *including* what the same `update` added. A request for something that is not in that frame is dropped.
+- **The focused field is kept in view for you**, on every kind of screen: the scroll views around it scroll, and if that cannot bring it above the keyboard (or there are none) the screen is drawn shifted up. Do not write this yourself.
+- **In tests**, `ui.rect_of(id)` is where a widget was laid out even when it is scrolled out of sight (a row far down a list has a rectangle below the screen); `ui.visible_rect_of(id)` is the part that shows, `None` if nothing does; `ui.scroll_offset(id)` and `ui.max_scroll_offset(id)` are in dp; `ui.scroll_to(ScrollTo::..)` asks as the application would.
+
+**A multi-line field that must not push the screen away** gets a bound, and then scrolls inside itself with the caret in view:
+
+```rust
+TextInput::new(&self.draft)
+    .multiline()
+    .max_lines(3)          // or .max_height(72.0)
+    .on_input(Message::Draft)
+    .id("reply")
+```
+
+It grows line by line up to the bound; nothing overflows; a drag on it scrolls it. Do not build a clipped window around an unbounded field.
+
+## Motion
+
+`view` always describes the screen as it should be. Motion is asked for per widget and happens by itself; frames are produced only while something is on its way, and the app is idle again afterwards.
+
+**A change that should be seen happening**: `.animate(duration, easing)` on the widget that changes, which needs an `.id(..)`.
+
+```rust
+fn switch(on: bool) -> Container<Message> {
+    let knob = Container::empty()
+        .size(24.0, 24.0)
+        .radius(12.0)
+        .background(hex(0xFFFFFF))
+        .offset(if on { 20.0 } else { 0.0 }, 0.0)
+        .id("knob")
+        .animate(Duration::from_millis(160), Easing::EaseOut);
+    Container::new(knob)
+        .size(48.0, 28.0)
+        .padding(2.0)
+        .radius(14.0)
+        .background(if on { hex(0x34C759) } else { hex(0xC7C7CC) })
+        .on_press(Message::Toggle)
+        .id("track")
+        .animate(Duration::from_millis(160), Easing::EaseOut)
+}
+```
+
+What is animated is the widget's own `.opacity(..)`, `.transform(..)` / `.rotate(..)`, `.offset(..)`, solid `.background(..)` and fixed `.width(..)` / `.height(..)`: write the two states with `if`, as above, and the widget is drawn on the way between them. An animated size moves its neighbours with it. A size that hugs or fills, a gradient, and anything about the children are not animated.
+
+**Something that appears and disappears**: `.transition(..)`, again with an `.id(..)`.
+
+```rust
+stack![
+    page,
+]
+.push_maybe(self.saved.then(|| {
+    banner("Saved").id("saved").transition(Transition::slide(0.0, -1.0).with_fade())
+}))
+```
+
+`Transition::fade()`, `::slide(x, y)` (from that many of its own widths and heights away) and `::scale(from)`, with `.with_fade()`, `.exit_slide(x, y)`, `.duration(..)` and `.easing(..)`. The widget enters in the first frame it is in the view and leaves in the first frame it is not: you just stop returning it, and it is still drawn, over the screen where it was, until it is gone. While leaving it takes no room and no taps.
+
+- **CSS**: `transition: transform .16s ease-out, background .16s` is `.animate(Duration::from_millis(160), Easing::EaseOut)`. There are no keyframes, delays or springs.
+- **`.opacity(x)` fades each thing drawn**, so shapes that overlap inside a faded box show through one another. For a fade in or out that is right; do not use it to hold a busy group at half strength.
+- **Reduce motion**: `ui.set_reduce_motion(true)` makes all of this instant, and `viewport.reduce_motion` tells a view. (The hosts do not pass the system setting on yet.)
+- **Testing**: build frames at chosen times and assert on `ui.rect_of(id)` or on the display list. `frame.redraw_requested()` is true while something moves and false on the frame that shows the end. `crates/morningstar-ui/tests/adaptive.rs` is the model, including a pixel test of intermediate frames (`screenshot_frame(&mut ui, &info.with_elapsed(..))`).
+- **Screenshots of a screen with a transition**: a widget with one fades or slides in on the first frame it is seen. Build a frame, then build the one you capture a second later (`info.with_elapsed(Duration::from_secs(1))`).
 
 ## Talking to a server, sound, and remembering things
 
@@ -567,8 +708,8 @@ Each of these produces a wrong picture, not an error.
 - **Icons are not in the font.** Use `Icon::vector`. Only a small subset of SVG is accepted (`path`, `circle`, `rect`, `line`; one colour; no groups, transforms or opacity) and an icon outside it draws nothing: put the icon set in one file and test every icon with `VectorIcon::check()`.
 - **A font family that was not added falls back silently.** Check with `setup.has_font_family("Inter")`.
 - **Arabic and other right-to-left text**: shaped and ordered correctly, but give it `.fill_width()` so it has a box to align in. Layout itself is never mirrored.
-- **Gradients look slightly lighter in the middle** than in a design tool (they blend in linear light); shadows and colours match.
-- **Not available yet**: text selection, copy and paste; animations other than scroll fling, horizontal scrolling, ellipsis, wrapping rows (`flex-wrap`), per-corner radii, per-side borders (use a `Divider`), a tap target inside a sentence.
+- **A widget with `.animate(..)` or `.transition(..)` needs an `.id(..)`** that stays the same while it changes; without one its identity is its place in the tree, and a sibling appearing before it makes it "a different widget".
+- **Not available yet**: text selection, copy and paste; keyframes, springs and group opacity; overscroll bounce; horizontal scrolling, ellipsis, per-corner radii, per-side borders (use a `Divider`), a tap target inside a sentence.
 
 ## From HTML/CSS or a design tool's inspector
 
@@ -587,7 +728,7 @@ Learned reproducing a real twelve-screen design (`examples/fundidesk`, [ADR 0015
 | `width: 100%` | `.fill_width()` |
 | `width: 70%` | no percentages: compute it from the parent's fixed width |
 | `display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px` | `row![a, b].gap(8.0)` with each child `.fill_width()`; several rows in a `col!` with the same gap |
-| `flex-wrap: wrap` | not available: write the rows out |
+| `flex-wrap: wrap; gap: 8px` | `.gap(8.0).line_gap(8.0).wrap()` on the row |
 | `background: #1E8416` | `.background(hex(0x1E8416))`, from a named constant |
 | `border-radius: 14px` / `999px` / `50%` | `.radius(14.0)` / `.radius(999.0)` / `.radius(side / 2.0)` |
 | `border: 1px solid #D9E0DB` | `.border(1.0, c)` |
@@ -622,11 +763,14 @@ Each of these cost a pixel or more per element until it was understood.
 - **Padding starts inside the border in CSS; here the border is drawn over the box's edge and takes no room.** `border: 1px; padding: 16px` is `.border(1.0, c).padding(17.0)`. Centred content is unaffected.
 - **Check `box-sizing`.** With `box-sizing: border-box`, `height: 52px` is the outer height. Without it (the default for `div` and `a`; `button` is border-box), the border and padding are added: `height: 48px; border: 1.5px solid` is 51 tall.
 - **Text with no `line-height` is not `1.2 x size`.** A browser takes the font's ascent and descent, rounds each to whole *device* pixels and adds them. For a reference rendered at 2x, 13 px Inter is 15.5 dp tall and 15 px is 18. Put the font's metrics in the theme and compute it there (`examples/fundidesk/src/theme.rs`, `normal_line_height`); every text below a wrong one is displaced.
+- **Give a text the design's `line-height` and nothing else.** Where the baseline falls inside the line (half the leading rounded down to a device pixel, each line's top to the nearest pixel row) is the browser's rule and is built in ([ADR 0022](architecture/0022-text-metrics-and-pixel-snapping.md)). Do not nudge a line by fractions of a dp, and do not pin the width of a box that hugs a text: widths keep their fractions and a text placed at a fraction of a dp is drawn there.
+- **Write translucent colours, shadows and gradients exactly as the design gives them.** `rgba(.., 0.25)`, `opacity`, `stroke-opacity`, `box-shadow` alphas and gradient stops are composited as in a browser ([ADR 0023](architecture/0023-compositing-space.md)). Layers go in the design's order.
 - **A bare `<input>` has 2 px of horizontal padding of its own**, so its text starts 2 px after the gap.
 - **An inline `<span>` with padding** (a pill) is as tall as its line plus the padding: 12 px text with `padding: 6px 10px` is 14.5 + 12 dp.
 - **Colour is inherited in CSS and not here.** An icon with `stroke="currentColor"` takes the nearest `color:`; find it and pass it.
 - **`h1`..`p` in exported markup usually carry `margin: 0`.** If one does not, the browser's default margins are part of the design.
-- **Anti-aliased edges are blended differently** (ADR 0015): text and thin strokes come out lighter than in a browser's rendering. It shows in the diff as many small regions over text and icons with the right extent. Do not chase it by changing weights or colours.
+- **What remains in a diff is the rasteriser.** Edges are blended as in a browser and light text is weighted like Chrome's (ADR 0023), but glyphs and curves are still drawn by a different rasteriser: expect many small regions over text and icons with the right extent, a fraction of a percent in all. Do not chase them by changing weights or colours.
+- **An inline box in a paragraph** (a ringed word, a blank to fill in, a pill inside a sentence) **does not exist yet**: such a piece is a separate element placed by measurement, and does not re-flow.
 
 ### The order that worked
 
