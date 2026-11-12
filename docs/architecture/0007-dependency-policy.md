@@ -26,6 +26,7 @@ Build tooling, not linked into apps: `cargo-ndk`, Android Gradle Plugin 9.5.1 wi
 
 - **`winit`, `android-activity`**: would own the application (ADR 0003).
 - **`jni`, `ndk`, `objc2`**: the hosts need four C functions on Android and none on iOS.
+- **An HTTP or TLS stack (`reqwest`, `ureq`, `rustls`), an audio stack (`cpal`), a random-number crate**: the platform has all three, with the system's certificates, codecs and audio policy. Applications reach them through the hosts (ADR 0019).
 - **`log`**: wgpu logs through it, so its warnings are currently invisible on devices. Adding a `log` backend that writes to logcat / the Xcode console is the most likely next dependency, and is worth it the first time a device shows a driver problem.
 - **`tokio` or another async runtime**: no demonstrated need.
 

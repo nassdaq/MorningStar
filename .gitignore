@@ -6,6 +6,19 @@
 *.xcodeproj
 *.xcframework
 templates/ios/build/
+# Generated launcher icons and names (ADR 0020). Both are already covered
+# by the build/ rules above; named so that nobody checks them in from a
+# template whose build directory moved.
+templates/android/app/build/generated/morningstar/
+templates/ios/build/generated/
+# Written by XcodeGen from project.yml's `info:` section.
+templates/ios/Info.plist
 .DS_Store
 *.actual.png
 *.diff.png
+
+# Secrets and local server state
+.env
+.env.*
+!.env.example
+node_modules/

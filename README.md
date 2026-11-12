@@ -63,7 +63,7 @@ morningstar::app!(Ui::new(Counter::default()));
 
 Sizes are in density-independent units. [`examples/showcase`](examples/showcase/src/lib.rs) has three realistic screens (a wallet home, settings, a login form) written this way; [`docs/building-screens.md`](docs/building-screens.md) is the guide. The snippet above is illustrative: check it against the showcase before copying.
 
-[`examples/fundidesk`](examples/fundidesk) is the proof that this works on a real design: twelve screens of a repair-shop app reproduced from the designer's export, each within half a percent of the design's pixels and held there by a test.
+[`examples/fundidesk`](examples/fundidesk) is the proof that this works on a real design: twelve screens of a repair-shop app reproduced from the designer's export, each within half a percent of the design's pixels and held there by a test. [`examples/callready`](examples/callready) does the same for a second, illustration-heavy design (turned cut-out letters, tilted cards, a vinyl disc drawn from layered vector shapes): five screens, each within a quarter of a percent.
 
 The low-level interface underneath (paint a display list by hand, receive raw touches) remains available; [`examples/hello-gpu`](examples/hello-gpu/src/lib.rs) uses it.
 
@@ -93,10 +93,11 @@ templates/
   ios/                    XcodeGen host project (one view controller, one CAMetalLayer)
 examples/hello-gpu/       low-level example (a tap counter)
 examples/showcase/        three realistic screens built with the UI layer
+examples/services-check/  device smoke test for HTTP, recording, playback and stored values
 docs/architecture/        architecture decision records
 benchmarks/               method, scripts and reports
 tools/
-  morningstar-devtools/    render an app to a PNG, no device needed
+  morningstar-devtools/    render an app to a PNG, no device needed; launcher icons
   build-android.sh, build-ios.sh
 ```
 
@@ -106,6 +107,25 @@ Requirements: Rust (stable, 1.87+).
 
 ```sh
 cargo test --workspace      # includes pixel tests on this machine's GPU
+```
+
+### Name and icon
+
+An app says what it is called and what its home-screen icon is in its own `Cargo.toml`; both builds make everything the platform needs from that ([ADR 0020](docs/architecture/0020-app-identity-and-launcher-icons.md)):
+
+```toml
+[package.metadata.morningstar]
+name = "CallReady"                 # under the icon (default: the package name)
+id = "dev.morningstar.callready"   # application id / bundle id (default: dev.morningstar.<lib>)
+icon = "assets/icon.png"           # square PNG, 512+, best 1024, full-bleed (default: this path if it exists)
+icon_foreground = "assets/icon-foreground.png"   # optional Android adaptive foreground, content in the middle 61%
+icon_background = "#0E0E0E"        # optional (default: the icon's top-left pixel)
+```
+
+Every key is optional. With no icon the app gets the built-in Morningstar star. With only `icon`, Android's adaptive icon is that picture in the 72 dp a launcher shows, so a round mask cuts its corners: keep what matters in the middle. Look before installing:
+
+```sh
+cargo run -q -p morningstar-devtools --bin morningstar-icon -- callready --preview out/icon.png
 ```
 
 ### Android
@@ -122,7 +142,7 @@ adb logcat -s Morningstar            # GPU in use, then frame statistics every 6
 Requirements: full Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```sh
-tools/build-ios.sh
+tools/build-ios.sh                   # MORNINGSTAR_APP=callready for another example
 xcodegen generate --spec templates/ios/project.yml
 open templates/ios/MorningstarHost.xcodeproj     # select a device, set a signing team, run
 ```

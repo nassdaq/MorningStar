@@ -20,14 +20,18 @@ Each record states one decision, why it was made, and what it costs. An accepted
 | [0014](0014-images.md) | Images: one texture per image, draw calls split by image | Accepted |
 | [0016](0016-text-input.md) | Text input: host keeps the editable copy, Rust-to-Java upcall, timed redraw for the caret | Accepted |
 | [0015](0015-fonts-icons-and-design-fidelity.md) | Font families, vector icons, rich text, letter spacing, dashed borders; first design-fidelity measurements | Accepted |
+| [0017](0017-transforms-and-vector-pictures.md) | Affine transforms carried per instance, multi-colour vector pictures composited on the CPU, synthetic italic, text shadow, outline and tabular numbers | Accepted |
+| [0018](0018-back-and-timers.md) | System back answered by the application (asked without blocking, answered by upcall on Android); a repeating timer message built on the timed redraw | Accepted |
+| [0019](0019-effects-and-platform-services.md) | Effects: HTTP, recording, playback and stored values done by the hosts with the platform's own stacks, asked for as data and answered as messages; an install id and stored values at setup; a test driver in place of a host | Accepted |
+| [0020](0020-app-identity-and-launcher-icons.md) | App identity declared once in the app's `Cargo.toml` (`[package.metadata.morningstar]`: name, id, icon), read through `cargo metadata`; launcher icons and names generated per build for both hosts, never checked into the templates; a single icon becomes the Android adaptive icon by one stated rule | Accepted |
 
 ## Verification status
 
-What has actually been run, as of 2026-11-11 (after the first device session and the first parallel wave). Update this table when it changes.
+What has actually been run, as of 2026-11-12 (after the first device session, the first parallel wave, transforms and vector pictures on the host, and effects and platform services on the host). Update this table when it changes.
 
 | Claim | Status | Evidence |
 | --- | --- | --- |
-| Shared code builds and passes tests on the dev host | Verified | `cargo test --workspace`: 563 tests |
+| Shared code builds and passes tests on the dev host | Verified | `cargo test --workspace`: 767 tests |
 | Rectangles, rounded corners, anti-aliasing, blending and paint order produce correct pixels on a real GPU | Verified on macOS/Metal only | `crates/morningstar-gpu/tests/offscreen.rs` |
 | Borders, gradients, shadows (against a CPU Gaussian reference), clips and partial atlas upload | Verified on macOS/Metal only | `crates/morningstar-gpu/tests/vocabulary.rs`, `atlas_upload.rs`; sample scene inspected by eye |
 | Layout engine | Verified in tests | 77 tests in `crates/morningstar-layout`, including a hand-computed screen and a zero-allocation check |
@@ -39,9 +43,23 @@ What has actually been run, as of 2026-11-11 (after the first device session and
 | Images | Verified on macOS/Metal; one image seen on device | 59 tests; the showcase avatar on the phone |
 | A real design reproduced: FundiDesk, 12 of 12 screens | Verified against the design | Each screen differs from its Chrome-rendered reference in 0.10% to 0.49% of pixels (`examples/fundidesk/tests/fidelity.rs`); all twelve inspected by eye |
 | Font families, rich text, letter spacing, vector icons, dashed borders | Verified on macOS/Metal only | Tests in `morningstar-text`, `morningstar-ui`, `morningstar-gpu` |
+| Transforms (rotation, slant, scale, move) of every operation kind, with clips outside and inside them; identity changes no byte | Verified on macOS/Metal only | `crates/morningstar-gpu/tests/transforms.rs` (18 pixel tests); FundiDesk's twelve fidelity figures unchanged to the fourth decimal |
+| Multi-colour vector pictures, outlined text, synthetic italic, hard text shadow, tabular numbers | Verified on macOS/Metal only | `morningstar-text` (`picture.rs`, `tests/effects.rs`), `crates/morningstar-runtime/tests/pictures.rs` |
+| Transform modifier in the UI layer: layout unaffected, touches follow the transformed picture | Verified in tests and by eye on the host | `crates/morningstar-ui/tests/transforms.rs`, `tests/rendered.rs` (one screen compared by eye with the design's rendering) |
+| **Transforms and vector pictures on a device** (the 144-byte instance and the new shader paths on Vulkan and GLES; frame time; picture rasterisation time and memory) | **Not verified** | No device was used for ADR 0017; nothing was timed |
 | FundiDesk launches on Android | Verified on one device, from the log only | Galaxy A27: first frame drawn, then idle. The screen was not inspected and no input was sent |
 | Text input on Android | Verified on one device from the owner's own typing, by log | Galaxy A27, Samsung Keyboard: keyboard shown on focus with the right type, key-event and input-method edits reach the field, Next/Done, keyboard inset, caret blink at 10 timed frames in 6 s |
 | **Text input: composition and autocorrect, swipe typing, Back-key dismissal, field staying above the keyboard, caret and focus visuals** | **Not verified** | Need the owner's eyes and fingers |
+| System back (`Application::back`) and the repeating timer message (`Application::tick`): engine and UI logic | Verified in tests on the host only | 4 tests in `crates/morningstar-runtime/src/engine.rs`, 17 in `crates/morningstar-ui/tests/back_and_tick.rs`; Android and iOS halves type-check, the Java compiles against API 36 |
+| **Back on a device** (the `OnBackInvokedCallback` on Android 16, the `onBackResult` upcall, leaving the app when declined, API 24 to 35), **a tick's frame rate on a device**, and any caller of `morningstar_ios_back` | **Not verified** | No device was used for ADR 0018; the Swift host does not call the function yet |
+| Effects (`Application::effects`): requests out, answers in as messages, one frame per awaited answer and idle otherwise, `Unsupported` without a host, the test driver, storage round trip, host state at setup | Verified in tests on the host only | 8 tests in `crates/morningstar-core/src/services.rs`, 12 in `crates/morningstar-runtime/src/engine.rs`, 42 in `crates/morningstar-ui/tests/effects.rs`, 10 in `examples/services-check/tests` (one is the example of `docs/building-screens.md`, compiled and run) |
+| Platform services, the two halves of each host interface agree | Checked by compiling and by comparison, not by running | Android: `cargo ndk clippy -p services-check` clean; the Java compiles with `javac -Xlint:all -Werror` against API 36; the upcall descriptors (`javap -s`) and native parameter lists (`javac -h`) compared with the Rust. iOS: the Rust type-checks, the header passes `cc -fsyntax-only`, the Swift passes `swiftc -parse` only |
+| **Platform services on an Android device** (an HTTPS request, the cleartext rule and `adb reverse`, failure mapping, the 10 MB cap; the microphone permission flow, a recording and its format, the 60 s limit; MP3 and M4A playback, audio focus; stored values and the install id across a restart; behaviour across `onStop` and activity recreation; API 24 to 35; the APK build with the new manifest and `res/xml`) | **Not verified** | No APK was built and no device was used for ADR 0019. `examples/services-check` is the app to install for it |
+| **Platform services on iOS** (`HostServices.swift`, `project.yml`'s Info.plist section) | **Not verified, never compiled** | No Xcode |
+| App identity and launcher icons: the generator (sizes, masks, the single-icon rule, flattening, validation, determinism, unchanged files left alone, the manifest read through Cargo) | Verified in tests on the host; icons inspected by eye in the preview sheet down to 48 px | 31 new tests in `tools/morningstar-devtools` (`icon.rs`, `identity.rs`, `json.rs`, `tests/icon_cli.rs`) |
+| Launcher icons and name in an Android APK | Verified by building and reading the APK back, not on a device | `aapt2 dump badging` of the CallReady APK: `application-label:'CallReady'`, `icon='res/mipmap-anydpi-v26/ic_launcher.xml'`; resource table has the three mipmaps at five densities and the adaptive XML; same for `hello-gpu` with the built-in icon |
+| **Launcher icon and name on a device** (home screen, drawer, recents; the adaptive mask and parallax; the themed built-in icon; API 24 and 25 legacy icons) | **Not verified** | Nothing was installed for ADR 0020 |
+| **Launcher icon, name and bundle id on iOS** (the generated asset catalog and `.xcconfig`, `project.yml`'s use of them, `tools/build-ios.sh` with `MORNINGSTAR_APP`) | **Not verified, never compiled** | No Xcode |
 | **Anti-aliased edges versus browser rendering** | Known difference | Text and thin strokes are lighter than Chrome's (linear-light blending); shadows render about half as dark for the same alpha |
 | **Dashed border phase; text width rounding; top-bar title 1.5 px low; break after hyphen; kerning with spaces; ligatures under letter spacing** | Known differences | Found by the FundiDesk agents; each costs a fraction of a percent |
 | **Scrolling, taps and navigation in the showcase on a device** | **Not verified** | No input was sent to the phone |
@@ -52,7 +70,7 @@ What has actually been run, as of 2026-11-11 (after the first device session and
 | Text renders on a real phone and matches the desktop render | Verified on one device, by eye | Galaxy A27 screenshot against the Metal screenshot |
 | Touch logic of the example (tap, slide-off, cancel, multi-finger) | Verified in unit tests | `examples/hello-gpu` |
 | The example cross-compiles for Android (arm64, x86_64) | Verified | `cargo ndk build`, NDK 27.1 |
-| The Android library exports all eleven JNI entry points | Verified | `llvm-nm -D libhello_gpu.so` |
+| The Android library exports all eleven JNI entry points | Verified when there were eleven; there are nineteen since ADR 0019, not re-checked | `llvm-nm -D libhello_gpu.so` |
 | The Android host packages into an installable APK | Built, not installed | `tools/build-android.sh`, AGP 9.5.1 / Gradle 9.6.0 |
 | A frame is presented on an Android device | Verified on one device | Galaxy A27, Android 16, Vulkan on Adreno 710, 120 Hz; `benchmarks/reports/2026-11-11-galaxy-a27.md` |
 | Surface loss and recreation on Android (background and return) | Verified on one device | Same session: surface recreated in the same process |

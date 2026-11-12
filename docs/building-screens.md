@@ -243,6 +243,275 @@ What to know:
 - **Testing a form**: drive `Ui` as the engine does. `ui.pointer(..)` a tap on `ui.rect_of(id)`, then `ui.text_input(&TextInputEvent::Commit("a".into()))` per key, a `ui.frame(..)` after each, and assert on your state. `examples/fundidesk/tests/input.rs` is the model.
 - **Not there**: selection, copy and paste, moving the caret with arrow keys, autofill, composition on iOS. See [ADR 0016](architecture/0016-text-input.md).
 
+## Screens, Back, and time
+
+Two optional methods of `Application` ([ADR 0018](architecture/0018-back-and-timers.md)). Navigation is state: keep a stack of screens, push in `update`, and pop in `back`.
+
+```rust
+use std::time::Duration;
+
+#[derive(Clone, Copy, PartialEq)]
+enum Screen { Home, Code, Done }
+
+struct App { stack: Vec<Screen>, seconds_left: u32 }   // stack starts as vec![Screen::Home]
+
+#[derive(Clone)]
+enum Message { Open(Screen), ResendCode, Second }
+
+impl Application for App {
+    type Message = Message;
+
+    fn view(&self) -> Element<Message> {
+        match self.stack.last().copied().unwrap_or(Screen::Home) {
+            Screen::Home => home(),
+            Screen::Code => col![
+                text(format!("Resend in 0:{:02}", self.seconds_left)).tabular_nums(),
+                Button::new("Resend").on_press_maybe((self.seconds_left == 0).then_some(Message::ResendCode)),
+            ].into(),
+            Screen::Done => done(),
+        }
+    }
+
+    fn update(&mut self, message: Message) {
+        match message {
+            Message::Open(screen) => {
+                if screen == Screen::Code { self.seconds_left = 30; }
+                self.stack.push(screen);
+            }
+            Message::ResendCode => self.seconds_left = 30,
+            Message::Second => self.seconds_left = self.seconds_left.saturating_sub(1),
+        }
+    }
+
+    // The system back gesture or key. true: handled here. false: leave the app.
+    fn back(&mut self) -> bool {
+        if self.stack.len() > 1 { self.stack.pop(); true } else { false }
+    }
+
+    // While this is Some, `Second` arrives every second, at one frame a second.
+    fn tick(&self) -> Option<(Duration, Message)> {
+        let counting = self.stack.last() == Some(&Screen::Code) && self.seconds_left > 0;
+        counting.then_some((Duration::from_secs(1), Message::Second))
+    }
+}
+```
+
+- **`back`** is also what an on-screen back arrow should do: give the arrow a message whose `update` arm pops the same stack. Back closes an open keyboard first, by itself; that Back does not reach the application. Without `back`, Back leaves the app from any screen.
+- **`tick` is read from the state**, like `view`: there is nothing to start or stop. When it returns `None` (the countdown reached zero, or another screen is on top) the app draws nothing until the next touch.
+- **Ticks count foreground time and never arrive in a burst.** The timer pauses while the app is in the background, and after any long gap one message arrives, not one per missed interval. For a deadline on the wall clock, store a `std::time::Instant` and compare it in `update` when a tick arrives, rather than counting ticks.
+- **One timer per app.** For two rhythms, tick at the faster one and count.
+- **Testing**: `ui.back()` returns what the system would be told. For a timer, build frames at chosen times, `ui.frame(&info.with_elapsed(Duration::from_secs(3)), &mut frame)`, and assert on your state; `frame.redraw_after()` is how long the host would sleep, and `None` there means idle. `crates/morningstar-ui/tests/back_and_tick.rs` is the model.
+
+## Talking to a server, sound, and remembering things
+
+`update` must return at once, and it cannot touch the device. Work that takes time is asked of the platform and comes back as a message ([ADR 0019](architecture/0019-effects-and-platform-services.md)). The pattern has three steps: `update` notes in the state that the work is wanted; `effects`, which the runtime calls after `setup` and after every `update`, hands it over; the result arrives in `update` like a tap would.
+
+A complete voice note: hold nothing, tap to record, tap to send, hear the reply.
+
+```rust
+use morningstar::ui::prelude::*;
+
+const SERVER: &str = "https://api.example.com/v1/turn";
+
+#[derive(Clone)]
+enum Message {
+    Tap,
+    RecordingStarted(Result<(), AudioError>),
+    Recorded(Result<Recording, AudioError>),
+    Replied(Result<HttpResponse, HttpError>),
+    Played(Result<(), AudioError>),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Phase { Idle, Starting, Recording, Sending, Speaking }
+
+/// What `update` has decided to start. `effects` empties it.
+enum Start { Record, Stop, Send(Recording), Play(AudioClip), Remember }
+
+struct Note {
+    device_id: String,
+    phase: Phase,
+    error: Option<String>,
+    start: Vec<Start>,
+}
+
+impl Note {
+    fn new() -> Self {
+        Self { device_id: String::new(), phase: Phase::Idle, error: None, start: Vec::new() }
+    }
+
+    fn fail(&mut self, error: impl ToString) {
+        self.phase = Phase::Idle;
+        self.error = Some(error.to_string());
+    }
+}
+
+impl Application for Note {
+    type Message = Message;
+
+    fn setup(&mut self, setup: &mut Setup<'_>) {
+        setup.add_font(include_bytes!("../assets/fonts/NotoSans-Regular.ttf"));
+        // Known before the first frame: what was stored last time, or else
+        // the id the host made for this installation (32 hex digits).
+        match setup.stored("device_id") {
+            Some(id) => self.device_id = id.to_owned(),
+            None => {
+                self.device_id = setup.install_id().to_owned();
+                self.start.push(Start::Remember);   // effects runs right after setup
+            }
+        }
+    }
+
+    fn view(&self) -> Element<Message> {
+        let label = match self.phase {
+            Phase::Idle => "Record",
+            Phase::Starting => "...",
+            Phase::Recording => "Send",
+            Phase::Sending => "Sending...",
+            Phase::Speaking => "Listening...",
+        };
+        let ready = matches!(self.phase, Phase::Idle | Phase::Recording);
+        SafeArea::new(
+            col![
+                Button::new(label).on_press_maybe(ready.then_some(Message::Tap)).fill_width(),
+            ]
+            .push_maybe(self.error.as_ref().map(|error| text(error.clone()).caption().fill_width()))
+            .gap(12.0)
+            .padding(20.0),
+        )
+        .into()
+    }
+
+    fn update(&mut self, message: Message) {
+        match message {
+            Message::Tap if self.phase == Phase::Idle => {
+                self.error = None;
+                self.phase = Phase::Starting;
+                self.start.push(Start::Record);
+            }
+            Message::Tap if self.phase == Phase::Recording => {
+                self.phase = Phase::Sending;
+                self.start.push(Start::Stop);
+            }
+            Message::Tap => {}
+            Message::RecordingStarted(Ok(())) => self.phase = Phase::Recording,
+            Message::RecordingStarted(Err(error)) => self.fail(error),   // PermissionDenied, ...
+            Message::Recorded(Ok(recording)) => self.start.push(Start::Send(recording)),
+            Message::Recorded(Err(error)) => self.fail(error),
+            Message::Replied(Ok(response)) if response.is_success() => {
+                self.phase = Phase::Speaking;
+                let mime = response.header("content-type").unwrap_or("audio/mpeg").to_owned();
+                self.start.push(Start::Play(AudioClip::new(response.body, mime)));
+            }
+            Message::Replied(Ok(response)) => self.fail(format!("server said {}", response.status)),
+            Message::Replied(Err(error)) => self.fail(error),            // Offline, Timeout, ...
+            // Stopped on purpose is not a failure worth showing.
+            Message::Played(Ok(()) | Err(AudioError::Interrupted)) => self.phase = Phase::Idle,
+            Message::Played(Err(error)) => self.fail(error),
+        }
+    }
+
+    fn effects(&mut self, out: &mut Effects<Message>) {
+        for start in self.start.drain(..) {
+            match start {
+                Start::Remember => out.store("device_id", self.device_id.clone()),
+                Start::Record => out.start_recording(Message::RecordingStarted),
+                Start::Stop => out.stop_recording(Message::Recorded),
+                Start::Send(recording) => out.http(
+                    HttpRequest::post(SERVER)
+                        .header("X-Device-Id", self.device_id.clone())
+                        .header("Content-Type", recording.mime.clone())
+                        .body(recording.bytes),
+                    Message::Replied,
+                ),
+                Start::Play(clip) => out.play(clip, Message::Played),
+            }
+        }
+    }
+}
+```
+
+What each request does, and what comes back:
+
+| Call | Message gets | Notes |
+| --- | --- | --- |
+| `out.http(request, f)` | `Result<HttpResponse, HttpError>` | Any status is `Ok`, 404 and 500 included: check `response.status` or `is_success()`. Errors: `Offline`, `Timeout`, `InvalidUrl`, `TooLarge` (body over 10 MB), `Unsupported`, `Failed(text)`. |
+| `out.start_recording(f)` | `Result<(), AudioError>` | Asks the user for the microphone the first time. `PermissionDenied`, `Busy` (already recording), `Unsupported`, `Failed(text)`. |
+| `out.stop_recording(f)` | `Result<Recording, AudioError>` | `Recording { bytes, mime, duration }`: an M4A file (`audio/mp4`, mono AAC). `NotRecording` if none was running. |
+| `out.play(clip, f)` | `Result<(), AudioError>` | Arrives when the clip **ends**. `AudioClip::new(bytes, "audio/mpeg")`; MP3 and M4A. `Interrupted` if it was stopped. |
+| `out.stop_playback()` | nothing | The clip's own message says `Interrupted`. |
+| `out.store(key, value)`, `out.remove(key)` | nothing | A few small strings. Not for secrets. |
+| `out.load(key, f)` | `Option<String>` | Usually not needed: `setup.stored(key)` has it at start. |
+| `out.forget_pending()` | nothing | Drops the answers of everything asked before it. |
+
+- **Build a request** with `HttpRequest::get(url)`, `::post`, `::put`, `::delete`, then `.header(name, value)`, `.body(bytes)` or `.json_body(bytes)` (sets `Content-Type: application/json`; encode the JSON yourself), `.timeout(Duration)` (30 s if not set, for the whole exchange). Read a response with `.status`, `.header("content-type")`, `.body`, `.text()`.
+- **HTTPS only.** Plain `http://` works only to `127.0.0.1`, `localhost` and `10.0.2.2`, for a server on your own machine (`adb reverse tcp:8787 tcp:8787`, then `http://127.0.0.1:8787`). Anything else fails as `Failed`.
+- **Every request is answered once**, with an error if need be, so a "loading" state always ends. Show the error (`error.to_string()` is a sentence) and let the user try again.
+- **One thing at a time, by your own state.** Nothing stops two taps from sending two requests except the state machine above (`on_press_maybe`). If a late reply could be mistaken for a newer one, number them: `out.http(request, move |result| Message::Replied(turn, result))`.
+- **A recording stops by itself** after 60 seconds and when the app leaves the screen; `stop_recording` still returns what was recorded. Sound does not play, and recording does not start, while the app is off screen. Drive your own "3 seconds" with `tick` and call `stop_recording` when it runs out (`examples/services-check` does).
+- **`view` never does any of this**, and `effects` must not change what `view` shows.
+- **Not there**: streaming, upload or download progress, cancelling a request on the wire, cookies, recording levels, pausing or seeking a clip.
+
+**Testing** needs no server and no phone. `Ui::testing(app)` holds each request until the test answers it:
+
+```rust
+let mut ui = Ui::testing(Note::new());
+let mut frame = Frame::for_app_with_host(       // runs setup, as on a second launch
+    &mut ui,
+    &HostState::new().with_stored("device_id", "abc"),
+);
+
+ui.send(Message::Tap);
+assert!(ui.answer_recording_started(Ok(())));                 // the microphone starts
+ui.send(Message::Tap);
+assert!(ui.answer_recording(Ok(Recording {                    // "the recording is these bytes"
+    bytes: vec![1, 2, 3],
+    mime: "audio/mp4".into(),
+    duration: Duration::from_secs(2),
+})));
+
+// What is the application waiting for now?
+let ServiceRequest::Http(request) = &ui.pending_effects()[0].request else { panic!() };
+assert_eq!(request.header_value("X-Device-Id"), Some("abc"));
+assert_eq!(request.body, [1, 2, 3]);
+
+assert!(ui.answer_http(Ok(HttpResponse::new(200)             // "the server replies this"
+    .with_header("Content-Type", "audio/mpeg")
+    .with_body(b"mp3 bytes".to_vec()))));
+assert!(ui.answer_playback(Ok(())));                          // the clip finishes
+assert!(ui.app().phase == Phase::Idle);
+
+// And the unhappy path:
+ui.send(Message::Tap);
+ui.answer_recording_started(Err(AudioError::PermissionDenied));
+assert_eq!(ui.app().error.as_deref(), Some("the microphone is not allowed"));
+```
+
+- `ui.answer_http`, `answer_recording_started`, `answer_recording`, `answer_playback` answer the **oldest** pending request of their kind and return `false` if there is none. `ui.resolve(id, ServiceResult::..)` answers a particular one, with `id` from `ui.pending_effects()`. The message is delivered at once.
+- **Stored values are in the driver's memory**: `out.store` shows in `ui.stored("device_id")`, `ui.set_stored(key, value)` seeds a later `out.load`. A `load`'s message is delivered at the start of the next `ui.frame(..)`, or by `ui.deliver_effects()`. What `setup.stored` sees is separate: it comes from the `HostState` given to `Frame::for_app_with_host`.
+- **A pretend server for a whole test**: `Ui::with_services(app, |request| match request { ServiceRequest::Http(r) if r.url.ends_with("/turn") => Some(ServiceResult::Http(Ok(HttpResponse::new(200)))), _ => None })`. `None` leaves that request pending. Its answers arrive with the next frame or `deliver_effects()`, not inside the `update` that asked, so the "sending" state can be asserted first.
+- **With plain `Ui::new`** and no device (the screenshot example), every request fails as `Unsupported` at the next frame: screenshots show your error state unless you set the state up directly.
+- `examples/services-check` is a complete small application with these tests (`tests/script.rs`), and the thing to install on a phone to see each service work.
+
+## Name and icon
+
+What the app is called on the home screen and what its icon is go in the app's `Cargo.toml`; `tools/build-android.sh` and `tools/build-ios.sh` generate the platform's icon files from it at every build ([ADR 0020](architecture/0020-app-identity-and-launcher-icons.md)):
+
+```toml
+[package.metadata.morningstar]
+name = "My App"                    # default: the package name
+id = "com.example.myapp"           # default: dev.morningstar.<lib>
+icon = "assets/icon.png"           # square PNG, 512+, best 1024, full-bleed; found here without being named
+icon_foreground = "assets/icon-foreground.png"   # optional: Android adaptive foreground
+icon_background = "#0E0E0E"        # optional: default is the icon's top-left pixel
+```
+
+- With no icon, the app gets the built-in star. A misspelt key is an error, not a default.
+- With only `icon`, Android's adaptive icon shows it as drawn, cut by the launcher's mask: a circle removes the corners. Keep what matters within the middle 92% of the width, on a background that runs to the edges.
+- Give `icon_foreground` (transparent, 108 dp canvas, content in the middle 66 dp, 61%) when the art should float over a plain colour.
+- The icon can be the app's own drawing: `examples/callready/examples/icon.rs` renders the home screen's disc to `assets/icon.png` and, with `screenshot_transparent`, to a transparent foreground.
+- **Look at it small.** `cargo run -q -p morningstar-devtools --bin morningstar-icon -- my-app --preview out/icon.png` writes the icon square, round and under two adaptive masks at 192, 96 and 48 pixels. Detail that is a smudge at 48 is not doing anything.
+
 ## The loop
 
 Add an example next to the app (copy `examples/showcase/examples/screenshot.rs`):
@@ -335,7 +604,14 @@ Learned reproducing a real twelve-screen design (`examples/fundidesk`, [ADR 0015
 | `color: ..` on a parent | pass the colour to each text and icon; nothing is inherited |
 | `<span style="font-weight: 600">` inside a paragraph | `Text::rich([span(".."), span("..").semibold()])` |
 | `<svg viewBox=.. stroke="currentColor" ..>` | a `VectorIcon::svg(..)` constant; `Icon::vector(X).size(w).color(c)`; another `stroke-width` on the same drawing: `.stroke_width(2.4)` |
-| an `<svg>` with two colours | one colour per icon: draw the plate as a box and the mark as an icon over it |
+| an `<svg>` with two colours | a `VectorPicture` constant and `Picture::vector(X)` (see "Turned things, illustrations and text effects" below); for a plate with a mark on it, a box with an icon over it is still simpler |
+| `transform: rotate(-8deg)` | `.rotate(-8.0)` on the widget |
+| `transform: rotate(5deg) translateY(-8px)` | `.transform(Transform::rotate(5.0).and_translate(0.0, -8.0))` |
+| `font-style: italic` | `.italic()` on the text or the span |
+| `text-shadow: 3px 3px 0 #FFF` | `.shadow(3.0, 3.0, hex(0xFFFFFF))` |
+| `-webkit-text-stroke: 1.5px #FFF` | `.outline(1.5, hex(0xFFFFFF))` |
+| `font-variant-numeric: tabular-nums` | `.tabular_nums()` |
+| `opacity: 0.8` on a box with one colour | the colour with that alpha: `with_alpha(c, 0.8)` |
 | `<input>`, `<textarea>` | a `Container` around a `TextInput` (see "A form") |
 | `<a href>`, `<button>` | `.on_press(Message::..)` on the box |
 
@@ -359,3 +635,180 @@ Each of these cost a pixel or more per element until it was understood.
 3. Render at the reference's exact size and compare. Before reading regions, compare the *extent of ink* row by row between the two images: a first difference of one pixel that grows down the page is a height (line height, border, padding), not a rendering difference.
 4. Fix heights first, then horizontal insets, then look at text and icons.
 5. Stop when every remaining region is text, an icon or a curved edge with the right extent. Record the number and hold it in a test.
+
+## Turned things, illustrations and text effects
+
+Added for a design full of tilted tiles and inline illustrations (`examples/callready`, [ADR 0017](architecture/0017-transforms-and-vector-pictures.md)). Everything here is in `morningstar::ui::prelude`.
+
+### A turned tile, with its text
+
+`.rotate(degrees)` turns a widget and everything inside it about the widget's own centre, clockwise for positive degrees, exactly as CSS `transform: rotate(..)` does. **Layout does not see it**: the widget keeps the room it was laid out in, and its turned picture overlaps whatever is beside it. So build the tile as if it were upright, check it against the design upright if you can, and add the turn last.
+
+```rust
+// <span style="background: #F6C445; border-radius: 6px; padding: 10px 16px;
+//              transform: rotate(-8deg)">TURNED</span>
+Container::new(text("TURNED").size(18.0).bold().color(INK))
+    .padding_xy(16.0, 10.0)
+    .background(GOLD)
+    .radius(6.0)
+    .rotate(-8.0)
+```
+
+Background, border (dashed too), radius, gradient, shadow, clip, icons, pictures and text all turn together. A design often turns only the *frame* and leaves the label upright; then the turn goes on the frame alone:
+
+```rust
+// <a style="position: relative; height: 138px">
+//   <span style="position: absolute; inset: 0; border: 2px solid #9B5DE5;
+//                border-radius: 4px; transform: rotate(-2deg)"></span>
+//   <span style="position: absolute; left: 12px; top: 12px">Angry customer</span>
+// </a>
+stack![
+    Container::empty().fill().border(2.0, PURPLE).radius(4.0).rotate(-2.0),
+    Container::new(text("Angry customer").size(16.0).semibold().color(WHITE)).padding(12.0),
+]
+.fill_width()
+.height(138.0)
+.on_press(Message::Open(Scenario::Angry))
+```
+
+### A turned text, and transforms with more than one function
+
+Text takes the same modifier: `text("3").size(82.0).rotate(-5.0)`. It turns about the centre of its *box*, which is the line box (font size times line height), as in CSS, so give it the design's `line-height`.
+
+For a CSS list of functions, write them in the same order with the `and_*` methods. The order matters and this is the order CSS means: each function acts in the axes the ones before it left behind.
+
+```rust
+// transform: rotate(5deg) translateY(-8px)   (moved "up" along the turned axis)
+.transform(Transform::rotate(5.0).and_translate(0.0, -8.0))
+// transform: rotate(-3deg) translateY(6px)
+.transform(Transform::rotate(-3.0).and_translate(0.0, 6.0))
+```
+
+Lengths are dp. `Transform::translate`, `scale`, `skew_x`, `skew_y` and `matrix(a, b, c, d, tx, ty)` exist too. `a.then(b)` is the other order (move by `a`, then by `b`, both on the fixed page); do not use it to transcribe CSS. A second `.transform(..)` or `.rotate(..)` on the same widget replaces the first; to combine a parent's and a child's transform, nest the widgets.
+
+What to know:
+
+- **Taps follow the picture.** A turned `on_press` box is hit where it is drawn. `Ui::rect_of` still reports the upright layout rectangle.
+- **It may overlap and may be clipped.** A turned tile sticks out of its room by up to half its diagonal. Inside a `.clip()` box or a scroll view it is cut at that box's edge, as `overflow: hidden` would; leave padding if the design shows the corners.
+- **A box that clips can itself be turned** (`.clip().rotate(..)`): its children are cut to the turned, rounded shape. One such clip is exact at a time; do not nest clipping boxes inside a turned clipping box.
+- **Do not put a `ScrollView` inside a turned widget.** A turned widget inside a scroll view is fine.
+- **Turned text and pictures are slightly softer** than upright ones (they are resampled). It does not show at the few degrees designs use.
+- A transform that only moves (`Transform::translate`) is the same as `.offset(x, y)`.
+
+### Italic
+
+`.italic()` on a `Text`, or on one `span(..)` of a rich text. If the family has an italic font and it was added in `setup`, that font is used. If not, the upright letters are slanted by 14 degrees, which is what a browser does for `font-style: italic` on such a family; the text takes exactly the room the upright text would. There is nothing to do with `Transform` here.
+
+```rust
+// <p style="font-style: italic; text-align: right">“Sorry, could you say that slower?”</p>
+text("\u{201c}Sorry, could you say that slower?\u{201d}").italic().align(TextAlign::End).fill_width()
+// one word: <em>slower</em>
+Text::rich([span("could you say that "), span("slower").italic(), span("?")])
+```
+
+### An illustration in several colours, from inline SVG
+
+A `VectorIcon` is one colour. For anything else, transcribe the SVG into a `VectorPicture`: a view box and a list of `Layer`s painted in order. It is a constant; every method is `const`.
+
+```rust
+// <svg width="250" height="250" viewBox="0 0 280 280">
+//   <defs><clipPath id="discClip"><circle cx="140" cy="140" r="122"/></clipPath></defs>
+//   <circle cx="140" cy="140" r="138" fill="none" stroke="#F6C445" stroke-opacity="0.25" stroke-width="2"/>
+//   <circle cx="140" cy="140" r="122" fill="#0E0E0E" stroke="#F6C445" stroke-width="1.5"/>
+//   <g clip-path="url(#discClip)">
+//     <rect x="-40" y="114" width="360" height="52" fill="#F6C445" transform="rotate(-18 140 140)"/>
+//   </g>
+//   <g fill="none" stroke="#F6C445" stroke-opacity="0.55" stroke-width="1">
+//     <circle cx="140" cy="140" r="114"/> <circle cx="140" cy="140" r="108"/> ...
+//   </g>
+//   <circle cx="140" cy="140" r="48" fill="#E9E2CF" stroke="#0E0E0E" stroke-width="3"/>
+//   <g fill="none" stroke="#0E0E0E" stroke-width="3" stroke-linecap="round"
+//      stroke-linejoin="round" transform="translate(122 122)">
+//     <path d="M4 22v-4a14 14 0 0 1 28 0v4"/>
+//     <rect x="2" y="20" width="7" height="11" rx="2"/>
+//   </g>
+// </svg>
+const RING: Color = with_alpha(GOLD, 0.55);
+
+pub const DISC: VectorPicture = VectorPicture::new(
+    280.0,
+    280.0,
+    &[
+        Layer::circle(140.0, 140.0, 138.0).stroke(with_alpha(GOLD, 0.25), 2.0),
+        Layer::circle(140.0, 140.0, 122.0).fill(INK).stroke(GOLD, 1.5),
+        Layer::rect(-40.0, 114.0, 360.0, 52.0)
+            .fill(GOLD)
+            .rotate(-18.0, 140.0, 140.0)
+            .clip_circle(140.0, 140.0, 122.0),
+        Layer::circle(140.0, 140.0, 114.0).stroke(RING, 1.0),
+        Layer::circle(140.0, 140.0, 108.0).stroke(RING, 1.0),
+        // ...
+        Layer::circle(140.0, 140.0, 48.0).fill(CREAM).stroke(INK, 3.0),
+        Layer::path("M4 22v-4a14 14 0 0 1 28 0v4").stroke(INK, 3.0).round().translate(122.0, 122.0),
+        Layer::rounded_rect(2.0, 20.0, 7.0, 11.0, 2.0).stroke(INK, 3.0).round().translate(122.0, 122.0),
+    ],
+);
+
+// In the view: the SVG's `width` and `height` are the size in dp.
+Picture::vector(DISC).size(250.0, 250.0)
+```
+
+| SVG | Layer |
+| --- | --- |
+| `<svg viewBox="0 0 280 280">` | `VectorPicture::new(280.0, 280.0, &[..])`; a view box not at the origin: `VectorPicture::with_view_box(x, y, w, h, &[..])` |
+| `<svg width="250" height="250">` | `.size(250.0, 250.0)` on the `Picture`; nothing in the picture |
+| `<path d="..">` | `Layer::path("..")` (every path command is understood) |
+| `<circle cx cy r>` / `<ellipse cx cy rx ry>` | `Layer::circle(cx, cy, r)` / `Layer::ellipse(cx, cy, rx, ry)` |
+| `<rect x y width height>` / with `rx="2"` | `Layer::rect(x, y, w, h)` / `Layer::rounded_rect(x, y, w, h, 2.0)` |
+| `<line x1 y1 x2 y2>` | `Layer::line(x1, y1, x2, y2)` |
+| `fill="#0E0E0E"` | `.fill(INK)`. **No `fill` attribute means black in SVG**: write `.fill(Color::BLACK)`. `fill="none"`: leave `.fill` out |
+| `stroke="#F6C445" stroke-width="1.5"` | `.stroke(GOLD, 1.5)`; SVG's default width is 1 |
+| `stroke-opacity="0.25"` / `fill-opacity` | the colour with that alpha: `.stroke(with_alpha(GOLD, 0.25), 2.0)` |
+| `opacity="0.5"` | `.opacity(0.5)`: the whole layer, fill and stroke together |
+| `stroke-linecap="round"` / `stroke-linejoin="round"` | `.cap(LineCap::Round)` / `.join(LineJoin::Round)`; both: `.round()` |
+| `fill-rule="evenodd"` | `.even_odd()` |
+| `transform="rotate(-18 140 140)"` | `.rotate(-18.0, 140.0, 140.0)` |
+| `transform="translate(122 122)"` | `.translate(122.0, 122.0)` |
+| any other `transform` | `.transform(Transform::..)`, written in CSS order with `and_*`; a layer has one transform, so combine a group's and an element's into it |
+| `clip-path="url(#id)"` on the element or its `<g>` | `.clip(Shape::..)`, `.clip_circle(cx, cy, r)` or `.clip_rect(x, y, w, h)` with the `<clipPath>`'s shape. The clip is in view-box coordinates and is **not** moved by the layer's own transform, which is what a clip on an enclosing `<g>` means |
+| attributes on a `<g>` or on the `<svg>` | repeat them on each layer inside; nothing is inherited |
+| `currentColor` | the colour it stands for; a picture has no "current colour" (use `.tint(..)` on the `Picture` to multiply the whole picture by a colour) |
+| gradients, `<mask>`, `<pattern>`, dashes, `<text>` | not available |
+
+Things that are pictures although the design draws them with CSS:
+
+- **An ellipse outline** (`border: 1.5px solid; border-radius: 50%` on a box that is not square): a box's radius only makes a pill. For a `w` by `h` dp box with a border of `b`: `VectorPicture::new(w, h, &[Layer::ellipse(w / 2.0, h / 2.0, (w - b) / 2.0, (h - b) / 2.0).stroke(c, b)])` (the numbers written out, since they are constants), under the text in a `stack!`.
+- **A circle in four colours**: four `Layer::rect` quadrants, each `.clip_circle(c, c, r)`.
+- **`repeating-linear-gradient(45deg, A 0 4px, B 4px 7px)`** on an `s` by `s` square: fill the square with `B`, then stroke lines in `A`, 4 wide, running down to the right at 45 degrees, 7 apart, the first centred 2 from the bottom-left corner. Line `k` is `y = x - c` with `c = (2 + 7k) * 1.4142 - s`; write each as `M{c - 4} -4 l{s + 8} {s + 8}` in one path (the view box cuts the ends off). For `s = 46` that is ten lines, `c` from -43.17 in steps of 9.90: see `STRIPES` in `crates/morningstar-ui/tests/rendered.rs`.
+- **Part of a shape at the screen's edge** (rings whose centre is off-screen): give the picture the SVG's own view box; what lies outside it is cut off.
+
+What to know:
+
+- Run `PICTURE.check()` over every picture in a unit test. A layer whose path does not parse is skipped silently otherwise.
+- A picture is rasterised once for the pixel size it is drawn at and cached; each *distinct* picture on screen is an image of `4 * width * height` bytes in pixels (2 MB for a 250 dp disc on a 2.8x phone) and usually its own draw call. That is fine for a handful of illustrations per screen. **Do not use a picture where a box will do** (a circle, a pill, a bordered tile, a one-colour icon): boxes and icons cost nothing extra.
+- A picture always shows its whole view box, centred in its box; make the box the view box's shape. `.radius(..)`, `.tint(..)`, `.rotate(..)` work as on any picture. To turn a picture by a fixed angle and keep it sharp, `.rotate` its layers instead of the widget.
+- Layers are `'static` data: a drawing that depends on state (a progress ring) cannot be one picture. Draw the changing part with boxes, or keep one constant per state.
+
+### A hard text shadow
+
+`text-shadow` with a zero blur is the text drawn twice. `.shadow(x, y, colour)` does that: the copy goes behind, moved by `(x, y)` dp, and takes no room.
+
+```rust
+// font-size: 80px; line-height: 1; color: #9B5DE5; text-shadow: 3px 3px 0 #FFFFFF; transform: rotate(3deg)
+text("1").family("Anton").size(80.0).line_height(1.0).color(PURPLE).shadow(3.0, 3.0, WHITE).rotate(3.0)
+```
+
+A blurred text shadow is not available.
+
+### An outlined digit
+
+```rust
+// font-size: 70px; line-height: 1; color: #0E0E0E; -webkit-text-stroke: 1.5px #FFFFFF; transform: rotate(-3deg)
+text("2").family("Anton").size(70.0).line_height(1.0).color(INK).outline(1.5, WHITE).rotate(-3.0)
+```
+
+The stroke is centred on the letters' edges, half inside and half outside, over the fill, as in a browser, and the text takes the room it would without it. Outlined text is drawn as an image (like a picture, with the same cost), so use it for a digit or a short word, not for paragraphs. A rich text is outlined in its one base colour.
+
+### Numbers that line up
+
+`.tabular_nums()` is `font-variant-numeric: tabular-nums`. It matters when the font's digits are proportional by default (Outfit's and Inter's are): a right-aligned figure or a running timer is laid out differently without it. On a font without the feature it does nothing.

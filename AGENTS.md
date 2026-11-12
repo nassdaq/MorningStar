@@ -78,19 +78,21 @@ It must have:
 | Path | Owns |
 | --- | --- |
 | `crates/morningstar` | Public developer API. The only crate an app depends on. |
-| `crates/morningstar-core` | Dependency-free types: `Color`, `Lifecycle`, `FrameStats`. |
+| `crates/morningstar-core` | Dependency-free types: `Color`, `Lifecycle`, `FrameStats`, and the data of platform services (`HttpRequest`, `Recording`, `ServiceRequest`, ...). |
 | `crates/morningstar-gpu` | The only crate that uses `wgpu`. No `wgpu` type appears in its public API. |
-| `crates/morningstar-text` | Fonts and families, shaping, layout cache, glyph atlas, vector icons. The only crate that uses `cosmic-text` and `zeno`. |
+| `crates/morningstar-text` | Fonts and families, shaping, layout cache, glyph atlas, vector icons and multi-colour vector pictures. The only crate that uses `cosmic-text` and `zeno`. |
 | `crates/morningstar-layout` | Layout engine: fixed / hug / fill boxes to rectangles. Depends only on core. |
-| `crates/morningstar-ui` | Declarative widgets, Elm-style state and events, themes. Apps use it as `morningstar::ui`. |
-| `crates/morningstar-runtime` | `Engine`: lifecycle in, frames out. The one object a host drives. |
-| `crates/morningstar-android` | JNI entry points, the Rust-to-Java upcall (`java.rs`) and the render thread. Empty off Android. |
+| `crates/morningstar-ui` | Declarative widgets, Elm-style state and events, themes, and `Effects` (HTTP, audio, stored values as messages) with its test driver. Apps use it as `morningstar::ui`. |
+| `crates/morningstar-runtime` | `Engine`: lifecycle in, frames out, and platform service requests out and answers in. The one object a host drives. |
+| `crates/morningstar-android` | JNI entry points, the Rust-to-Java upcalls (`java.rs`) and the render thread. Empty off Android. |
 | `crates/morningstar-ios` | C ABI for the UIKit host. Empty off iOS. |
-| `templates/android`, `templates/ios` | Thin native host projects. No application logic. |
-| `tools/morningstar-devtools` | Renders an app to a PNG with no device, and compares it with a design image (`morningstar-diff`). |
+| `templates/android`, `templates/ios` | Thin native host projects. No application logic. They implement the platform services (`MorningstarServices.java`, `HostServices.swift`). |
+| `tools/morningstar-devtools` | Renders an app to a PNG with no device, and compares it with a design image (`morningstar-diff`). Generates an app's launcher icons and reads its name and id from its `Cargo.toml` (`morningstar-icon`, ADR 0020). |
 | `examples/hello-gpu` | The low-level example: paints and hit-tests by hand. |
 | `examples/showcase` | Three realistic screens written with the UI layer. |
+| `examples/services-check` | Device smoke test for platform services: one button per service. Also the smallest app that uses every effect, with scripted tests. |
 | `examples/fundidesk` | Twelve screens reproduced from a real design, each tested against its reference image. The model to imitate; start with its `SCREENS.md`. |
+| `examples/callready` | Five illustrated screens from a second design: turned elements, multi-colour vector pictures, text effects. Tested against its references. |
 | `docs/architecture` | Architecture Decision Records. Read before changing a subsystem. |
 | `benchmarks` | Benchmark method and reports. |
 
@@ -107,7 +109,9 @@ cargo ndk -t arm64-v8a clippy -p hello-gpu   # type-check and lint the Android c
 tools/build-android.sh [--install]     # APK (MORNINGSTAR_APP=showcase, MORNINGSTAR_ABIS=arm64-v8a)
 cargo run -p showcase --example screenshot out/ 3   # the showcase screens as PNGs at scale 3
 cargo run -p fundidesk --example screenshot -- out/ 07 --diff --phone   # one FundiDesk screen, compared with its design
-tools/build-ios.sh                     # XCFramework for the example (needs full Xcode)
+tools/build-ios.sh                     # XCFramework, icon and names for the example (MORNINGSTAR_APP; needs full Xcode)
+cargo run -q -p morningstar-devtools --bin morningstar-icon -- callready --preview out/icon.png   # the app's launcher icon in every form; look at it
+cargo run -p callready --example icon  # redraw an app's source icon (assets/icon.png) from its own art
 ```
 
 ### Building a screen from a design
@@ -116,9 +120,11 @@ Read `docs/building-screens.md` and `docs/design-to-code.md`, imitate `examples/
 
 ### Rules specific to this codebase
 
-- The Java/Swift hosts and their Rust counterparts are two halves of one interface. `MorningstarNative.java` ↔ `morningstar-android/src/jni.rs`, and `morningstar_ios.h` ↔ `morningstar-ios/src/lib.rs`, must change together.
+- The Java/Swift hosts and their Rust counterparts are two halves of one interface. `MorningstarNative.java` ↔ `morningstar-android/src/jni.rs` and `java.rs`, and `morningstar_ios.h` ↔ `morningstar-ios/src/lib.rs`, must change together. An app library and a host from different sides of such a change must never be combined: rebuild both.
+- An application never does I/O itself: no sockets, files, threads or sleeps in `update` or `view`. Work that takes time goes through `Application::effects` (ADR 0019), and tests answer it with `Ui::testing`.
 - Record a new ADR in `docs/architecture` when a decision there is changed or a new cross-cutting one is made. Do not edit an accepted ADR's decision; supersede it.
 - Dependency versions move quickly (wgpu's API changed materially between major versions). Check the version in `Cargo.lock` and its docs rather than relying on memory.
+- An app's name, id and launcher icon are declared in its `Cargo.toml` under `[package.metadata.morningstar]` and nowhere else. The hosts' icon resources are generated by the build scripts into `build/` directories: never add an icon to `templates/`, and never special-case an app in a script.
 - After changing anything visual, render a screenshot and look at it. Passing tests do not show that a screen looks right.
 - The offscreen pixel tests are the specification of the renderer. A new drawing operation comes with pixel tests.
 - A phone connected over adb belongs to a person who may be using it. Never call `adb shell input`, monkey or `screencap` directly. The only permitted route is `tools/adb-guarded.sh`, which checks the foreground app immediately before each command, and even then only when the owner has agreed and is not using the app: a guarded tap has still landed while the owner was mid-typing. Prefer proving behaviour from logs.

@@ -13,6 +13,8 @@ members = [
     "examples/hello-gpu",
     "examples/showcase",
     "examples/fundidesk",
+    "examples/callready",
+    "examples/services-check",
     "tools/morningstar-devtools",
 ]
 
