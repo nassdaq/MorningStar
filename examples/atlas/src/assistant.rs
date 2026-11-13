@@ -1,18 +1,16 @@
-//! The assistant: the one place a real model would be plugged in.
+//! The scripted assistant: what answers when the app's server does not.
 //!
-//! There is deliberately no backend in this example. [`respond`] is the
-//! whole boundary between the app and "the model": the chat hands it a
-//! [`Request`] and gets a [`Response`] back, which the app then plays out
-//! (the steps one by one on the timer, then the reply). Nothing else in
-//! the app knows where an answer comes from.
+//! [`respond`] is the whole of it: the chat hands it a [`Request`] and
+//! gets a [`Response`] back, which the app then plays out (the steps one
+//! by one on the timer, then the reply). It reads nothing and sends
+//! nothing.
 //!
-//! To use a real model, keep both types and replace the call to
-//! [`respond`] in `lib.rs` (`Atlas::ask`): push the request to be sent
-//! from `Application::effects` with `out.http(request, ..)`, and turn the
-//! server's answer into `Message::Answered(turn, response)`, the message
-//! the scripted answer already arrives by. Streaming is not available in
-//! the effects API yet (ADR 0019); a streamed answer would arrive as
-//! several such messages.
+//! With a server behind the app (`server/`, and [`crate::api`]) the same
+//! [`Response`] is built from the server's answer instead (its steps and
+//! its text; `Atlas::take_reply` in `lib.rs`) and played out by the same
+//! code, so the chat screen does not know where an answer came from.
+//! Streaming is not available in the effects API (ADR 0019), so an answer
+//! arrives whole.
 
 use crate::Mode;
 

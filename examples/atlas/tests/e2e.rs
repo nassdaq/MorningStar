@@ -112,7 +112,8 @@ impl Device {
     /// has the keyboard: to tell whether a tap did anything.
     fn snapshot(&self) -> String {
         let app = self.app();
-        let focus = ["email", "password", "search", "draft"].map(|id| self.ui.is_focused(id));
+        let focus =
+            ["email", "password", "search", "draft", "server-url"].map(|id| self.ui.is_focused(id));
         format!(
             "{:?}",
             (
@@ -126,6 +127,7 @@ impl Device {
                     app.sign_in_error(),
                     app.notice()
                 ),
+                (app.server_draft(), app.server_problem()),
                 focus,
             )
         )
@@ -610,23 +612,59 @@ fn controls() -> Vec<Control> {
             d.tap(("chat", 0usize))
         }),
         control("new-chat", Screen::Library, nothing, |d| d.tap("new-chat")),
+        control("server", Screen::Models, nothing, |d| d.tap("server")),
+        control("server-url-field", Screen::Server, nothing, |d| {
+            d.tap("server-url-field")
+        }),
+        control(
+            "server-url",
+            Screen::Server,
+            |d| d.tap("server-url"),
+            |d| d.type_text("a"),
+        ),
+        // With nothing behind the app there is no server to check, and
+        // both buttons say so.
+        control("server-check", Screen::Server, nothing, |d| {
+            d.tap("server-check")
+        }),
+        control("server-default", Screen::Server, nothing, |d| {
+            d.tap("server-default")
+        }),
     ]
 }
 
+/// Controls that exist only with a server behind the app. Nothing here can
+/// reach them (there is no server in this file); `tests/online.rs` taps
+/// every one of them, on both phones, against a scripted server.
+const ONLINE_CONTROLS: [&str; 6] = [
+    "delete-chat",
+    "link",
+    "reload",
+    "retry",
+    "stop-speaking",
+    "voice-retry",
+];
+
 /// Ids in the source that are not controls: containers, texts and what a
 /// test looks for.
-const NOT_CONTROLS: [&str; 12] = [
+const NOT_CONTROLS: [&str; 18] = [
     "chips",
     "composer",
+    "failed",
     "heard",
+    "loading",
+    "models-note",
+    "no-chats",
     "no-tools",
     "orb",
     "picker",
     "reply",
+    "server-status",
     "sign-in-error",
     "tabs",
     "toast",
     "turn",
+    "voice-hint",
     "row",
 ];
 
@@ -682,6 +720,7 @@ fn the_table_names_every_id_in_the_source() {
         .map(|control| control.name.to_owned())
         .collect();
     in_table.extend(NOT_CONTROLS.map(str::to_owned));
+    in_table.extend(ONLINE_CONTROLS.map(str::to_owned));
     in_table.remove("row");
     assert_eq!(in_source, in_table);
 }

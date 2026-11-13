@@ -1,15 +1,29 @@
 # Atlas: the screens
 
 An AI-assistant app reproduced from a design of ten pages
-(`design/README.md`) and made to work end to end. **There is no backend, no
-model, no account system, no microphone and no file picker in this
-example**: answers are scripted (`src/assistant.rs`), live voice plays the
-design's own line, the attachment is the design's sample, and a plan is
-"chosen", not bought. Nothing leaves the phone and nothing is stored: the
-app's state is one run.
+(`design/README.md`) and made to work end to end, in two ways:
+
+- **With its server** (`server/`: a small Node program that holds a
+  DeepSeek key, optionally an ElevenLabs key, and a PostgreSQL database)
+  the chat is answered by a real model, chats are kept and listed in the
+  Library, the model and plan are saved, and, if the server has a voice,
+  live voice records what you say and the answer is spoken. See "With a
+  server" below.
+- **Without it** (the server does not answer, or nothing behind the app
+  can make a request, as in a test or a screenshot) it is the scripted
+  app: answers come from `src/assistant.rs`, live voice plays the design's
+  own line, and nothing leaves the phone or is stored.
+
+In both there is **no account system and no file picker**: sign-in accepts
+anything, the attachment is the design's sample (its *name* is all the
+server is told, and the model is instructed to say that it cannot read
+it), and a plan is "chosen", not bought. The app holds no secret.
 
 ```sh
-cargo test -p atlas -j2                                               # fidelity, journeys, accessibility
+cargo test -p atlas -j2                                               # fidelity, journeys, accessibility, the app against a scripted server
+cargo run -q -p atlas --example screenshot -- out/ --phone --online --sheet   # the states with a server, on a Galaxy A27
+(cd examples/atlas/server && npm install && npm start)                # the server, on 127.0.0.1:8788 (its README says how)
+cargo test -p atlas --test online -- --ignored --nocapture a_real_typed_chat  # the app against that server, through curl
 cargo run -q -p atlas --example screenshot -- out/ 03 --diff          # one page against the design
 cargo run -q -p atlas --example screenshot -- out/ --phone --states --sheet   # everything on a Galaxy A27
 cargo run -q -p atlas --example icon                                  # redraw assets/icon.png from the orb
@@ -94,26 +108,35 @@ link, the app does something a person would expect and says so here.
 | | "Forgot password?", "Create an account" | A toast saying what this demo does instead (`href="#"` in the design) |
 | Home, Explore, Library | Profile button | The plans page, as the design's link (there is no separate profile screen) |
 | Home, chat, voice | The model's name | The model picker rises over that screen with the scrim fading in |
-| Picker | A model | Chooses it and closes the sheet; the name changes on every screen, and scripted answers end with it |
+| Picker | A model | Chooses it and closes the sheet; the name changes on every screen, and scripted answers end with it. Online it is sent with every message and saved to the profile |
 | | The scrim, system Back | Closes the sheet |
 | | "All models and providers" | The models screen (app's own) |
 | Home | A suggestion | Starts a chat with that request |
 | Home, chat | "+" | Attaches the design's sample ("3 PDFs"); a chip above the composer shows it and removes it when tapped (app's own). There is no file picker |
 | | The field | Typing swaps the microphone for the send button, as the design's script does |
-| | Send, the keyboard's Send | Adds the message (with its attachment) and asks the assistant; from home, opens a new chat |
+| | Send, the keyboard's Send | Adds the message (with its attachment) and asks the assistant; from home, opens a new chat. Online the message is posted to the server; while one message of a chat is being answered the next stays in the field |
+| Home | "Live" / "Offline" beside the model chip | Only when there is a server to be live with or offline from: opens the Server screen (app's own) |
 | | Microphone | Live voice |
 | Chat | Back | Home |
-| | The step card | Unfolds into the list of steps, as in the design's markup; "Cancel task" stops the answer |
+| | The step card | Unfolds into the list of steps, as in the design's markup; "Cancel task" stops the answer. Online it is there from "Thinking" on and abandons the request |
+| | "Retry" (online) | Under a message the server did not answer, beside one line that says why: sends the same message again |
+| | "Stop" (online) | Beside an answer being spoken: stops it. Leaving the chat stops it too |
+| | "Delete this chat" (online) | Asks once more ("Tap again to delete it for good"), then deletes the chat on the server and returns to where it was opened from |
 | | An attachment chip | A toast: attachments are a sample |
 | Live voice | (by itself) | "Hears" the design's line a word every quarter second while the orb breathes, holds it a moment, then sends it to the chat it was opened from (or a new one) |
 | | Microphone | Pauses and resumes; the label says "Paused" |
 | | Cross | Ends at once and sends what was heard so far |
+| Live voice, server with a voice | (by itself) | Asks for the microphone and records, the orb breathing; stops by itself after 55 s |
+| | Microphone, cross | Stop recording and send it; the transcript shows in the design's quotes for a moment, then the chat opens with it and the answer is spoken. After a failure the microphone records again and "Send again" resends the recording |
 | | Chevron, system Back | Leaves and sends nothing |
 | | Camera | A toast: no camera in this demo |
 | Explore | Search | Filters the tools by their two lines as it is typed |
 | | Chips | Filter by kind; the row scrolls sideways. Which tool is of which kind is the app's own sorting |
 | | A tool | Starts a chat about it |
-| Plans | "Get Plus", a row of "Other plans" | Records that plan as chosen: the button or row says so and a toast says nothing was charged |
+| Plans | "Get Plus", a row of "Other plans" | Records that plan as chosen: the button or row says so and a toast says nothing was charged. Online it is saved to the profile (still a demo: nothing is paid) |
+| Library (online) | A row | Opens that chat and fetches its messages from the server |
+| Models | "Server" | The Server screen |
+| Server | The address, "Check connection", "Use the default address" | Where the server is (remembered on the phone), and asking it how it is |
 | Tab bar | Home, Explore, Library | The tab's root; Library is the app's own |
 | Anywhere | System Back | Closes the keyboard, then the sheet, then pops; on a tab's root it is left to the system |
 
@@ -125,24 +148,92 @@ spinner turning) until the reply appears; the list follows the newest
 message down. The timer runs only while something moves and the app is
 idle otherwise (tested).
 
-**Where a real model plugs in.** `assistant::respond(&Request) -> Response`
-in `src/assistant.rs` is the whole boundary, called from one place,
-`Atlas::ask` in `src/lib.rs`. A backend replaces that call with a request
-handed to `Application::effects` (`out.http(..)`) and delivers the reply as
-`Message::Answered(chat, turn, Response)`, the message the scripted answer
-already arrives by; the steps, the cancelling and the scrolling need no
-change.
+That paragraph is the app without a server. With one, the same card and
+the same timer play out what the server sent.
+
+## With a server
+
+`server/API.md` is the contract, `src/api.rs` the client (requests built,
+answers decoded and cleaned; nothing from a server is trusted), `src/lib.rs`
+the state. `src/json.rs` is a copy of CallReady's small JSON reader.
+
+**Start-up.** `GET /v1/health`, then `/v1/profile`, then `/v1/chats`. If all
+three answer, the app is *online* (`Link::Online`): the model chip and the
+plan are the profile's, the Library lists the server's chats. If the server
+does not answer, or has no model key or database, the app is *offline*
+(`Link::Offline`, with the reason on the Server screen) and behaves exactly
+as the scripted app; it asks again each time Home or the Library is
+reached. With nothing behind the app that can make a request (`Ui::new`: the
+fidelity tests, the screenshots) the first question fails at once and the
+app is *standalone*: no mark, no "demo" label, the design's pixels.
+
+**A message.** Sending posts it (`POST /v1/chats` for a new chat,
+`…/messages` after) with the model chosen and the name of the attachment.
+The card says "Thinking" with the spinner for as long as the server takes;
+when the answer arrives the chat takes the server's title, the card runs
+through the server's two to four steps on the same timer (0.8 s each), and
+then the answer shows. If the choice was Auto, a small line under the
+answer says which model took it ("Answered by Smart").
+
+**The answer's formatting.** The server keeps the model to plain text with
+paragraphs, `- ` and `1. ` items, `` `inline code` `` and fenced code
+blocks, and the app renders exactly those (`src/format.rs`): paragraphs
+and list items in the design's 16 px text, code on a tinted card. There is
+no monospace face among the app's fonts, so code is set in Plus Jakarta
+Sans (inline code a weight heavier); its line breaks are kept. An answer
+with none of the marks is laid out exactly as before.
+
+**When it fails.** The bubble keeps what was typed, the card says "No
+answer", and one line under it says why with a "Retry" pill that sends
+the same message again. A failed message stores nothing on the server. If
+the server was not reached at all, the app is offline until it answers
+again. An answer that arrives after "Cancel task", after a retry, or for a
+chat that is gone, changes nothing (every request is numbered). A request
+cannot be recalled, though: a cancelled message the server had already
+answered is in the chat when it is next fetched.
+
+**Voice.** When `health.voice` is true the microphone screen records
+(`out.start_recording`), posts the recording with `X-Speak: 1`, shows the
+server's transcript, opens the chat with that message and its answer, and
+plays the spoken answer (`out.play`) with "Stop" beside it. A refused
+microphone is explained in a toast and the screen becomes the demo; a
+recording that is too short or does not get through is explained on the
+screen. When the server has no voice, or the app is offline, live voice is
+the simulation and its status says "demo" (the simulated line is then
+sent to the server as a typed message when the app is online).
+
+**The model behind each choice** is the server's business
+(`server/src/model.js`): Fast, Smart and Code are DeepSeek models and
+settings, Auto picks one per message.
+
+`tests/online.rs` drives all of it with fingers and a scripted server at
+the Galaxy A27's frame and at 360 x 640 dp: the journeys, every failure,
+late answers, the offline fallback and the address change. Its one ignored
+test carries the app's requests to a real server with `curl`.
 
 ## The app's own design
 
 Not from the design, built from its parts and tokens:
 
-- **Library** (`screens/library.rs`): the conversations of this run, under
+- **Library** (`screens/library.rs`): the server's chats when it answers,
+  otherwise the conversations of this run, under
   Explore's heading and in its list card, with a "New chat" button. The
   design's tab bar has the tab and no page for it.
 - **Models** (`screens/models.rs`): where "All models and providers"
-  leads. The picker's four models again, and three invented providers that
-  switch nothing on.
+  leads. The picker's four models again, three invented providers that
+  switch nothing on, the way to the Server screen, and a note that says
+  where answers come from right now.
+- **Server** (`screens/server.rs`): the server's address in the sign-in
+  page's field, how the app stands with it, the design's two buttons, and
+  how to run one. Reached from Models and from the mark on home.
+- **Everything a server adds**: the "Live"/"Offline" mark beside home's
+  model chip; in the chat, "Thinking" with "Cancel task", the failure line
+  with "Retry", the formatted answer, "Answered by …", "Speaking the
+  answer" with "Stop", "Loading this chat…" and "Delete this chat"; on
+  live voice, the "Starting", "Sending", "Heard", "Not sent" and "demo"
+  statuses, the small line under them and "Send again"; the Library's
+  server rows and its "No chats yet". All in the design's type, pills and
+  cards; none of it is drawn when the app is standalone.
 - **States the design does not picture**: the sign-in message; the
   attachment waiting above the composer; the step card while thinking, when
   done and when cancelled; "Paused" on live voice; Explore with nothing
@@ -210,10 +301,20 @@ tests hold:
 
 No contrast finding: every text of the design passes.
 
+The controls a server adds are the app's own, so they are made 48 dp tall
+rather than allowed: "Retry", "Stop", "Send again", "Delete this chat" and
+the "Live" mark. A second test puts the app online against scripted
+answers and checks those states and names the same way, with no allowance
+added.
+
 ## Not verified
 
 Everything here was seen on macOS/Metal only. **Nothing has run on a
-phone**: no APK was built. Unseen on a device are every screen, the
+phone**: no APK was built. That includes all of the online behaviour: the
+app has talked to its real server only through the test that carries its
+requests with `curl`; a phone's own HTTP stack, `adb reverse`, the
+microphone permission and recording, the M4A a phone records being
+transcribed, and the spoken answer playing are untried on a device. Unseen on a device are every screen, the
 keyboard over the fields, the sheet, the timer-driven motion, the new
 shader paths (radial gradients, the blurred glow, inner shadows) on Vulkan
 or GLES and their frame times, the sideways drag of the chips, TalkBack,

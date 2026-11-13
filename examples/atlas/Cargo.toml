@@ -1,6 +1,6 @@
 [package]
 name = "atlas"
-description = "Atlas: an AI-assistant app. Ten screens reproduced from a design (the test of Morningstar's radial gradients, blurs, inner shadows and per-corner radii) and three of its own, working end to end without a backend."
+description = "Atlas: an AI-assistant app. Ten screens reproduced from a design (the test of Morningstar's radial gradients, blurs, inner shadows and per-corner radii) and four of its own. With its server (server/) the chat is answered by a real model and can be spoken; without it the app works end to end from a script."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

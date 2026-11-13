@@ -3,9 +3,11 @@
 //! (`href="#"`); built from Explore's parts: its heading, its list card
 //! and its rows.
 //!
-//! The design's own conversation is always there; every chat started on
-//! home, in Explore or by voice is added. Nothing is stored: the list is
-//! this run of the app.
+//! With a server behind the app these are the chats it holds for this
+//! phone, newest first: a row opens one and fetches its messages. Without
+//! one, the design's own conversation is always there and every chat
+//! started on home, in Explore or by voice is added; nothing of those is
+//! stored: the list is this run of the app.
 
 use morningstar::ui::prelude::*;
 
@@ -14,14 +16,22 @@ use crate::components::{
     section_heading, tab_bar, two_lines,
 };
 use crate::icons::{self, icon};
-use crate::theme::{ACCENT, RADIUS_CARD, RADIUS_TILE, TINT_08, jakarta};
-use crate::{Atlas, Conversation, Message, Phase, Screen, Tab};
+use crate::theme::{ACCENT, MUTED, RADIUS_CARD, RADIUS_TILE, TINT_08, jakarta};
+use crate::{Atlas, Conversation, Loaded, Message, Phase, Screen, Tab};
 
 fn summary(chat: &Conversation) -> String {
-    let count = chat.turns.len();
+    // Of a chat the server holds, the app may have the count alone.
+    let listed = chat
+        .remote
+        .as_ref()
+        .filter(|remote| remote.loaded != Loaded::Full)
+        .map(|remote| remote.count as usize);
+    let count = listed.unwrap_or(chat.turns.len());
     let state = match chat.turns.last().map(|turn| turn.phase) {
+        _ if listed.is_some() => "answered",
         Some(Phase::Thinking | Phase::Working(_)) => "working",
         Some(Phase::Cancelled) => "cancelled",
+        Some(Phase::Failed) => "not answered",
         Some(Phase::Done) => "answered",
         None => "empty",
     };
@@ -34,11 +44,13 @@ fn summary(chat: &Conversation) -> String {
 /// The screen.
 pub fn view(app: &Atlas) -> Element<Message> {
     let chats = app.chats();
-    let rows = chats
+    let listed = app.library();
+    let oldest = listed.first().copied();
+    let rows: Vec<Container<Message>> = listed
         .iter()
-        .enumerate()
         .rev()
-        .map(|(index, chat)| {
+        .map(|&index| {
+            let chat = &chats[index];
             list_row(
                 row![
                     Container::new(icon(&icons::FILE, 19.0, ACCENT))
@@ -52,15 +64,33 @@ pub fn view(app: &Atlas) -> Element<Message> {
                 68.0,
                 14.0,
                 14.0,
-                index == 0,
+                Some(index) == oldest,
             )
             .on_press(Message::OpenChat(index))
             .id(("chat", index))
         })
         .collect();
+    // A phone the server has not seen has no chats yet.
+    let list: Element<Message> = if rows.is_empty() {
+        Container::new(
+            jakarta(
+                "No chats yet. What you ask Atlas is kept on its server and listed here.",
+                14.0,
+            )
+            .line_height_dp(21.0)
+            .color(MUTED)
+            .fill_width(),
+        )
+        .fill_width()
+        .padding_xy(4.0, 8.0)
+        .id("no-chats")
+        .into()
+    } else {
+        list_card(rows, RADIUS_CARD).into()
+    };
     let content = col![
         section_heading("Recent chats"),
-        list_card(rows, RADIUS_CARD),
+        list,
         Spacer::fixed(4.0),
         primary_button("New chat", Message::NewChat).id("new-chat"),
     ]

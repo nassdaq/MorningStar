@@ -12,7 +12,9 @@ use std::time::Duration;
 
 use atlas::{Atlas, Flow, Message, Mode, Phase, Plan, Screen, VOICE_LINE};
 use morningstar::ui::{AccessibilityIssue, Action, IssueKind, Role, SemanticsNode, States, Ui};
-use morningstar::{App, Frame, FrameInfo, Insets, SurfaceSize, TextInputEvent};
+use morningstar::{
+    App, Frame, FrameInfo, HttpError, HttpResponse, Insets, Recording, SurfaceSize, TextInputEvent,
+};
 
 /// The owner's phone: 384 x 832 dp at 2.8125, with its bars.
 fn galaxy_a27() -> FrameInfo {
@@ -329,4 +331,214 @@ fn the_journey_by_semantics_alone() {
             .any(|line| line.contains("Plus")),
         "the toast is announced"
     );
+}
+
+// ------------------------------------------------------ with a server
+
+/// A server's JSON answer.
+fn json(body: &str) -> Result<HttpResponse, HttpError> {
+    Ok(HttpResponse::new(200)
+        .with_header("Content-Type", "application/json")
+        .with_body(body.as_bytes().to_vec()))
+}
+
+const REPLY: &str = r#"{"chat_id": "h_0000000000000000000000000000000a", "title": "Buying or leasing",
+    "heard": "Compare buying and leasing a car",
+    "steps": [{"label": "Reading the request", "state": "done"}, {"label": "Writing the answer", "state": "done"}],
+    "answer": {"text": "Buying wins over ten years.\n\n- Leases never end\n- `total = monthly * 120`\n\n1. Add it up\n\n```\nprint(450 * 120)\n```", "audio_url": "/v1/audio/a_000000000000000000000001.mp3"},
+    "model_used": "smart", "turn": 1}"#;
+
+/// The app online and on home: the three questions of start-up answered.
+fn online(info: FrameInfo, voice: bool) -> Device {
+    let mut device = Device::with(Atlas::default(), info);
+    let health = format!(r#"{{"ok": true, "model": true, "voice": {voice}, "database": true}}"#);
+    for body in [
+        health.as_str(),
+        r#"{"model": "auto", "plan": "free"}"#,
+        r#"{"chats": [{"chat_id": "h_0000000000000000000000000000000b", "title": "A week in Lisbon", "updated_at": "2026-11-13T09:14:03Z", "messages": 1, "state": "answered"}]}"#,
+    ] {
+        assert!(device.ui.answer_http(json(body)));
+        device.draw();
+    }
+    assert!(device.ui.app().link().is_online());
+    device.ui.send(Message::Google);
+    device.draw();
+    device.wait(2);
+    device
+}
+
+/// Lets the screen settle, finds each expected control as a screen reader
+/// would, and notes what the check finds.
+fn look(
+    findings: &mut std::collections::BTreeSet<String>,
+    device: &mut Device,
+    expected: &[(Role, &str)],
+) {
+    device.draw();
+    device.wait(2);
+    for (role, label) in expected {
+        device.node(*role, label);
+    }
+    findings.extend(unexplained(device));
+}
+
+/// What only exists with a server behind the app: named for a screen
+/// reader, and passing the same check as everything else (these are the
+/// app's own controls, so none of them needs the design's allowance).
+#[test]
+fn the_online_controls_have_names_and_pass_the_check() {
+    for info in [galaxy_a27(), design()] {
+        let mut findings = std::collections::BTreeSet::new();
+
+        // Home: the mark that says answers are live.
+        let mut device = online(info, true);
+        look(
+            &mut findings,
+            &mut device,
+            &[(Role::Button, "Answers are live. Opens the server screen")],
+        );
+
+        // A message the server does not answer, then one it does.
+        device
+            .ui
+            .send(Message::Draft("Compare buying and leasing a car".into()));
+        device.ui.send(Message::Send);
+        look(&mut findings, &mut device, &[(Role::Button, "Thinking")]);
+        assert!(device.ui.answer_http(Ok(HttpResponse::new(502))));
+        look(
+            &mut findings,
+            &mut device,
+            &[
+                (Role::Button, "No answer"),
+                (Role::Button, "Retry: send the message again"),
+            ],
+        );
+        assert!(
+            device
+                .ui
+                .announcements()
+                .iter()
+                .any(|line| line == "Atlas could not answer just now."),
+            "the failure is announced"
+        );
+        device.activate(Role::Button, "Retry: send the message again");
+        assert!(device.ui.answer_http(json(REPLY)));
+        device.ticks(80);
+        assert_eq!(device.ui.app().conversation().turns[0].phase, Phase::Done);
+        look(
+            &mut findings,
+            &mut device,
+            &[
+                (Role::Heading, "Buying or leasing"),
+                (Role::Button, "Delete this chat"),
+            ],
+        );
+        let spoken = device.spoken().join("\n");
+        for part in [
+            "Buying wins over ten years.",
+            "Leases never end",
+            "Add it up",
+            "print(450 * 120)",
+            "Answered by Smart",
+        ] {
+            assert!(spoken.contains(part), "{part:?} is in the tree: {spoken}");
+        }
+        device.activate(Role::Button, "Delete this chat");
+        look(
+            &mut findings,
+            &mut device,
+            &[(Role::Button, "Tap again to delete it for good")],
+        );
+
+        // The Library, the Models screen and the Server screen, online.
+        for (screen, expected) in [
+            (
+                Screen::Library,
+                vec![(Role::Button, "A week in Lisbon, 1 message \u{b7} answered")],
+            ),
+            (
+                Screen::Models,
+                vec![(
+                    Role::Button,
+                    "Server, Connected. Answers are live, and so is voice.",
+                )],
+            ),
+        ] {
+            let mut device = online(info, true);
+            device.ui.send(match screen {
+                Screen::Library => Message::Tab(atlas::Tab::Library),
+                _ => Message::AllModels,
+            });
+            look(&mut findings, &mut device, &expected);
+            if screen == Screen::Models {
+                device.activate(
+                    Role::Button,
+                    "Server, Connected. Answers are live, and so is voice.",
+                );
+                assert_eq!(device.screen(), Screen::Server);
+                look(
+                    &mut findings,
+                    &mut device,
+                    &[
+                        (Role::Heading, "Server"),
+                        (Role::TextField, "Server address"),
+                        (Role::Button, "Check connection"),
+                        (Role::Button, "Use the default address"),
+                    ],
+                );
+            }
+        }
+
+        // Live voice, for real: recording, failed, heard, and the spoken answer.
+        let mut device = online(info, true);
+        device.activate(Role::Button, "Start voice conversation");
+        assert!(device.ui.answer_recording_started(Ok(())));
+        look(
+            &mut findings,
+            &mut device,
+            &[(Role::Button, "Send what you said")],
+        );
+        device.activate(Role::Button, "Send what you said");
+        assert!(device.ui.answer_recording(Ok(Recording {
+            bytes: vec![1, 2, 3],
+            mime: "audio/mp4".into(),
+            duration: Duration::from_secs(2),
+        })));
+        device.draw();
+        assert!(device.ui.answer_http(Ok(HttpResponse::new(502))));
+        look(
+            &mut findings,
+            &mut device,
+            &[(Role::Button, "Record again"), (Role::Button, "Send again")],
+        );
+        device.activate(Role::Button, "Send again");
+        assert!(device.ui.answer_http(json(REPLY)));
+        device.draw();
+        assert!(
+            device
+                .spoken()
+                .iter()
+                .any(|line| line.contains("Compare buying and leasing a car")),
+            "what was heard is in the tree: {:#?}",
+            device.spoken()
+        );
+        findings.extend(unexplained(&device));
+        // The audio arrives; the chat opens; the answer is spoken.
+        assert!(
+            device.ui.answer_http(Ok(HttpResponse::new(200)
+                .with_header("Content-Type", "audio/mpeg")
+                .with_body(vec![1, 2, 3])))
+        );
+        device.ticks(60);
+        assert_eq!(device.screen(), CHAT);
+        look(
+            &mut findings,
+            &mut device,
+            &[(Role::Button, "Stop speaking")],
+        );
+        device.activate(Role::Button, "Stop speaking");
+        assert_eq!(device.ui.app().speaking(), None);
+
+        assert!(findings.is_empty(), "{findings:#?}");
+    }
 }

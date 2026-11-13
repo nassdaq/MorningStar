@@ -14,8 +14,44 @@ use crate::components::{
     tab_bar, wash_home, wordmark,
 };
 use crate::icons::icon;
-use crate::theme::{ACCENT, LINE, RADIUS_ROW, WHITE, jakarta};
-use crate::{Atlas, Message, SUGGESTIONS, Tab};
+use crate::theme::{ACCENT, LINE, MUTED, QUIET, RADIUS_ROW, WHITE, jakarta};
+use crate::{Atlas, Link, Message, SUGGESTIONS, Tab};
+
+/// Whether answers are live, beside the model chip: a dot and a word, and
+/// the way to the Server screen. **The app's own**, in the model chip's
+/// type (`font-size: 13px; font-weight: 600; color: #5E5873`). It is there
+/// only when there is a server to be live with or offline from: with
+/// nothing behind the app, home is the design's.
+fn link_mark(link: &Link) -> Option<Container<Message>> {
+    let (word, color, label) = match link {
+        Link::Online { .. } => ("Live", ACCENT, "Answers are live. Opens the server screen"),
+        Link::Offline(_) => (
+            "Offline",
+            QUIET,
+            "The server is offline: answers are scripted. Opens the server screen",
+        ),
+        Link::Standalone | Link::Checking => return None,
+    };
+    Some(
+        row![
+            Container::empty()
+                .size(7.0, 7.0)
+                .radius(3.5)
+                .background(color),
+            jakarta(word, 13.0).semibold().color(MUTED),
+        ]
+        .gap(6.0)
+        .cross_align(CrossAlign::Center)
+        // The app's own, so as tall as Android asks (the chip is 44).
+        .height(48.0)
+        .min_width(48.0)
+        .padding_xy(8.0, 0.0)
+        .radius(24.0)
+        .on_press(Message::OpenServer)
+        .label(label)
+        .id("link"),
+    )
+}
 
 /// A suggestion: a `button` with `height: 52px; display: flex;
 /// align-items: center; gap: 12px; padding: 0 16px; border-radius: 16px;
@@ -98,7 +134,14 @@ pub fn view(app: &Atlas, room: f32) -> Element<Message> {
             .fill_width(),
         // `align-self: flex-start; margin-top: 8px; padding: 0 6px`.
         Spacer::fixed(8.0),
-        model_chip(app.mode(), 6.0),
+        match link_mark(app.link()) {
+            None => model_chip(app.mode(), 6.0),
+            // The same chip, with the mark at the row's other end.
+            Some(mark) => row![model_chip(app.mode(), 6.0), mark]
+                .space_between()
+                .cross_align(CrossAlign::Center)
+                .fill_width(),
+        },
     ]
     .fill_width()
     .min_height((room - fixed).max(0.0))

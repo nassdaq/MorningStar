@@ -4,7 +4,7 @@
 //! [`Element`](morningstar::ui::Element) of [`Message`](crate::Message)s:
 //! it changes nothing itself. The first eight are the design's pages (09
 //! and 10 are `home` and `chat` again, see [`Flow`](crate::Flow)); the last
-//! two are the app's own, in the same visual language.
+//! three are the app's own, in the same visual language.
 //!
 //! Each quotes the CSS it was written from. Fixed bars stay put and the
 //! rest scrolls, so a screen is usable on a phone shorter than the
@@ -23,3 +23,4 @@ pub mod sign_in;
 
 pub mod library;
 pub mod models;
+pub mod server;

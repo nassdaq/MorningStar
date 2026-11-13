@@ -96,7 +96,7 @@ templates/
   ios/                    XcodeGen host project (one view controller, one CAMetalLayer)
 examples/hello-gpu/       low-level example (a tap counter)
 examples/showcase/        three realistic screens built with the UI layer
-examples/atlas/           ten screens of an AI-assistant design, working end to end with no backend
+examples/atlas/           ten screens of an AI-assistant design; answers from a real model through its server, scripted without it
 examples/services-check/  device smoke test for HTTP, recording, playback and stored values
 docs/architecture/        architecture decision records
 benchmarks/               method, scripts and reports
