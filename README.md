@@ -66,7 +66,7 @@ morningstar::app!(Ui::new(Counter::default()));
 
 Sizes are in density-independent units. [`examples/showcase`](examples/showcase/src/lib.rs) has three realistic screens (a wallet home, settings, a login form) written this way; [`docs/building-screens.md`](docs/building-screens.md) is the guide. The snippet above is illustrative: check it against the showcase before copying.
 
-[`examples/fundidesk`](examples/fundidesk) is the proof that this works on a real design: twelve screens of a repair-shop app reproduced from the designer's export, each within half a percent of the design's pixels and held there by a test. [`examples/callready`](examples/callready) does the same for a second, illustration-heavy design (turned cut-out letters, tilted cards, a vinyl disc drawn from layered vector shapes): five screens, each within a quarter of a percent.
+[`examples/fundidesk`](examples/fundidesk) is the proof that this works on a real design: twelve screens of a repair-shop app reproduced from the designer's export, each within half a percent of the design's pixels and held there by a test. [`examples/callready`](examples/callready) does the same for a second, illustration-heavy design (turned cut-out letters, tilted cards, a vinyl disc drawn from layered vector shapes): five screens, each within a quarter of a percent. [`examples/atlas`](examples/atlas) is a third, built of light rather than of lines (an AI assistant: a glass orb of stacked radial gradients, inner shadows and a blurred glow, a bottom sheet over a scrim): ten screens, each within a fifth of a percent, and a working app behind them, with a chat whose scripted answers arrive step by step, live voice, search and filters, and no backend.
 
 The low-level interface underneath (paint a display list by hand, receive raw touches) remains available; [`examples/hello-gpu`](examples/hello-gpu/src/lib.rs) uses it.
 
@@ -96,6 +96,7 @@ templates/
   ios/                    XcodeGen host project (one view controller, one CAMetalLayer)
 examples/hello-gpu/       low-level example (a tap counter)
 examples/showcase/        three realistic screens built with the UI layer
+examples/atlas/           ten screens of an AI-assistant design, working end to end with no backend
 examples/services-check/  device smoke test for HTTP, recording, playback and stored values
 docs/architecture/        architecture decision records
 benchmarks/               method, scripts and reports

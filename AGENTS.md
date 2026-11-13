@@ -93,6 +93,7 @@ It must have:
 | `examples/services-check` | Device smoke test for platform services: one button per service. Also the smallest app that uses every effect, with scripted tests. |
 | `examples/fundidesk` | Twelve screens reproduced from a real design, each tested against its reference image. The model to imitate; start with its `SCREENS.md`. |
 | `examples/callready` | Five illustrated screens from a second design: turned elements, multi-colour vector pictures, text effects. Tested against its references. |
+| `examples/atlas` | Ten screens from a third design, an AI assistant: radial gradients, blur, inner shadows, a bottom sheet, a sideways chip row; a working app with no backend. Tested against its references. Start with its `SCREENS.md`. |
 | `docs/architecture` | Architecture Decision Records. Read before changing a subsystem. |
 | `benchmarks` | Benchmark method and reports. |
 

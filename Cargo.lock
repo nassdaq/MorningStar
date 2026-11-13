@@ -39,6 +39,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "atlas"
+version = "0.0.1"
+dependencies = [
+ "morningstar",
+ "morningstar-devtools",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

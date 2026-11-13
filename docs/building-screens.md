@@ -69,6 +69,11 @@ Work top-down. Every region of the picture is one of these:
 | One child aligned differently | `.align_self(CrossAlign::End)` on the child |
 | Card: fill, corner radius, stroke, shadow | `.background(c).radius(16.0).border(1.0, c).shadow(elevation::LOW)` |
 | Gradient fill | `.gradient(Gradient::diagonal(a, b))` (also `vertical`, `horizontal`, `angled`) |
+| A glow, a wash, a glass ball: colour spreading from a point | `.radial(Radial::circle().at(0.5, 0.3).stop(0.0, a).stop(0.5, b))`; several, as CSS lists them: `.radials([top, .., bottom])` |
+| A soft blob | a box with a colour or a radial gradient and `.blur(8.0)` |
+| A light or dark edge inside a shape | `.shadows([Shadow::inset(0.0, 4.0, 10.0, c), ..])` |
+| One corner different (a chat bubble, a sheet) | `.radii(20.0, 20.0, 6.0, 20.0)` |
+| A row of chips or cards wider than the screen | `ScrollView::horizontal(Row::new().extend(chips).gap(8.0).padding_xy(20.0, 0.0))` |
 | Content cut off by rounded corners | `.clip()` |
 | Text | `text("…")` with `.display() / .title() / .headline() / .body() / .label() / .caption()`, or `.size(17.0).semibold()`; `.color(..)`, `.muted()` |
 | Centred text | `text("…").centered().fill_width()` |
@@ -776,7 +781,7 @@ Each of these produces a wrong picture, not an error.
 - **A widget with `.animate(..)` or `.transition(..)` needs an `.id(..)`** that stays the same while it changes; without one its identity is its place in the tree, and a sibling appearing before it makes it "a different widget".
 - **A control that is only a picture needs `.label("..")`**, or a screen reader says just "button". `ui.accessibility_issues()` finds them; see "Accessibility" above.
 - **The system's bars** (clock, battery, the gesture handle) are drawn over your screen. Their icons are dark over a light theme background and light over a dark one, by themselves. A screen whose top or bottom is not the theme's background says so: `fn system_bars(&self) -> Option<SystemBars>` on the `Application`, returning `Some(SystemBars::LIGHT_CONTENT)` (light icons, for a dark screen), `Some(SystemBars::DARK_CONTENT)`, or a `SystemBars { status, navigation }` of its own, and `None` everywhere else. `examples/fundidesk` does it for its green splash.
-- **Not available yet**: keyframes and springs; overscroll bounce; horizontal scrolling, ellipsis, per-corner radii, per-side borders (use a `Divider`), a tap target inside a sentence.
+- **Not available yet**: keyframes and springs; overscroll bounce; ellipsis; per-side borders (use a `Divider`; a border in two colours is a picture); a tap target inside a sentence; `align-items: baseline`; a blur of anything but a box's own background.
 
 ## From HTML/CSS or a design tool's inspector
 
@@ -798,6 +803,13 @@ Learned reproducing a real twelve-screen design (`examples/fundidesk`, [ADR 0015
 | `flex-wrap: wrap; gap: 8px` | `.gap(8.0).line_gap(8.0).wrap()` on the row |
 | `background: #1E8416` | `.background(hex(0x1E8416))`, from a named constant |
 | `border-radius: 14px` / `999px` / `50%` | `.radius(14.0)` / `.radius(999.0)` / `.radius(side / 2.0)` |
+| `border-radius: 20px 20px 6px 20px` | `.radii(20.0, 20.0, 6.0, 20.0)` (solid fill and border; see "Glows, glass and soft light") |
+| `background: radial-gradient(circle at 30% 22%, A 0%, B 24%)` | `.radial(Radial::circle().at(0.3, 0.22).stop(0.0, A).stop(0.24, B))` |
+| `background: radial-gradient(..), radial-gradient(..), #FFF` | `.background(WHITE).radials([first, second])`, in the CSS order |
+| `filter: blur(9px)` on a box with only a background | `.blur(9.0)` |
+| `box-shadow: inset 0 9px 21px A, 0 18px 39px B` | `.shadows([Shadow::inset(0.0, 9.0, 21.0, A), Shadow::new(0.0, 18.0, 39.0, B)])` |
+| `box-shadow: inset 0 0 0 1px A` | `Shadow::inset(0.0, 0.0, 0.0, A).with_spread(1.0)` in that list |
+| `overflow-x: auto` on a flex row | `ScrollView::horizontal(row)` |
 | `border: 1px solid #D9E0DB` | `.border(1.0, c)` |
 | `border: 1px dashed #AEB9B1` | `.border_dashed(1.0, c)` |
 | `border-top: 1px solid ..` | a `Divider::new().color(c)` as the first child of a column |
@@ -1024,6 +1036,55 @@ What to know:
 - A picture is rasterised once for the pixel size it is drawn at and cached; each *distinct* picture on screen is an image of `4 * width * height` bytes in pixels (2 MB for a 250 dp disc on a 2.8x phone) and usually its own draw call. That is fine for a handful of illustrations per screen. **Do not use a picture where a box will do** (a circle, a pill, a bordered tile, a one-colour icon): boxes and icons cost nothing extra.
 - A picture always shows its whole view box, centred in its box; make the box the view box's shape. `.radius(..)`, `.tint(..)`, `.rotate(..)` work as on any picture. To turn a picture by a fixed angle and keep it sharp, `.rotate` its layers instead of the widget.
 - Layers are `'static` data: a drawing that depends on state (a progress ring) cannot be one picture. Draw the changing part with boxes, or keep one constant per state.
+
+### Glows, glass and soft light
+
+Added for a design made of light (`examples/atlas`, [ADR 0033](architecture/0033-radial-gradients.md) to [0036](architecture/0036-a-radius-per-corner.md)). Everything here is drawn by the GPU as part of the box, in the same draw call as every other box: it costs no image and can change size every frame.
+
+**A radial gradient** is written as CSS writes it: a shape, where its centre is, how far it reaches, and its stops.
+
+```rust
+// background: radial-gradient(circle at 50% 34%, rgba(246,170,214,0.32), rgba(246,170,214,0) 48%), #FBF8FC
+Container::new(content)
+    .fill()
+    .background(PAGE)
+    .radial(Radial::circle().at(0.5, 0.34).stop(0.0, with_alpha(WASH, 0.32)).stop(0.48, with_alpha(WASH, 0.0)))
+```
+
+- `Radial::circle()` or `Radial::ellipse()` (CSS's default when the word is missing). `.at(x, y)` is the centre in fractions of the box: `at 30% 22%` is `.at(0.3, 0.22)`, and the middle if left out.
+- The size is CSS's default, the farthest corner, unless `.extent(RadialExtent::ClosestSide)` (or `FarthestSide`, `ClosestCorner`, `Radii(x, y)` in dp) says otherwise. Stops are fractions of it: `48%` is `0.48`. An ellipse to the farthest corner from the middle reaches 1.41 times each half side, so a stop at 70% is at the box's edge.
+- Any number of `.stop(offset, colour)`, in order. A colour with alpha is written with its alpha; a fade to a transparent stop keeps its hue, as in a browser.
+- It follows the box's `.radius(..)` and turns with `.rotate(..)`.
+
+**Several on one box** are CSS's comma list, the first on top:
+
+```rust
+// background: radial-gradient(circle at 30% 22%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 24%),
+//             radial-gradient(circle at 50% 35%, #FFB8DE 0%, #F06CBC 45%, #C94FCB 75%, #8E5BE8 100%);
+Container::empty().size(96.0, 96.0).radius(48.0).radials([shine, body])
+```
+
+**Shadows inside and out** are CSS's `box-shadow` list, the first on top. `Shadow::inset(x, y, blur, colour)` is `inset x y blur colour`; `.with_spread(n)` is the fourth length, and `inset 0 0 0 1px` is a one-dp ring just inside the edge. They lie over the background and under the border and the children.
+
+**A blur** is `.blur(sigma)` for `filter: blur(sigma)`, and blurs the box's **background only**: a solid colour exactly, a radial gradient closely when it fades out inside the box (a glow). It spreads beyond the box and takes no room. The border and the children stay sharp, a linear gradient is not blurred, and there is no blurring of pictures, text or whole widgets: for those, ask the designer for the blurred picture.
+
+**`border-radius: 50%` on a box that is not square** is an ellipse, which a box cannot be. If its background is a radial gradient that fades to nothing at the edge (stop at 70% of the default size), the shape does not show and `.radius(height / 2.0)` is the same picture. If the ellipse's edge shows, it is a picture (above).
+
+**A radius per corner**, `.radii(top_left, top_right, bottom_right, bottom_left)`, is for a solid background and a solid border. Give `.radius(..)` as well if the box has a shadow, a clip, a gradient or a dashed border: those use the single radius (a shadow uses the largest of the four).
+
+**A border in two colours** (CSS `border-top-color` on a round box: a spinner) is not a box. A browser draws the top border of a circle as the quarter arc from -135 to -45 degrees: write two arcs as SVG files and stack them (`examples/atlas/assets/svg/spinner-*.svg`), then `.rotate(..)` the stack from `tick` to spin it.
+
+### A row that scrolls sideways
+
+```rust
+// display: flex; gap: 8px; overflow-x: auto; margin-right: -20px
+ScrollView::horizontal(
+    Row::new().extend(chips).gap(8.0).padding_xy(20.0, 0.0),
+)
+.id("chips")
+```
+
+It fills the width it is given and is as tall as its content, which is laid out as wide as it likes: chips keep their natural width instead of wrapping ([ADR 0037](architecture/0037-scroll-views-that-scroll-sideways.md)). Put the side padding on the *content*, as above, so that the first chip starts in line with the page and still slides out under the screen's edge. Inside a page that scrolls, a sideways drag moves the row and an up-and-down drag the page. `ScrollTo::offset("chips", dp)` and `ScrollTo::end("chips")` work; `ScrollTo::reveal` and the focused field's keeping in view do not act along it.
 
 ### A hard text shadow
 
