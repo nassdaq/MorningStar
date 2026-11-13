@@ -26,7 +26,14 @@ use crate::{Mode, Plan};
 
 /// Where the server is when nobody has said otherwise: the development
 /// machine, which a phone reaches through `adb reverse tcp:8788 tcp:8788`.
-pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8788";
+///
+/// A build for a deployed server names it at compile time instead:
+/// `ATLAS_SERVER_URL=https://… tools/build-android.sh`. The address stays
+/// out of the repository that way.
+pub const DEFAULT_BASE_URL: &str = match option_env!("ATLAS_SERVER_URL") {
+    Some(url) => url,
+    None => "http://127.0.0.1:8788",
+};
 
 /// The most characters of a message the server accepts.
 pub const MESSAGE_LIMIT: usize = 2000;
