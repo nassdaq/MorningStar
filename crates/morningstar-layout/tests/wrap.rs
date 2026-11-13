@@ -405,3 +405,31 @@ fn random_wrapping_rows_with_hostile_values_stay_finite_and_keep_lines_in_order(
         assert!(overflow.width.is_finite() && overflow.height.is_finite());
     }
 }
+
+// ------------------------------------------------- unbounded rows (0037)
+
+/// `Style::unbounded`: the content of a viewport that scrolls sideways.
+/// A hugging child takes its natural width however little room there is.
+#[test]
+fn an_unbounded_row_offers_its_hugging_children_all_the_width_they_want() {
+    for unbounded in [false, true] {
+        let mut tree = LayoutTree::new();
+        // An inner row that hugs three fixed chips: 60 + 10 + 60 + 10 + 60.
+        let kids = chips(&mut tree, &[(60.0, 20.0), (60.0, 20.0), (60.0, 20.0)]);
+        let inner = tree.row(Style::new().gap(10.0), &kids);
+        let mut style = Style::new().fill_width();
+        style.unbounded = unbounded;
+        let outer = tree.row(style, &[inner]);
+        tree.compute(outer, avail(100.0, 300.0), no_measure);
+        assert_eq!(tree.rect(outer), r(0.0, 0.0, 100.0, 20.0));
+        // Bounded, the inner row is capped at the 100 on offer and its
+        // own children overflow it; unbounded, it is its natural 200 and
+        // nothing inside it overflows.
+        let width = if unbounded { 200.0 } else { 100.0 };
+        assert_eq!(tree.rect(inner), r(0.0, 0.0, width, 20.0));
+        assert_eq!(tree.rect(kids[2]), r(140.0, 0.0, 60.0, 20.0));
+        assert_eq!(tree.overflow(inner).width > 0.0, !unbounded);
+        // What runs past the outer row's end is its to scroll.
+        assert_eq!(tree.overflow(outer).width > 0.0, unbounded);
+    }
+}

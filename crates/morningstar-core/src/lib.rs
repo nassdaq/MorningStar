@@ -16,7 +16,8 @@ mod services;
 
 pub use color::Color;
 pub use display_list::{
-    AtlasView, Border, Dash, DirtyRows, DisplayList, DrawOp, LinearGradient, Shadow,
+    AtlasView, Border, CornerRadii, Dash, DirtyRows, DisplayList, DrawOp, GradientStop,
+    LinearGradient, RadialGradient, RadialSegment, Shadow,
 };
 pub use frame_stats::{FrameStats, FrameSummary};
 pub use geometry::{Point, Rect, Size, Transform};

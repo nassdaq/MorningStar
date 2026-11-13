@@ -302,9 +302,9 @@ mod viewport;
 pub use color::{ColorRef, ThemeColor, hex, hexa, rgb8, with_alpha};
 pub use effects::Effects;
 pub use element::{
-    Avatar, Button, Column, Container, Divider, Element, Gradient, Icon, Picture, Pressable, Row,
-    SafeArea, SafeEdges, ScrollView, Spacer, Span, Stack, Text, TextInput, Wrap, elevation, icon,
-    span, text,
+    Avatar, Button, Column, Container, Divider, Element, Gradient, Icon, Picture, Pressable,
+    Radial, RadialExtent, Row, SafeArea, SafeEdges, ScrollView, Spacer, Span, Stack, Text,
+    TextInput, Wrap, elevation, icon, span, text,
 };
 pub use motion::{Animation, Easing, Transition};
 pub use navigator::{Navigation, Navigator};
@@ -336,10 +336,10 @@ pub mod prelude {
         Align, Alignment, Application, Avatar, Button, Capitalization, Color, ColorRef, Colors,
         Column, Container, CrossAlign, Divider, Element, FontFamily, Fonts, Gradient, Icon, Image,
         ImageFit, ImeAction, KeyboardType, Layer, LineCap, LineJoin, MainAlign, Picture, Pressable,
-        Radii, Row, SafeArea, SafeEdges, ScrollView, Setup, Shadow, Shape, Sizing, Spacer, Spacing,
-        Span, Stack, SvgAsset, SvgPicture, Text, TextAlign, TextInput, TextRole, TextSpec,
-        TextWeight, Theme, ThemeColor, Transform, TypeScale, Ui, VectorIcon, VectorPicture, col,
-        elevation, hex, hexa, icon, rgb8, row, span, stack, text, with_alpha,
+        Radial, RadialExtent, Radii, Row, SafeArea, SafeEdges, ScrollView, Setup, Shadow, Shape,
+        Sizing, Spacer, Spacing, Span, Stack, SvgAsset, SvgPicture, Text, TextAlign, TextInput,
+        TextRole, TextSpec, TextWeight, Theme, ThemeColor, Transform, TypeScale, Ui, VectorIcon,
+        VectorPicture, col, elevation, hex, hexa, icon, rgb8, row, span, stack, text, with_alpha,
     };
     pub use crate::{
         AudioClip, AudioError, Effects, HttpError, HttpMethod, HttpRequest, HttpResponse,

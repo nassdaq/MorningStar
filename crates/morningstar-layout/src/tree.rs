@@ -685,7 +685,11 @@ impl LayoutTree {
                 // Every hugging child may be as wide as what is left, on
                 // its own. Two long hugging texts in one row therefore
                 // overflow rather than share; make one of them `Fill`.
-                let cap = (inner - gaps - used).max(0.0);
+                let cap = if style.unbounded {
+                    f32::INFINITY
+                } else {
+                    (inner - gaps - used).max(0.0)
+                };
                 let mut child = first_child;
                 while child != NONE {
                     let child_index = child as usize;

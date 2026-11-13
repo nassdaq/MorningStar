@@ -6,10 +6,10 @@ use std::hash::Hash;
 use std::time::Duration;
 
 use morningstar_core::{
-    AudioError, Border, CaretMove, Color, Dash, HttpError, HttpResponse, ImeAction, LinearGradient,
-    Point, PointerEvent, PointerPhase, Recording, Rect, ServiceCall, ServiceId, ServiceRequest,
-    ServiceResult, Shadow, Size, SystemBars, TextInputEvent, TextInputRequest, TextInputTraits,
-    Transform,
+    AudioError, Border, CaretMove, Color, CornerRadii, Dash, GradientStop, HttpError, HttpResponse,
+    ImeAction, LinearGradient, Point, PointerEvent, PointerPhase, RadialGradient, Recording, Rect,
+    ServiceCall, ServiceId, ServiceRequest, ServiceResult, Shadow, Size, SystemBars,
+    TextInputEvent, TextInputRequest, TextInputTraits, Transform,
 };
 use morningstar_layout::{Edges, LayoutTree, NodeId, Sizing};
 use morningstar_runtime::{
@@ -550,8 +550,13 @@ struct Press {
 
 #[derive(Clone, Copy, Debug)]
 struct Drag {
-    anchor_y: f32,
+    /// Where the finger was, along the scroll view's axis (px).
+    anchor: f32,
     anchor_offset: f32,
+    /// The scroll view being dragged: the one under the finger, or one
+    /// around it that scrolls the way the finger went.
+    id: u64,
+    sideways: bool,
 }
 
 /// The one touch interaction in progress.
@@ -592,6 +597,10 @@ struct ScrollState {
     seen: u64,
     /// An animated move asked for by the application.
     glide: Option<Glide>,
+    /// It scrolls along x.
+    sideways: bool,
+    /// The scroll view around it.
+    parent: Option<u64>,
 }
 
 /// An animated move of a scroll view to an offset (dp).
@@ -1983,11 +1992,16 @@ impl<A: Application> Ui<A> {
             }
             return;
         }
-        let scroll = gesture.scroll.and_then(|id| self.scrolls.get_mut(&id));
-
-        if let (Some(drag), Some(state)) = (gesture.drag, scroll) {
-            let travelled = (position.y - drag.anchor_y) / self.scale;
-            state.offset = clamp_offset(drag.anchor_offset - travelled, state.max);
+        if let Some(drag) = gesture.drag {
+            if let Some(state) = self.scrolls.get_mut(&drag.id) {
+                let along = if drag.sideways {
+                    position.x
+                } else {
+                    position.y
+                };
+                let travelled = (along - drag.anchor) / self.scale;
+                state.offset = clamp_offset(drag.anchor_offset - travelled, state.max);
+            }
             return;
         }
 
@@ -1997,17 +2011,35 @@ impl<A: Application> Ui<A> {
             // Too far to still become a long press.
             gesture.moved = true;
         }
-        if let Some(state) = gesture.scroll.and_then(|id| self.scrolls.get_mut(&id))
-            && state.max > 0.0
-            && dy.abs() > TOUCH_SLOP * self.scale
-            && dy.abs() >= dx.abs()
+        // The scroll view the finger is on, or the nearest one around it,
+        // that can scroll the way the finger is going.
+        let sideways = dx.abs() > dy.abs();
+        let far = if sideways { dx.abs() } else { dy.abs() };
+        let mut target = None;
+        if far > TOUCH_SLOP * self.scale {
+            let mut next = gesture.scroll;
+            while let Some(id) = next {
+                let Some(state) = self.scrolls.get(&id) else {
+                    break;
+                };
+                if state.sideways == sideways && state.max > 0.0 {
+                    target = Some(id);
+                    break;
+                }
+                next = state.parent;
+            }
+        }
+        if let Some(id) = target
+            && let Some(state) = self.scrolls.get_mut(&id)
         {
             // The finger is scrolling: whatever it landed on is no longer
             // being pressed. Anchoring here avoids a jump of one slop.
             gesture.press = None;
             gesture.drag = Some(Drag {
-                anchor_y: position.y,
+                anchor: if sideways { position.x } else { position.y },
                 anchor_offset: state.offset,
+                id,
+                sideways,
             });
             state.tracking = false;
             state.velocity = 0.0;
@@ -2034,8 +2066,8 @@ impl<A: Application> Ui<A> {
                 focus.menu = true;
                 focus.touched();
             }
-        } else if gesture.drag.is_some() {
-            if let Some(state) = gesture.scroll.and_then(|id| self.scrolls.get_mut(&id)) {
+        } else if let Some(drag) = gesture.drag {
+            if let Some(state) = self.scrolls.get_mut(&drag.id) {
                 state.flinging = true;
                 state.released = true;
             }
@@ -2373,7 +2405,13 @@ impl<A: Application> App for Ui<A> {
                         if let Some(record) = self.scroll_table.iter().find(|r| r.id == id)
                             && let Some(node) = node_of(&self.records, record.slot)
                         {
-                            let max = scroll_max(&self.tree, node, keyboard_top);
+                            let sideways =
+                                self.tree.style(node).is_some_and(|style| style.unbounded);
+                            let max = if sideways {
+                                scroll_max_x(&self.tree, node)
+                            } else {
+                                scroll_max(&self.tree, node, keyboard_top)
+                            };
                             let state = self.scrolls.entry(id).or_default();
                             state.go(clamp_offset(dp, max), glide);
                         }
@@ -2489,8 +2527,8 @@ impl<A: Application> App for Ui<A> {
                 .map(|press| press.id),
             dragging: self
                 .gesture
-                .filter(|gesture| gesture.drag.is_some())
-                .and_then(|gesture| gesture.scroll),
+                .and_then(|gesture| gesture.drag)
+                .map(|drag| drag.id),
             animating: false,
             node_cursor: 0,
             text_cursor: 0,
@@ -2500,6 +2538,7 @@ impl<A: Application> App for Ui<A> {
             keyboard_top,
             overlay: None,
             rects: Vec::new(),
+            stops: Vec::new(),
             safe_top: info.insets.top,
             surface,
             semantics: describe.then_some(&mut self.collector),
@@ -2705,6 +2744,21 @@ fn scroll_max(tree: &LayoutTree, node: NodeId, keyboard_top: Option<f32>) -> f32
     (content - viewport.height + covered).max(0.0)
 }
 
+/// How far (dp) a sideways scroll view can scroll: what its content is
+/// wider than it, its right padding included.
+fn scroll_max_x(tree: &LayoutTree, node: NodeId) -> f32 {
+    let viewport = tree.rect(node);
+    let padding_right = tree.style(node).map_or(0.0, |style| style.padding.right);
+    let content_right = tree
+        .children(node)
+        .map(|child| {
+            let rect = tree.rect(child);
+            rect.x + rect.width
+        })
+        .fold(viewport.x, f32::max);
+    (content_right - viewport.x + padding_right - viewport.width).max(0.0)
+}
+
 /// How far up (dp) a screen that cannot scroll is shifted so that a focused
 /// field at `field` shows above a keyboard whose top is at `keyboard_top`:
 /// enough to clear it with a margin, but never so far that the field would
@@ -2769,6 +2823,11 @@ impl Reveal<'_> {
             let Some(node) = node_of(self.records, record.slot) else {
                 continue;
             };
+            if self.tree.style(node).is_some_and(|style| style.unbounded) {
+                // A sideways scroll view: what is revealed is brought up
+                // or down, never along it.
+                continue;
+            }
             let bottom = match (next, self.keyboard_top) {
                 (None, Some(top)) => top,
                 _ => f32::INFINITY,
@@ -3215,6 +3274,10 @@ fn paints<M>(element: &Element<M>) -> bool {
             node.fill.is_some()
                 || node.border.is_some()
                 || node.shadow.is_some()
+                || node
+                    .decor
+                    .as_ref()
+                    .is_some_and(|decor| !decor.radials.is_empty() || !decor.shadows.is_empty())
                 || node.children.iter().any(paints)
         }
         _ => true,
@@ -3232,10 +3295,17 @@ fn overlaps_itself<M>(element: &Element<M>) -> bool {
     let Kind::Box(node) = &element.kind else {
         return false;
     };
-    let surface = node.fill.is_some() || node.border.is_some();
+    let radials = node.decor.as_ref().map_or(0, |decor| decor.radials.len());
+    let shadows = node.decor.as_ref().map_or(0, |decor| decor.shadows.len())
+        + usize::from(node.shadow.is_some());
+    let surface = node.fill.is_some() || node.border.is_some() || radials > 0;
+    // Layers of one box that lie over one another.
+    let layered = radials + usize::from(node.fill.is_some()) + usize::from(node.border.is_some());
     let painted_children = || node.children.iter().filter(|child| paints(child)).count();
-    (surface && node.shadow.is_some())
-        || ((surface || node.shadow.is_some()) && painted_children() > 0)
+    (surface && shadows > 0)
+        || layered > 1 && radials > 0
+        || shadows > 1
+        || ((surface || shadows > 0) && painted_children() > 0)
         || (node.axis == Axis::Stack && painted_children() > 1)
         || node.children.iter().any(overlaps_itself)
 }
@@ -3291,6 +3361,8 @@ struct Painter<'a, M> {
     overlay: Option<SelectionOverlay>,
     /// Reused for the rectangles of the selection.
     rects: Vec<Rect>,
+    /// Reused for the stops of a radial gradient.
+    stops: Vec<GradientStop>,
     /// The top safe-area inset (px): the menu stays below it.
     safe_top: f32,
     /// The whole surface (px).
@@ -4370,19 +4442,36 @@ impl<M: Clone> Painter<'_, M> {
             .map(|(_, input)| *input);
         let focused = field.is_some() && self.focus.as_ref().map(|focus| focus.id) == field;
 
-        if let Some(shadow) = data.shadow {
-            self.frame.list.draw_shadow(
-                rect,
-                radius,
-                Shadow {
-                    offset_x: shadow.offset_x * scale,
-                    offset_y: shadow.offset_y * scale,
-                    blur: shadow.blur * scale,
-                    spread: shadow.spread * scale,
-                    color: fade(shadow.color, alpha),
-                },
-            );
+        let decor = data.decor.as_deref();
+        let corners = decor
+            .and_then(|decor| decor.corners)
+            .map(|[a, b, c, d]| CornerRadii::new(a, b, c, d).scaled(scale));
+        let blur = decor.map_or(0.0, |decor| decor.blur * scale);
+        let scaled = |shadow: &Shadow| Shadow {
+            offset_x: shadow.offset_x * scale,
+            offset_y: shadow.offset_y * scale,
+            blur: shadow.blur * scale,
+            spread: shadow.spread * scale,
+            color: fade(shadow.color, alpha),
+            inset: shadow.inset,
+        };
+        // The shadow of a box with a radius per corner has the largest.
+        let shadow_radius = corners.map_or(radius, CornerRadii::max);
+        if let Some(shadow) = &data.shadow {
+            self.frame
+                .list
+                .draw_shadow(rect, shadow_radius, scaled(shadow));
         }
+        // CSS lists shadows from the top down.
+        for shadow in decor.iter().flat_map(|decor| decor.shadows.iter().rev()) {
+            if !shadow.inset {
+                self.frame
+                    .list
+                    .draw_shadow(rect, shadow_radius, scaled(shadow));
+            }
+        }
+        let inset = decor.is_some_and(|decor| decor.shadows.iter().any(|shadow| shadow.inset));
+        let radials = decor.is_some_and(|decor| !decor.radials.is_empty());
 
         let border = if focused {
             data.focused_border.or(data.border)
@@ -4412,7 +4501,33 @@ impl<M: Clone> Painter<'_, M> {
             DashKind::Pattern(length, gap) => Dash::new(length * scale, gap * scale),
         });
         let clear = morningstar_core::Color::rgba(0.0, 0.0, 0.0, 0.0);
+        // With gradients or inner shadows over the fill, or a blur, the
+        // border is a layer of its own, drawn after them.
+        let late_border = border.filter(|_| radials || inset || blur > 0.0);
+        let border = if late_border.is_some() { None } else { border };
         match (fill, border) {
+            (Some(Fill::Solid(color)), None) if blur > 0.0 => {
+                // A blurred solid box is exactly its own shadow: a blur
+                // radius is two standard deviations.
+                self.frame.list.draw_shadow(
+                    rect,
+                    shadow_radius,
+                    Shadow::new(0.0, 0.0, 2.0 * blur, fade(color.resolve(self.theme), alpha)),
+                );
+            }
+            (Some(Fill::Solid(color)), border) if corners.is_some() && dash.is_none() => {
+                self.frame.list.fill_corners_rect(
+                    rect,
+                    corners.unwrap_or_default(),
+                    fade(color.resolve(self.theme), alpha),
+                    border.unwrap_or(Border::new(0.0, clear)),
+                );
+            }
+            (None, Some(border)) if corners.is_some() && dash.is_none() => {
+                self.frame
+                    .list
+                    .fill_corners_rect(rect, corners.unwrap_or_default(), clear, border);
+            }
             (Some(Fill::Solid(color)), Some(border)) => {
                 let fill = fade(color.resolve(self.theme), alpha);
                 match dash {
@@ -4463,6 +4578,47 @@ impl<M: Clone> Painter<'_, M> {
                 None => self.frame.list.stroke_rounded_rect(rect, radius, border),
             },
             (None, None) => {}
+        }
+        if let Some(decor) = decor {
+            for radial in &decor.radials {
+                let (cx, cy, radius_x, radius_y) = radial.geometry(rect, scale);
+                self.stops.clear();
+                self.stops
+                    .extend(radial.stops.iter().map(|(offset, color)| {
+                        GradientStop::new(*offset, fade(color.resolve(self.theme), alpha))
+                    }));
+                self.frame.list.fill_radial_gradient_rect(
+                    rect,
+                    radius,
+                    RadialGradient {
+                        center: Point::new(cx, cy),
+                        radius_x,
+                        radius_y,
+                        stops: &self.stops,
+                    },
+                    blur,
+                );
+            }
+            for shadow in decor.shadows.iter().rev() {
+                if shadow.inset {
+                    self.frame
+                        .list
+                        .draw_inset_shadow(rect, shadow_radius, scaled(shadow));
+                }
+            }
+        }
+        if let Some(border) = late_border {
+            match (dash, corners) {
+                (Some(dash), _) => self
+                    .frame
+                    .list
+                    .fill_dashed_rect(rect, radius, clear, border, dash),
+                (None, Some(corners)) => self
+                    .frame
+                    .list
+                    .fill_corners_rect(rect, corners, clear, border),
+                (None, None) => self.frame.list.stroke_rounded_rect(rect, radius, border),
+            }
         }
         if pressed && data.pressed_fill.is_none() {
             self.frame.list.fill_rounded_rect(
@@ -4515,12 +4671,24 @@ impl<M: Clone> Painter<'_, M> {
             let offset = if self.inert {
                 self.rest_scroll(context.id)
             } else {
-                let max = scroll_max(self.tree, node, self.keyboard_top);
+                let max = if data.sideways {
+                    scroll_max_x(self.tree, node)
+                } else {
+                    scroll_max(self.tree, node, self.keyboard_top)
+                };
                 let offset = self.advance_scroll(context.id, max);
+                if let Some(state) = self.scrolls.get_mut(&context.id) {
+                    state.sideways = data.sideways;
+                    state.parent = context.scroll;
+                }
                 scrolled = Some((offset, max));
                 offset
             };
-            inner.dy -= (offset * scale).round();
+            if data.sideways {
+                inner.dx -= (offset * scale).round();
+            } else {
+                inner.dy -= (offset * scale).round();
+            }
             inner.scroll = Some(context.id);
             if !visible.is_empty() && !self.inert {
                 self.regions.push(Region {
@@ -4548,10 +4716,16 @@ impl<M: Clone> Painter<'_, M> {
                 block: data.block,
                 field,
                 scroll: scrolled,
-                fill: fill.map(|fill| match fill {
-                    Fill::Solid(color) => Backdrop::Solid(fade(color.resolve(self.theme), alpha)),
-                    Fill::Gradient(_) => Backdrop::Mixed,
-                }),
+                fill: if radials {
+                    Some(Backdrop::Mixed)
+                } else {
+                    fill.map(|fill| match fill {
+                        Fill::Solid(color) => {
+                            Backdrop::Solid(fade(color.resolve(self.theme), alpha))
+                        }
+                        Fill::Gradient(_) => Backdrop::Mixed,
+                    })
+                },
                 stack: data.axis == Axis::Stack,
                 increment: adjust.is_some_and(|adjust| adjust.increment.is_some()),
                 decrement: adjust.is_some_and(|adjust| adjust.decrement.is_some()),

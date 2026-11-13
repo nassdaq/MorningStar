@@ -308,6 +308,11 @@ pub struct Style {
     /// columns, stacks and leaves. See "Wrapping rows" in the crate
     /// documentation for the exact rules.
     pub wrap: bool,
+    /// Rows only: hugging children are offered unlimited width, so each
+    /// takes its natural width however wide the row is, and what does not
+    /// fit runs past the row's end. For the content of a viewport that
+    /// scrolls sideways. Default `false`; ignored by a wrapping row.
+    pub unbounded: bool,
     /// Space between the lines of a wrapping row (CSS `row-gap`). Default
     /// `0`; `gap` stays the space between neighbours on a line. May be
     /// negative; NaN is treated as `0`. Ignored unless `wrap` is set.
@@ -354,6 +359,7 @@ impl Style {
         padding: Edges::ZERO,
         gap: 0.0,
         wrap: false,
+        unbounded: false,
         line_gap: 0.0,
         main_align: MainAlign::Start,
         cross_align: CrossAlign::Start,
@@ -462,6 +468,13 @@ impl Style {
     /// Makes a row wrap its children onto further lines.
     pub const fn wrap(mut self) -> Self {
         self.wrap = true;
+        self
+    }
+
+    /// Offers a row's hugging children unlimited width: see
+    /// [`unbounded`](Self::unbounded).
+    pub const fn unbounded(mut self) -> Self {
+        self.unbounded = true;
         self
     }
 

@@ -1,6 +1,7 @@
 // Draws every display-list operation as an instanced quad: rounded rectangles
-// (solid, bordered or gradient-filled), blurred shadows, glyphs sampled from
-// the atlas, and images. One instance each, four vertices generated from the
+// (solid, bordered, with a radius per corner, or filled with a linear or a
+// radial gradient, which may be blurred), blurred shadows cast outwards and
+// inwards, glyphs sampled from the atlas, and images. One instance each, four vertices generated from the
 // vertex index, so every kind keeps its paint order within a draw call.
 // Clipping is per instance and applied as coverage, not as scissor state, for
 // the same reason. The only thing that splits the instances into more than
@@ -48,6 +49,9 @@ const KIND_GLYPH: f32 = 1.0;
 const KIND_GRADIENT: f32 = 2.0;
 const KIND_SHADOW: f32 = 3.0;
 const KIND_IMAGE: f32 = 4.0;
+const KIND_RADIAL: f32 = 5.0;
+const KIND_INSET_SHADOW: f32 = 6.0;
+const KIND_CORNERS: f32 = 7.0;
 
 struct Instance {
     // x, y, width, height
@@ -80,6 +84,14 @@ struct Instance {
     // transform does more than move, 2 when `clip` is in the quad's own
     // space rather than on the screen.
     @location(8) placement: vec4<f32>,
+    // Radial gradients (whose `extra` is the centre, xy, and the radii of
+    // the ending ellipse, zw): x and y are the offsets, in units of that
+    // ellipse, between which this instance paints (colour to colour2), and
+    // z the sigma of a Gaussian blur of the result, zero for none.
+    // Inset shadows: xy the shadow's offset, z its spread.
+    // Rectangles with a radius per corner: the radii, clockwise from the
+    // top-left.
+    @location(9) extra2: vec4<f32>,
 }
 
 struct VertexOutput {
@@ -106,6 +118,10 @@ struct VertexOutput {
     @location(9) own: vec2<f32>,
     // x: screen pixels per local pixel. y: flags.
     @location(10) @interpolate(flat) placement: vec2<f32>,
+    // The instance's `extra` and `extra2`, for the kinds that read them
+    // per fragment (radial gradients, inset shadows, per-corner radii).
+    @location(11) @interpolate(flat) extra: vec4<f32>,
+    @location(12) @interpolate(flat) extra2: vec4<f32>,
 }
 
 // Extra pixels drawn around a rectangle so its anti-aliased edge, which
@@ -137,6 +153,9 @@ fn vs_main(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutpu
         }
     } else if kind == KIND_SHADOW {
         fringe = fringe + SHADOW_EXTENT * instance.params.z;
+    } else if kind == KIND_RADIAL {
+        // A blurred gradient reaches as far out as a shadow does.
+        fringe = fringe + SHADOW_EXTENT * instance.extra2.z;
     }
 
     let half_size = instance.rect.zw * 0.5;
@@ -155,7 +174,7 @@ fn vs_main(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutpu
         // itself and the fringe extrapolates (and is clamped when sampled).
         uv = (instance.extra.xy + (pixel - instance.rect.xy) / instance.rect.zw * instance.extra.zw)
             / globals.atlas_size;
-    } else if kind == KIND_RECT {
+    } else if kind == KIND_RECT || kind == KIND_CORNERS {
         uv = instance.extra.xy;
     } else if kind == KIND_GRADIENT {
         // Linear in position, so interpolating it across the quad is exact.
@@ -199,6 +218,8 @@ fn vs_main(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutpu
     out.clip = instance.clip;
     out.own = pixel;
     out.placement = vec2<f32>(edge_scale, flags);
+    out.extra = instance.extra;
+    out.extra2 = instance.extra2;
     return out;
 }
 
@@ -338,6 +359,32 @@ fn shadow_coverage(point: vec2<f32>, half_size: vec2<f32>, radius: f32, sigma: f
     return clamp((value * reach - SHADOW_TAIL) / (1.0 - SHADOW_TAIL), 0.0, 1.0);
 }
 
+// One segment of a radial gradient at `point` (the quad's own space),
+// times the coverage of the rounded box it fills: `ellipse` is the centre
+// (xy) and radii (zw) of the gradient's ending ellipse, `band` the two
+// offsets the segment lies between. A point belongs to the segment whose
+// offsets it lies between, the nearer one included and the further one
+// not, so the segments of one gradient never overlap and leave no seam.
+fn radial_sample(
+    point: vec2<f32>,
+    box_center: vec2<f32>,
+    half_size: vec2<f32>,
+    radius: f32,
+    edge_scale: f32,
+    ellipse: vec4<f32>,
+    band: vec2<f32>,
+    from_color: vec4<f32>,
+    to_color: vec4<f32>,
+) -> vec4<f32> {
+    let along = length((point - ellipse.xy) / ellipse.zw);
+    if along < band.x || along >= band.y {
+        return vec4<f32>(0.0);
+    }
+    let distance = rounded_box_distance(point - box_center, half_size, radius);
+    let coverage = clamp(0.5 - distance * edge_scale, 0.0, 1.0);
+    return mix(from_color, to_color, (along - band.x) / (band.y - band.x)) * coverage;
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let radius = in.shape.x;
@@ -369,8 +416,79 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     } else if kind == KIND_SHADOW {
         color = in.color * shadow_coverage(in.local, in.half_size, radius, in.shape.z);
-    } else {
+    } else if kind == KIND_RADIAL {
+        let box_center = in.own - in.local;
+        let sigma = in.extra2.z;
+        if sigma > 0.0 {
+            // A Gaussian blur of the filled shape, as a 6 x 6 Gauss-Hermite
+            // quadrature of the unblurred picture around this pixel: the
+            // nodes and weights integrate a Gaussian times a polynomial of
+            // degree 11 exactly, and a gradient that fades out inside its
+            // box to about 1% of its strength (ADR 0034).
+            var nodes = array<f32, 6>(
+                -2.3506049737, -1.3358490740, -0.4360774119,
+                0.4360774119, 1.3358490740, 2.3506049737,
+            );
+            var weights = array<f32, 6>(
+                0.0025557844, 0.0886157460, 0.4088284696,
+                0.4088284696, 0.0886157460, 0.0025557844,
+            );
+            let reach = 1.4142135 * sigma;
+            color = vec4<f32>(0.0);
+            for (var i = 0; i < 6; i++) {
+                for (var j = 0; j < 6; j++) {
+                    let at = in.own + reach * vec2<f32>(nodes[i], nodes[j]);
+                    color += weights[i] * weights[j] * radial_sample(
+                        at, box_center, in.half_size, radius, edge_scale,
+                        in.extra, in.extra2.xy, in.color, in.color2,
+                    );
+                }
+            }
+        } else {
+            color = radial_sample(
+                in.own, box_center, in.half_size, radius, edge_scale,
+                in.extra, in.extra2.xy, in.color, in.color2,
+            );
+        }
+    } else if kind == KIND_INSET_SHADOW {
+        // The shadow's colour inside the box, except under the blurred
+        // silhouette of the box itself moved by the offset and shrunk by
+        // the spread: what shows of a sheet with that hole in it.
         let distance = rounded_box_distance(in.local, in.half_size, radius);
+        let inside = clamp(0.5 - distance * edge_scale, 0.0, 1.0);
+        let spread = in.extra2.z;
+        let hole_half = in.half_size - spread;
+        var hole = 0.0;
+        if hole_half.x > 0.0 && hole_half.y > 0.0 {
+            var hole_radius = 0.0;
+            if radius > 0.0 {
+                hole_radius = clamp(radius - spread, 0.0, min(hole_half.x, hole_half.y));
+            }
+            let point = in.local - in.extra2.xy;
+            if in.shape.z > 0.0 {
+                hole = shadow_coverage(point, hole_half, hole_radius, in.shape.z);
+            } else {
+                let edge = rounded_box_distance(point, hole_half, hole_radius);
+                hole = clamp(0.5 - edge * edge_scale, 0.0, 1.0);
+            }
+        }
+        color = in.color * (inside * (1.0 - hole));
+    } else {
+        var corner = radius;
+        if kind == KIND_CORNERS {
+            // The radius of the corner this pixel's quadrant belongs to.
+            corner = in.extra2.x;
+            if in.local.x >= 0.0 {
+                corner = in.extra2.y;
+                if in.local.y >= 0.0 {
+                    corner = in.extra2.z;
+                }
+            } else if in.local.y >= 0.0 {
+                corner = in.extra2.w;
+            }
+            corner = min(corner, min(in.half_size.x, in.half_size.y));
+        }
+        let distance = rounded_box_distance(in.local, in.half_size, corner);
         // One pixel of linear falloff centred on the edge.
         let outer = clamp(0.5 - distance * edge_scale, 0.0, 1.0);
         if kind == KIND_GRADIENT {
@@ -392,7 +510,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let inner = clamp(0.5 - (distance + in.shape.z) * edge_scale, 0.0, 1.0);
             var stroke = in.color2;
             if in.uv.x > 0.0 {
-                stroke = stroke * dash_coverage(in.local, in.half_size, radius, in.shape.z, in.uv);
+                stroke = stroke * dash_coverage(in.local, in.half_size, corner, in.shape.z, in.uv);
             }
             let ring = stroke + in.color * (1.0 - stroke.a);
             color = in.color * inner + ring * (outer - inner);

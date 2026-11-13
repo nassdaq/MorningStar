@@ -508,6 +508,7 @@ impl<M> Element<M> {
                     on_press: node.on_press.map(convert),
                     pressed_fill: node.pressed_fill,
                     scroll: node.scroll,
+                    sideways: node.sideways,
                     block: node.block,
                     safe: node.safe,
                     spacer: node.spacer,
@@ -520,6 +521,7 @@ impl<M> Element<M> {
                             decrement: adjust.decrement.map(convert),
                         })
                     }),
+                    decor: node.decor,
                 }),
             },
         }
@@ -566,6 +568,8 @@ pub(crate) struct BoxNode<M> {
     pub on_press: Option<M>,
     pub pressed_fill: Option<ColorRef>,
     pub scroll: bool,
+    /// A scroll view that scrolls along x.
+    pub sideways: bool,
     pub block: bool,
     pub safe: SafeEdges,
     pub spacer: Option<SpacerKind>,
@@ -578,6 +582,22 @@ pub(crate) struct BoxNode<M> {
     /// The messages of the accessibility actions "increment" and
     /// "decrement". Boxed: almost no box has them.
     pub adjust: Option<Box<Adjust<M>>>,
+    /// Radial gradients, a blur, several shadows, a radius per corner.
+    /// Boxed: few boxes have any.
+    pub decor: Option<Box<Decor>>,
+}
+
+/// The rarer parts of a box's look.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Decor {
+    /// Painted over the fill, in this order (the last is on top).
+    pub radials: Vec<Radial>,
+    /// Sigma in dp of a blur of the fill and gradients; zero for none.
+    pub blur: f32,
+    /// In CSS order: the first is on top. Replaces `BoxNode::shadow`.
+    pub shadows: Vec<Shadow>,
+    /// Top-left, top-right, bottom-right, bottom-left, in dp.
+    pub corners: Option<[f32; 4]>,
 }
 
 /// What raising and lowering a value sends.
@@ -600,6 +620,7 @@ impl<M> BoxNode<M> {
             on_press: None,
             pressed_fill: None,
             scroll: false,
+            sideways: false,
             block: false,
             safe: SafeEdges::NONE,
             spacer: None,
@@ -607,6 +628,7 @@ impl<M> BoxNode<M> {
             focused_border: None,
             focused_fill: None,
             adjust: None,
+            decor: None,
         }
     }
 }
@@ -826,6 +848,134 @@ impl Gradient {
             from: from.into(),
             to: to.into(),
         }
+    }
+}
+
+/// How far a [`Radial`] gradient reaches: CSS's size keywords, measured
+/// from the gradient's centre to the box's sides or corners.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RadialExtent {
+    /// `closest-side`: to the nearest side (per axis for an ellipse).
+    ClosestSide,
+    /// `farthest-side`.
+    FarthestSide,
+    /// `closest-corner`.
+    ClosestCorner,
+    /// `farthest-corner`: CSS's default.
+    FarthestCorner,
+    /// Explicit radii in dp: `radial-gradient(40px 20px at ..)`.
+    Radii(f32, f32),
+}
+
+/// A radial gradient for [`Container::radial`]: CSS `radial-gradient`.
+///
+/// ```
+/// # use morningstar_ui::prelude::*;
+/// # const PINK: Color = hex(0xF6AAD6);
+/// // radial-gradient(circle at 50% 34%, rgba(246,170,214,0.32), rgba(246,170,214,0) 48%)
+/// let wash = Radial::circle()
+///     .at(0.5, 0.34)
+///     .stop(0.0, with_alpha(PINK, 0.32))
+///     .stop(0.48, with_alpha(PINK, 0.0));
+/// ```
+///
+/// The centre is given as fractions of the box (`at 30% 22%` is
+/// `.at(0.3, 0.22)`; the default is the middle), the size as a
+/// [`RadialExtent`] (the default is the farthest corner, as in CSS), and
+/// the stops as fractions of that size, in order. Colours mix as in a
+/// browser: sRGB-encoded, premultiplied, so a fade to a transparent stop
+/// keeps its hue.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Radial {
+    pub(crate) circle: bool,
+    pub(crate) at: (f32, f32),
+    pub(crate) extent: RadialExtent,
+    pub(crate) stops: Vec<(f32, ColorRef)>,
+}
+
+impl Radial {
+    fn new(circle: bool) -> Self {
+        Self {
+            circle,
+            at: (0.5, 0.5),
+            extent: RadialExtent::FarthestCorner,
+            stops: Vec::new(),
+        }
+    }
+
+    /// `radial-gradient(circle, ..)`: the same radius in every direction.
+    pub fn circle() -> Self {
+        Self::new(true)
+    }
+
+    /// `radial-gradient(ellipse, ..)` (CSS's default shape): the box's own
+    /// proportions.
+    pub fn ellipse() -> Self {
+        Self::new(false)
+    }
+
+    /// The centre, as fractions of the box's width and height.
+    pub fn at(mut self, x: f32, y: f32) -> Self {
+        self.at = (x, y);
+        self
+    }
+
+    /// Where the gradient ends (offset 1).
+    pub fn extent(mut self, extent: RadialExtent) -> Self {
+        self.extent = extent;
+        self
+    }
+
+    /// Adds a colour stop at `offset` (0 at the centre, 1 at the extent).
+    pub fn stop(mut self, offset: f32, color: impl Into<ColorRef>) -> Self {
+        self.stops.push((offset, color.into()));
+        self
+    }
+
+    /// The centre and the two radii, in the units of `rect`.
+    pub(crate) fn geometry(
+        &self,
+        rect: morningstar_core::Rect,
+        scale: f32,
+    ) -> (f32, f32, f32, f32) {
+        let (cx, cy) = (self.at.0 * rect.width, self.at.1 * rect.height);
+        let (left, right) = (cx.abs(), (rect.width - cx).abs());
+        let (top, bottom) = (cy.abs(), (rect.height - cy).abs());
+        let closest = (left.min(right), top.min(bottom));
+        let farthest = (left.max(right), top.max(bottom));
+        // An ellipse through a corner keeps the proportions of the one
+        // that touches the sides; a circle's radius is the distance.
+        let through = |side: (f32, f32)| {
+            if self.circle {
+                let radius = side.0.hypot(side.1);
+                (radius, radius)
+            } else {
+                (
+                    side.0 * std::f32::consts::SQRT_2,
+                    side.1 * std::f32::consts::SQRT_2,
+                )
+            }
+        };
+        let round = |side: (f32, f32), nearer: bool| {
+            if self.circle {
+                let radius = if nearer {
+                    side.0.min(side.1)
+                } else {
+                    side.0.max(side.1)
+                };
+                (radius, radius)
+            } else {
+                side
+            }
+        };
+        let (rx, ry) = match self.extent {
+            RadialExtent::ClosestSide => round(closest, true),
+            RadialExtent::FarthestSide => round(farthest, false),
+            RadialExtent::ClosestCorner => through(closest),
+            RadialExtent::FarthestCorner => through(farthest),
+            RadialExtent::Radii(x, y) => (x * scale, y * scale),
+        };
+        (rect.x + cx, rect.y + cy, rx, ry)
     }
 }
 
@@ -1102,6 +1252,77 @@ impl<M> Container<M> {
         self
     }
 
+    /// Paints a radial gradient over the background, and over the radial
+    /// gradients added before it. CSS lists the layers of a `background`
+    /// from the top down; [`radials`](Self::radials) takes them in that
+    /// order.
+    pub fn radial(mut self, gradient: Radial) -> Self {
+        self.node
+            .decor
+            .get_or_insert_default()
+            .radials
+            .push(gradient);
+        self
+    }
+
+    /// Several radial gradients **in CSS order, the first on top**, over
+    /// the background colour: `background: radial-gradient(A),
+    /// radial-gradient(B), #FFF` is `.background(WHITE).radials([a, b])`.
+    pub fn radials(mut self, top_first: impl IntoIterator<Item = Radial>) -> Self {
+        let mut layers: Vec<Radial> = top_first.into_iter().collect();
+        layers.reverse();
+        self.node
+            .decor
+            .get_or_insert_default()
+            .radials
+            .extend(layers);
+        self
+    }
+
+    /// Blurs the box's background (its colour and its radial gradients)
+    /// with a Gaussian of standard deviation `sigma` dp: CSS `filter:
+    /// blur(9px)` is `.blur(9.0)`. The blur spreads beyond the box and
+    /// takes no room in layout.
+    ///
+    /// Only the background is blurred, without a second render pass: a
+    /// solid colour exactly, a radial gradient closely where it fades out
+    /// inside the box (ADR 0034). The border and the children are drawn
+    /// sharp, and a linear gradient is not blurred; a blur of arbitrary
+    /// content is not available.
+    pub fn blur(mut self, sigma: f32) -> Self {
+        self.node.decor.get_or_insert_default().blur = sigma.max(0.0);
+        self
+    }
+
+    /// Several shadows **in CSS order, the first on top**, of either kind:
+    /// `box-shadow: inset 0 9px 21px A, 0 18px 39px B` is
+    /// `.shadows([Shadow::inset(0.0, 9.0, 21.0, A), Shadow::new(0.0, 18.0,
+    /// 39.0, B)])`. Drop shadows go under the box; inner ones over its
+    /// background and under its border and children. Replaces
+    /// [`shadow`](Self::shadow).
+    pub fn shadows(mut self, top_first: impl IntoIterator<Item = Shadow>) -> Self {
+        self.node.shadow = None;
+        self.node.decor.get_or_insert_default().shadows = top_first.into_iter().collect();
+        self
+    }
+
+    /// A radius per corner in dp, clockwise from the top-left as in CSS
+    /// `border-radius: 20px 20px 6px 20px`, for a solid background and a
+    /// solid border. A gradient, a dashed border and a clip use the
+    /// [`radius`](Self::radius) (give the one that matters most), and a
+    /// shadow the largest of the four.
+    pub fn radii(
+        mut self,
+        top_left: f32,
+        top_right: f32,
+        bottom_right: f32,
+        bottom_left: f32,
+    ) -> Self {
+        self.node.decor.get_or_insert_default().corners =
+            Some([top_left, top_right, bottom_right, bottom_left]);
+        self
+    }
+
     /// Corner radius in dp, for the background, border, shadow and clip.
     /// A large value gives a pill or a circle.
     pub fn radius(mut self, dp: f32) -> Self {
@@ -1297,6 +1518,38 @@ impl ScrollView {
         let mut container = Container::with_axis(Axis::Column).fill().push(content);
         container.layout.cross_align = CrossAlign::Stretch;
         container.node.scroll = true;
+        container.node.clip = true;
+        container
+    }
+
+    /// A viewport that scrolls **sideways**: a row of chips or cards wider
+    /// than the screen. It fills its parent's width and is as tall as its
+    /// content; the content is laid out as wide as it likes (hugging
+    /// things in a row take their natural width instead of wrapping) and
+    /// a sideways drag moves it. Pad the content, not the viewport, where
+    /// the first item should start in from the screen's edge and still
+    /// scroll out under it.
+    ///
+    /// ```
+    /// # use morningstar_ui::prelude::*;
+    /// # fn chip(label: &'static str) -> Container<()> { Container::new(text(label)) }
+    /// // display: flex; gap: 8px; overflow-x: auto
+    /// let chips: Container<()> = ScrollView::horizontal(
+    ///     Row::new().extend(["All", "Writing", "Research"].map(chip)).gap(8.0).padding_xy(20.0, 0.0),
+    /// )
+    /// .id("chips");
+    /// ```
+    ///
+    /// Inside a vertical scroll view, a drag goes to whichever of the two
+    /// runs the way the finger moves. The application asks for a move with
+    /// [`ScrollTo::offset`](crate::ScrollTo::offset) or `end`, as for any
+    /// scroll view; `reveal` and the focused field's keeping in view act
+    /// on vertical scroll views only (ADR 0037).
+    pub fn horizontal<M>(content: impl Into<Element<M>>) -> Container<M> {
+        let mut container = Container::with_axis(Axis::Row).fill_width().push(content);
+        container.layout.unbounded = true;
+        container.node.scroll = true;
+        container.node.sideways = true;
         container.node.clip = true;
         container
     }

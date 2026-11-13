@@ -342,6 +342,7 @@ fn every_kind_of_operation_can_be_in_a_layer() {
             blur: 0.0,
             spread: 0.0,
             color: Color::WHITE,
+            inset: false,
         },
     );
     list.fill_rounded_rect(Rect::new(4.0, 4.0, 8.0, 8.0), 2.0, RED);

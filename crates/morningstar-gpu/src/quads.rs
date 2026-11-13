@@ -21,7 +21,7 @@ use crate::images::ImageTextures;
 /// params, atlas rect or gradient points or image source region, rectangular
 /// clip, rounded clip, the transform's linear part, and its translation
 /// with the edge scale and flags.
-const INSTANCE_FLOATS: usize = 36;
+const INSTANCE_FLOATS: usize = 40;
 /// Values of the instance's flags. Must match `quad.wgsl`.
 const FLAG_TURNED: f32 = 1.0;
 const FLAG_LOCAL_CLIP: f32 = 2.0;
@@ -33,6 +33,11 @@ const KIND_GLYPH: f32 = 1.0;
 const KIND_GRADIENT: f32 = 2.0;
 const KIND_SHADOW: f32 = 3.0;
 const KIND_IMAGE: f32 = 4.0;
+const KIND_RADIAL: f32 = 5.0;
+const KIND_INSET_SHADOW: f32 = 6.0;
+const KIND_CORNERS: f32 = 7.0;
+/// A radial segment's far end when it has none ("beyond the last stop").
+const RADIAL_FAR: f32 = 1.0e9;
 /// How far, in standard deviations, a shadow is drawn beyond its edge. Must
 /// match `quad.wgsl`.
 const SHADOW_EXTENT: f32 = 3.0;
@@ -317,6 +322,10 @@ struct Quad {
     /// Atlas region, gradient start and end points, or an image's source
     /// region in texture coordinates.
     extra: [f32; 4],
+    /// Radial gradients: the segment's two offsets and the blur's sigma.
+    /// Inset shadows: its offset and spread. Rectangles with a radius per
+    /// corner: the four radii, clockwise from the top-left.
+    extra2: [f32; 4],
 }
 
 impl Quad {
@@ -329,6 +338,7 @@ impl Quad {
             kind: KIND_RECT,
             extent: 0.0,
             extra: [0.0; 4],
+            extra2: [0.0; 4],
         }
     }
 
@@ -342,6 +352,8 @@ impl Quad {
             if xform.turned { edge } else { 0.0 }
         } else if self.kind == KIND_SHADOW {
             edge + SHADOW_EXTENT * self.extent
+        } else if self.kind == KIND_RADIAL {
+            edge + SHADOW_EXTENT * self.extra2[2]
         } else {
             edge
         };
@@ -516,6 +528,69 @@ fn quad_for(op: &DrawOp) -> Option<Quad> {
                 solid
             }
         }
+        DrawOp::RadialGradientRect {
+            rect,
+            corner_radius,
+            segment,
+            blur,
+        } => {
+            let to = segment.to.min(RADIAL_FAR);
+            let usable = segment.radius_x > 0.0 && segment.radius_y > 0.0 && to > segment.from;
+            if !usable {
+                return None;
+            }
+            Quad {
+                color2: premultiplied(segment.to_color),
+                kind: KIND_RADIAL,
+                extra: [
+                    segment.center.x,
+                    segment.center.y,
+                    segment.radius_x,
+                    segment.radius_y,
+                ],
+                extra2: [
+                    segment.from,
+                    to,
+                    if blur >= MIN_SHADOW_SIGMA { blur } else { 0.0 },
+                    0.0,
+                ],
+                ..Quad::solid(rect, corner_radius, segment.from_color)
+            }
+        }
+        DrawOp::InsetShadow {
+            rect,
+            corner_radius,
+            shadow,
+        } => {
+            let sigma = shadow.blur / 2.0;
+            Quad {
+                kind: KIND_INSET_SHADOW,
+                extent: if sigma >= MIN_SHADOW_SIGMA {
+                    sigma
+                } else {
+                    0.0
+                },
+                extra2: [shadow.offset_x, shadow.offset_y, shadow.spread, 0.0],
+                ..Quad::solid(rect, corner_radius, shadow.color)
+            }
+        }
+        DrawOp::CornersRect {
+            rect,
+            radii,
+            fill,
+            border,
+        } => Quad {
+            color2: premultiplied(border.color),
+            kind: KIND_CORNERS,
+            extent: border.width.max(0.0),
+            extra2: [
+                radii.top_left,
+                radii.top_right,
+                radii.bottom_right,
+                radii.bottom_left,
+            ],
+            ..Quad::solid(rect, radii.max(), fill)
+        },
         // Clips are handled by the caller. `DrawOp` is non-exhaustive:
         // operations this renderer does not know yet are skipped rather than
         // failing the frame.
@@ -639,6 +714,7 @@ impl QuadRenderer {
                 6 => Float32x4,
                 7 => Float32x4,
                 8 => Float32x4,
+                9 => Float32x4,
             ],
         };
 
@@ -904,6 +980,7 @@ impl QuadRenderer {
                             kind: KIND_IMAGE,
                             extent: 0.0,
                             extra: [u, v, du, dv],
+                            extra2: [0.0; 4],
                             rect,
                         };
                         run_image = Some(RunTexture::Layer(own));
@@ -1148,6 +1225,7 @@ impl QuadRenderer {
             color,
             color2,
             extra,
+            extra2,
             ..
         } = *quad;
         let instance: [f32; INSTANCE_FLOATS] = [
@@ -1187,6 +1265,10 @@ impl QuadRenderer {
             matrix.ty,
             xform.edge_scale,
             flags,
+            extra2[0],
+            extra2[1],
+            extra2[2],
+            extra2[3],
         ];
         for value in instance {
             self.scratch.extend_from_slice(&value.to_ne_bytes());
@@ -1403,8 +1485,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn instance_is_nine_vec4s() {
-        assert_eq!(INSTANCE_SIZE, 144);
+    fn instance_is_ten_vec4s() {
+        assert_eq!(INSTANCE_SIZE, 160);
     }
 
     const TURN: Transform = Transform::matrix(0.0, 1.0, -1.0, 0.0, 0.0, 0.0);

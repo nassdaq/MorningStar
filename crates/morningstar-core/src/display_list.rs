@@ -173,6 +173,104 @@ impl LinearGradient {
     }
 }
 
+/// One colour of a [`RadialGradient`], at `offset` along every ray from the
+/// centre: 0 at the centre, 1 on the gradient's ending ellipse. Offsets may
+/// exceed 1.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GradientStop {
+    pub offset: f32,
+    pub color: Color,
+}
+
+impl GradientStop {
+    pub const fn new(offset: f32, color: Color) -> Self {
+        Self { offset, color }
+    }
+}
+
+/// A radial gradient with any number of stops: CSS `radial-gradient`.
+///
+/// The colour depends on where a point lies between `center` and the
+/// ellipse around it with the radii `radius_x` and `radius_y` (equal for a
+/// circle): the first stop's colour up to its offset, the last stop's
+/// beyond its offset, and in between a mix of the two neighbouring stops.
+/// Everything is in the physical pixels of the rectangle being filled; the
+/// centre may lie outside it and the ellipse may be larger than it.
+///
+/// Colours are interpolated as [`LinearGradient`]'s are: sRGB-encoded with
+/// premultiplied alpha, so a fade to a transparent stop keeps its hue.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RadialGradient<'a> {
+    pub center: Point,
+    pub radius_x: f32,
+    pub radius_y: f32,
+    /// In order of offset. A stop whose offset is below the one before it
+    /// is taken to be at that one's offset, as in CSS.
+    pub stops: &'a [GradientStop],
+}
+
+/// The part of a [`RadialGradient`] between two neighbouring stops: what
+/// one [`DrawOp::RadialGradientRect`] paints. Points nearer the centre than
+/// `from` or at least as far as `to` (in units of the ending ellipse) get
+/// nothing from it, so the segments of one gradient tile the rectangle
+/// without overlapping.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RadialSegment {
+    pub center: Point,
+    pub radius_x: f32,
+    pub radius_y: f32,
+    pub from: f32,
+    /// May be infinite: the part beyond the last stop.
+    pub to: f32,
+    pub from_color: Color,
+    pub to_color: Color,
+}
+
+/// A radius for each corner of a rectangle (CSS `border-radius: tl tr br
+/// bl`). Each is clamped to half the shorter side.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CornerRadii {
+    pub top_left: f32,
+    pub top_right: f32,
+    pub bottom_right: f32,
+    pub bottom_left: f32,
+}
+
+impl CornerRadii {
+    /// In CSS order: clockwise from the top-left corner.
+    pub const fn new(top_left: f32, top_right: f32, bottom_right: f32, bottom_left: f32) -> Self {
+        Self {
+            top_left,
+            top_right,
+            bottom_right,
+            bottom_left,
+        }
+    }
+
+    /// The same radius at every corner.
+    pub const fn uniform(radius: f32) -> Self {
+        Self::new(radius, radius, radius, radius)
+    }
+
+    /// Every radius multiplied by `factor`.
+    pub fn scaled(self, factor: f32) -> Self {
+        Self::new(
+            self.top_left * factor,
+            self.top_right * factor,
+            self.bottom_right * factor,
+            self.bottom_left * factor,
+        )
+    }
+
+    /// The largest of the four.
+    pub fn max(self) -> f32 {
+        self.top_left
+            .max(self.top_right)
+            .max(self.bottom_right)
+            .max(self.bottom_left)
+    }
+}
+
 /// A drop shadow: the blurred silhouette of a rounded rectangle.
 ///
 /// The fields mean what they do in CSS `box-shadow` and in design tools.
@@ -190,6 +288,11 @@ pub struct Shadow {
     /// it is blurred.
     pub spread: f32,
     pub color: Color,
+    /// An inner shadow (CSS `box-shadow: inset ..`): painted inside the
+    /// rectangle, over its fill, as if the rectangle were a hole in a sheet
+    /// of the shadow's colour lying just above it. A positive `spread`
+    /// then makes the hole smaller, so the shadow reaches further in.
+    pub inset: bool,
 }
 
 impl Shadow {
@@ -201,6 +304,15 @@ impl Shadow {
             blur,
             spread: 0.0,
             color,
+            inset: false,
+        }
+    }
+
+    /// An inner shadow with no spread: CSS `inset x y blur colour`.
+    pub const fn inset(offset_x: f32, offset_y: f32, blur: f32, color: Color) -> Self {
+        Self {
+            inset: true,
+            ..Self::new(offset_x, offset_y, blur, color)
         }
     }
 
@@ -283,6 +395,32 @@ pub enum DrawOp {
         border: Border,
         /// The dash pattern along the stroke.
         dash: Dash,
+    },
+    /// A rounded rectangle filled with one segment of a radial gradient,
+    /// optionally blurred. See [`DisplayList::fill_radial_gradient_rect`].
+    RadialGradientRect {
+        rect: Rect,
+        corner_radius: f32,
+        segment: RadialSegment,
+        /// Standard deviation, in physical pixels, of a Gaussian blur of
+        /// the filled shape (CSS `filter: blur(..)`); zero for none.
+        blur: f32,
+    },
+    /// The inner shadow of the rounded rectangle `rect`: `shadow.color`
+    /// everywhere inside `rect` except under the blurred silhouette of the
+    /// rectangle itself, moved by the shadow's offset and shrunk by its
+    /// spread. Drawn after the fill it darkens or lights.
+    InsetShadow {
+        rect: Rect,
+        corner_radius: f32,
+        shadow: Shadow,
+    },
+    /// A [`BorderedRect`](Self::BorderedRect) with a radius per corner.
+    CornersRect {
+        rect: Rect,
+        radii: CornerRadii,
+        fill: Color,
+        border: Border,
     },
     /// Restricts every following operation, of any kind, to `rect` until the
     /// matching [`PopClip`](Self::PopClip). See [`DisplayList::push_clip`].
@@ -570,6 +708,138 @@ impl DisplayList {
             rect,
             corner_radius: corner_radius.max(0.0),
             gradient,
+        });
+    }
+
+    /// Fills a rounded rectangle with a radial gradient, as CSS
+    /// `radial-gradient` paints a box: one operation (one instance on the
+    /// GPU) per pair of neighbouring stops that shows anything.
+    ///
+    /// `blur` is the standard deviation in physical pixels of a Gaussian
+    /// blur of the result (CSS `filter: blur(..)` on a box that has only
+    /// this background); zero or NaN for none. The blur is evaluated per
+    /// pixel from the gradient itself, with no offscreen pass: see
+    /// ADR 0034 for how exact it is.
+    ///
+    /// A gradient with no stops, or with a radius that is not positive and
+    /// finite, draws nothing; with one stop it is that colour throughout.
+    pub fn fill_radial_gradient_rect(
+        &mut self,
+        rect: Rect,
+        corner_radius: f32,
+        gradient: RadialGradient<'_>,
+        blur: f32,
+    ) {
+        let radii_ok = gradient.radius_x.is_finite()
+            && gradient.radius_y.is_finite()
+            && gradient.radius_x > 0.0
+            && gradient.radius_y > 0.0
+            && gradient.center.x.is_finite()
+            && gradient.center.y.is_finite();
+        let Some(first) = gradient.stops.first() else {
+            return;
+        };
+        if rect.is_empty() || !radii_ok {
+            return;
+        }
+        let blur = if blur.is_finite() { blur.max(0.0) } else { 0.0 };
+        let mut push = |from: f32, to: f32, from_color: Color, to_color: Color| {
+            let visible = from_color.a > 0.0 || to_color.a > 0.0;
+            // Written so that a NaN offset drops the segment.
+            if visible && to > from {
+                self.ops.push(DrawOp::RadialGradientRect {
+                    rect,
+                    corner_radius: corner_radius.max(0.0),
+                    segment: RadialSegment {
+                        center: gradient.center,
+                        radius_x: gradient.radius_x,
+                        radius_y: gradient.radius_y,
+                        from,
+                        to,
+                        from_color,
+                        to_color,
+                    },
+                    blur,
+                });
+            }
+        };
+        // Inside the first stop: its colour.
+        let mut previous = GradientStop::new(first.offset.max(0.0), first.color);
+        push(0.0, previous.offset, previous.color, previous.color);
+        for stop in &gradient.stops[1..] {
+            let stop = GradientStop::new(stop.offset.max(previous.offset), stop.color);
+            push(previous.offset, stop.offset, previous.color, stop.color);
+            previous = stop;
+        }
+        // Beyond the last stop: its colour.
+        push(
+            previous.offset,
+            f32::INFINITY,
+            previous.color,
+            previous.color,
+        );
+    }
+
+    /// Adds the inner shadow of the rounded rectangle `rect` (CSS
+    /// `box-shadow: inset ..`). Call it after drawing the rectangle's fill.
+    /// `shadow.inset` is not consulted: this always draws inside.
+    pub fn draw_inset_shadow(&mut self, rect: Rect, corner_radius: f32, shadow: Shadow) {
+        let finite = shadow.offset_x.is_finite() && shadow.offset_y.is_finite();
+        if rect.is_empty() || !finite || shadow.color.a.is_nan() || shadow.color.a <= 0.0 {
+            return;
+        }
+        self.ops.push(DrawOp::InsetShadow {
+            rect,
+            corner_radius: corner_radius.max(0.0),
+            shadow: Shadow {
+                blur: shadow.blur.max(0.0),
+                spread: if shadow.spread.is_finite() {
+                    shadow.spread
+                } else {
+                    0.0
+                },
+                inset: true,
+                ..shadow
+            },
+        });
+    }
+
+    /// Adds a filled rectangle with a radius per corner and a border drawn
+    /// inside its bounds; a border of zero width or no alpha is no border.
+    /// With four equal radii this is
+    /// [`fill_bordered_rect`](Self::fill_bordered_rect).
+    pub fn fill_corners_rect(
+        &mut self,
+        rect: Rect,
+        radii: CornerRadii,
+        fill: Color,
+        border: Border,
+    ) {
+        let stroked = border.width > 0.0 && border.color.a > 0.0;
+        if rect.is_empty() || !(fill.a > 0.0 || stroked) {
+            return;
+        }
+        let clean = |radius: f32| {
+            if radius.is_finite() {
+                radius.max(0.0)
+            } else {
+                0.0
+            }
+        };
+        self.ops.push(DrawOp::CornersRect {
+            rect,
+            radii: CornerRadii::new(
+                clean(radii.top_left),
+                clean(radii.top_right),
+                clean(radii.bottom_right),
+                clean(radii.bottom_left),
+            ),
+            fill,
+            border: if stroked {
+                border
+            } else {
+                Border::new(0.0, Color::rgba(0.0, 0.0, 0.0, 0.0))
+            },
         });
     }
 
