@@ -1,0 +1,91 @@
+div layout x=0 y=0 w=390 h=844 font="Plus Jakarta Sans" 16px/normal 400
+  div layout x=20 y=52 w=350 h=46 font="Plus Jakarta Sans" 16px/normal 400
+    h1 layout x=20 y=58 w=100 h=35 font="Plus Jakarta Sans" 28px/normal 700
+      text "Explore" line-boxes(untransformed only if no ancestor is transformed) [x=20 y=57.5 w=100.09 h=35]
+    a layout x=324 y=52 w=46 h=46 font="Plus Jakarta Sans" 16px/normal 400 aria="Profile and settings"
+      svg bounds x=337 y=65 w=20 h=20 font="Plus Jakarta Sans" 16px/normal 400
+  div layout x=20 y=112 w=350 h=54 font="Plus Jakarta Sans" 16px/normal 400
+    svg bounds x=37 y=129.5 w=19 h=19 font="Plus Jakarta Sans" 16px/normal 400
+    input layout x=68 y=117 w=285 h=44 font="Plus Jakarta Sans" 16px/normal 400 aria="Search tools"
+  div layout x=20 y=180 w=370 h=44 font="Plus Jakarta Sans" 16px/normal 400
+    button layout x=20 y=180 w=49 h=44 font="Plus Jakarta Sans" 13px/normal 600
+      text "All" line-boxes(untransformed only if no ancestor is transformed) [x=37 y=193.75 w=15.36 h=16.5]
+    button layout x=77 y=180 w=79 h=44 font="Plus Jakarta Sans" 13px/normal 600
+      text "Writing" line-boxes(untransformed only if no ancestor is transformed) [x=94.36 y=193.75 w=45.04 h=16.5]
+    button layout x=164 y=180 w=92 h=44 font="Plus Jakarta Sans" 13px/normal 600
+      text "Research" line-boxes(untransformed only if no ancestor is transformed) [x=181.4 y=193.75 w=58.35 h=16.5]
+    button layout x=265 y=180 w=80 h=44 font="Plus Jakarta Sans" 13px/normal 600
+      text "Coding" line-boxes(untransformed only if no ancestor is transformed) [x=281.75 y=193.75 w=46.48 h=16.5]
+    button layout x=353 y=180 w=98 h=44 font="Plus Jakarta Sans" 13px/normal 600
+      text "Education" line-boxes(untransformed only if no ancestor is transformed) [x=370.23 y=193.75 w=63.87 h=16.5]
+  div layout x=20 y=238 w=350 h=410 font="Plus Jakarta Sans" 16px/normal 400
+    button layout x=21 y=239 w=348 h=68 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=35 y=253 w=40 h=40 font="Plus Jakarta Sans" 13.3333px/normal 400
+        svg bounds x=45.5 y=263 w=19 h=19 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=89 y=254 w=236 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=89 y=254 w=236 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Web research" line-boxes(untransformed only if no ancestor is transformed) [x=89 y=253.75 w=100.69 h=19]
+        span layout x=89 y=275 w=236 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "Answers with sources you can check" line-boxes(untransformed only if no ancestor is transformed) [x=89 y=274.75 w=221.45 h=16.5]
+      svg bounds x=339 y=264.5 w=16 h=16 font="Plus Jakarta Sans" 13.3333px/normal 400
+    button layout x=21 y=307 w=348 h=68 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=35 y=321 w=40 h=40 font="Plus Jakarta Sans" 13.3333px/normal 400
+        svg bounds x=45.5 y=331 w=19 h=19 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=89 y=322 w=236 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=89 y=322 w=236 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Summarise documents" line-boxes(untransformed only if no ancestor is transformed) [x=89 y=321.75 w=167.63 h=19]
+        span layout x=89 y=343 w=236 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "PDFs and long files, condensed" line-boxes(untransformed only if no ancestor is transformed) [x=89 y=342.75 w=191.43 h=16.5]
+      svg bounds x=339 y=332.5 w=16 h=16 font="Plus Jakarta Sans" 13.3333px/normal 400
+    button layout x=21 y=375 w=348 h=68 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=35 y=389 w=40 h=40 font="Plus Jakarta Sans" 13.3333px/normal 400
+        svg bounds x=45.5 y=399 w=19 h=19 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=89 y=390 w=236 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=89 y=390 w=236 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Translate" line-boxes(untransformed only if no ancestor is transformed) [x=89 y=389.75 w=65.77 h=19]
+        span layout x=89 y=411 w=236 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "Text, voice or a photo of a sign" line-boxes(untransformed only if no ancestor is transformed) [x=89 y=410.75 w=182.45 h=16.5]
+      svg bounds x=339 y=400.5 w=16 h=16 font="Plus Jakarta Sans" 13.3333px/normal 400
+    button layout x=21 y=443 w=348 h=68 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=35 y=457 w=40 h=40 font="Plus Jakarta Sans" 13.3333px/normal 400
+        svg bounds x=45.5 y=467 w=19 h=19 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=89 y=458 w=236 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=89 y=458 w=236 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Analyse spreadsheets" line-boxes(untransformed only if no ancestor is transformed) [x=89 y=457.75 w=160.53 h=19]
+        span layout x=89 y=479 w=236 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "Ask questions about your data" line-boxes(untransformed only if no ancestor is transformed) [x=89 y=478.75 w=185.03 h=16.5]
+      svg bounds x=339 y=468.5 w=16 h=16 font="Plus Jakarta Sans" 13.3333px/normal 400
+    button layout x=21 y=511 w=348 h=68 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=35 y=525 w=40 h=40 font="Plus Jakarta Sans" 13.3333px/normal 400
+        svg bounds x=45.5 y=535 w=19 h=19 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=89 y=526 w=236 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=89 y=526 w=236 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Generate images" line-boxes(untransformed only if no ancestor is transformed) [x=89 y=525.75 w=124.5 h=19]
+        span layout x=89 y=547 w=236 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "From a description · uses credits" line-boxes(untransformed only if no ancestor is transformed) [x=89 y=546.75 w=197.24 h=16.5]
+      svg bounds x=339 y=536.5 w=16 h=16 font="Plus Jakarta Sans" 13.3333px/normal 400
+    button layout x=21 y=579 w=348 h=68 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=35 y=593 w=40 h=40 font="Plus Jakarta Sans" 13.3333px/normal 400
+        svg bounds x=45.5 y=603.5 w=19 h=19 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=89 y=594 w=236 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=89 y=594 w=236 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Transcribe audio" line-boxes(untransformed only if no ancestor is transformed) [x=89 y=594.25 w=119.8 h=19]
+        span layout x=89 y=615 w=236 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "Recordings into notes and actions" line-boxes(untransformed only if no ancestor is transformed) [x=89 y=615.25 w=208.16 h=16.5]
+      svg bounds x=339 y=605 w=16 h=16 font="Plus Jakarta Sans" 13.3333px/normal 400
+  nav layout x=0 y=769 w=390 h=75 font="Plus Jakarta Sans" 16px/normal 400 aria="Main"
+    a layout x=17 y=777 w=96 h=60 font="Plus Jakarta Sans" 12px/normal 500
+      span layout x=37 y=783 w=56 h=30 font="Plus Jakarta Sans" 12px/normal 500
+        svg bounds x=54.5 y=787 w=21 h=21 font="Plus Jakarta Sans" 12px/normal 500
+      span layout x=48 y=817 w=35 h=15 font="Plus Jakarta Sans" 12px/normal 500
+        text "Home" line-boxes(untransformed only if no ancestor is transformed) [x=47.5 y=816.5 w=35 h=15]
+    a layout x=147 y=777 w=96 h=60 font="Plus Jakarta Sans" 12px/normal 700
+      span layout x=167 y=783 w=56 h=30 font="Plus Jakarta Sans" 12px/normal 700
+        svg bounds x=184.5 y=787 w=21 h=21 font="Plus Jakarta Sans" 12px/normal 700
+      span layout x=173 y=817 w=45 h=15 font="Plus Jakarta Sans" 12px/normal 700
+        text "Explore" line-boxes(untransformed only if no ancestor is transformed) [x=172.71 y=816.5 w=44.58 h=15]
+    a layout x=277 y=777 w=96 h=60 font="Plus Jakarta Sans" 12px/normal 500
+      span layout x=297 y=783 w=56 h=30 font="Plus Jakarta Sans" 12px/normal 500
+        svg bounds x=314.5 y=787 w=21 h=21 font="Plus Jakarta Sans" 12px/normal 500
+      span layout x=305 y=817 w=39 h=15 font="Plus Jakarta Sans" 12px/normal 500
+        text "Library" line-boxes(untransformed only if no ancestor is transformed) [x=305.39 y=816.5 w=39.21 h=15]

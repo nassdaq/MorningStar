@@ -1,0 +1,24 @@
+[package]
+name = "atlas"
+description = "Atlas: an AI-assistant app. Ten screens reproduced from a design (the test of Morningstar's radial gradients, blurs, inner shadows and per-corner radii) and three of its own, working end to end without a backend."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The home-screen icon and name (ADR 0020). The picture is drawn by
+# `cargo run -p atlas --example icon`.
+[package.metadata.morningstar]
+name = "Atlas"
+icon = "assets/icon.png"
+
+[lib]
+# cdylib for Android; tools/build-ios.sh requests the static library itself.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+morningstar.workspace = true
+
+[dev-dependencies]
+morningstar-devtools.workspace = true

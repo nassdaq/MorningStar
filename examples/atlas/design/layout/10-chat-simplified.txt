@@ -1,0 +1,33 @@
+div layout x=0 y=0 w=390 h=844 font="Plus Jakarta Sans" 16px/normal 400
+  div layout x=10 y=52 w=370 h=44 font="Plus Jakarta Sans" 16px/normal 400
+    a layout x=10 y=52 w=44 h=44 font="Plus Jakarta Sans" 16px/normal 400 aria="Back to home"
+      svg bounds x=21 y=63 w=22 h=22 font="Plus Jakarta Sans" 16px/normal 400
+    h1 layout x=58 y=64 w=251 h=20 font="Plus Jakarta Sans" 16px/normal 700
+      text "Compare supplier quotes" line-boxes(untransformed only if no ancestor is transformed) [x=58 y=64 w=196.98 h=20]
+    a layout x=313 y=52 w=67 h=44 font="Plus Jakarta Sans" 13px/normal 600
+      text "Auto" line-boxes(untransformed only if no ancestor is transformed) [x=322.9 y=65.75 w=30.1 h=16.5]
+      svg bounds x=357 y=67.5 w=13 h=13 font="Plus Jakarta Sans" 13px/normal 600
+  div layout x=20 y=116 w=350 h=632 font="Plus Jakarta Sans" 16px/normal 400
+    div layout x=80 y=116 w=290 h=134 font="Plus Jakarta Sans" 16px/normal 400
+      span layout x=285 y=116 w=85 h=34 font="Plus Jakarta Sans" 12px/normal 600
+        svg bounds x=298.26 y=126 w=14 h=14 font="Plus Jakarta Sans" 12px/normal 600
+        text "3 PDFs" line-boxes(untransformed only if no ancestor is transformed) [x=318.26 y=125.5 w=38.74 h=15]
+      p layout x=80 y=158 w=290 h=92 font="Plus Jakarta Sans" 15px/22.5px 400
+        text "Compare the prices in these three quotes, find the cheapest option and write me a summary." line-boxes(untransformed only if no ancestor is transformed) [x=96 y=171.5 w=239.12 h=19] [x=96 y=194 w=231.17 h=19] [x=96 y=216.5 w=172.87 h=19]
+    div layout x=20 y=272 w=350 h=119 font="Plus Jakarta Sans" 16px/normal 400
+      p layout x=20 y=272 w=350 h=51 font="Plus Jakarta Sans" 16px/25.6px 400
+        text "On it. I’ll check the totals against each other before I write the summary." line-boxes(untransformed only if no ancestor is transformed) [x=20 y=274 w=325.2 h=20] [x=20 y=299.59 w=203.23 h=20]
+      div layout x=20 y=337 w=350 h=54 font="Plus Jakarta Sans" 16px/normal 400
+        button layout x=21 y=338 w=348 h=52 font="Plus Jakarta Sans" 13.3333px/normal 400
+          span layout x=35 y=355 w=18 h=18 font="Plus Jakarta Sans" 13.3333px/normal 400
+          span layout x=65 y=355 w=185 h=18 font="Plus Jakarta Sans" 14px/normal 600
+            text "Comparing totals" line-boxes(untransformed only if no ancestor is transformed) [x=65 y=354.94 w=117.31 h=17.5]
+          span layout x=262 y=355 w=66 h=17 font="Plus Jakarta Sans" 13px/normal 400
+            text "Step 3 of 4" line-boxes(untransformed only if no ancestor is transformed) [x=262.05 y=355.44 w=65.95 h=16.5]
+          svg bounds x=340 y=356.19 w=15 h=15 font="Plus Jakarta Sans" 13.3333px/normal 400
+  div layout x=20 y=768 w=350 h=56 font="Plus Jakarta Sans" 16px/normal 400
+    button layout x=27 y=774 w=44 h=44 font=Arial 13.3333px/normal 400 aria="Add a photo, file or camera shot"
+      svg bounds x=39 y=786 w=20 h=20 font=Arial 13.3333px/normal 400
+    input layout x=75 y=774 w=240 h=44 font="Plus Jakarta Sans" 16px/normal 400 aria="Message Atlas"
+    a layout x=319 y=774 w=44 h=44 font="Plus Jakarta Sans" 16px/normal 400 aria="Start voice conversation"
+      svg bounds x=330.5 y=785.5 w=21 h=21 font="Plus Jakarta Sans" 16px/normal 400

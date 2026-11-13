@@ -1,0 +1,64 @@
+div layout x=0 y=0 w=390 h=844 font="Plus Jakarta Sans" 16px/normal 400
+  div layout x=10 y=52 w=370 h=44 font="Plus Jakarta Sans" 16px/normal 400
+    a layout x=10 y=52 w=44 h=44 font="Plus Jakarta Sans" 16px/normal 400 aria="Back"
+      svg bounds x=21 y=63 w=22 h=22 font="Plus Jakarta Sans" 16px/normal 400
+    h1 layout x=58 y=64 w=41 h=20 font="Plus Jakarta Sans" 16px/normal 700
+      text "Plans" line-boxes(untransformed only if no ancestor is transformed) [x=58 y=64 w=41.38 h=20]
+  div layout x=20 y=112 w=350 h=309 font="Plus Jakarta Sans" 16px/normal 400
+    div layout x=42 y=134 w=307 h=26 font="Plus Jakarta Sans" 16px/normal 400
+      span layout x=42 y=135 w=36 h=23 font="Plus Jakarta Sans" 18px/normal 700
+        text "Plus" line-boxes(untransformed only if no ancestor is transformed) [x=41.5 y=135.25 w=36.11 h=22.5]
+      span layout x=238 y=134 w=110 h=26 font="Plus Jakarta Sans" 12px/normal 700
+        text "Recommended" line-boxes(untransformed only if no ancestor is transformed) [x=248.38 y=139 w=90.12 h=15]
+    div layout x=42 y=176 w=307 h=38 font="Plus Jakarta Sans" 16px/normal 400
+      span layout x=42 y=176 w=101 h=38 font="Plus Jakarta Sans" 38px/38px 700
+        text "$9.99" line-boxes(untransformed only if no ancestor is transformed) [x=41.5 y=170.5 w=100.55 h=48]
+      span layout x=148 y=196 w=68 h=18 font="Plus Jakarta Sans" 14px/normal 400
+        text "per month" line-boxes(untransformed only if no ancestor is transformed) [x=148.05 y=195.5 w=68.42 h=17.5]
+    div layout x=42 y=230 w=307 h=100 font="Plus Jakarta Sans" 16px/normal 400
+      div layout x=42 y=230 w=307 h=18 font="Plus Jakarta Sans" 14px/normal 400
+        svg bounds x=41.5 y=230.25 w=16 h=16 font="Plus Jakarta Sans" 14px/normal 400
+        text "Broader model selection" line-boxes(untransformed only if no ancestor is transformed) [x=67.5 y=229.5 w=163.88 h=17.5]
+      div layout x=42 y=257 w=307 h=18 font="Plus Jakarta Sans" 14px/normal 400
+        svg bounds x=41.5 y=257.75 w=16 h=16 font="Plus Jakarta Sans" 14px/normal 400
+        text "Higher usage allowance" line-boxes(untransformed only if no ancestor is transformed) [x=67.5 y=257 w=157.3 h=17.5]
+      div layout x=42 y=285 w=307 h=18 font="Plus Jakarta Sans" 14px/normal 400
+        svg bounds x=41.5 y=285.25 w=16 h=16 font="Plus Jakarta Sans" 14px/normal 400
+        text "Projects and expanded memory" line-boxes(untransformed only if no ancestor is transformed) [x=67.5 y=284.5 w=211.57 h=17.5]
+      div layout x=42 y=312 w=307 h=18 font="Plus Jakarta Sans" 14px/normal 400
+        svg bounds x=41.5 y=312.75 w=16 h=16 font="Plus Jakarta Sans" 14px/normal 400
+        text "More advanced tools" line-boxes(untransformed only if no ancestor is transformed) [x=67.5 y=312 w=139.48 h=17.5]
+    button layout x=42 y=346 w=307 h=54 font="Plus Jakarta Sans" 15px/normal 600
+      text "Get Plus" line-boxes(untransformed only if no ancestor is transformed) [x=165.05 y=363 w=59.91 h=19]
+  h2 layout x=20 y=443 w=350 h=15 font="Plus Jakarta Sans" 12px/normal 700
+    text "Other plans" line-boxes(untransformed only if no ancestor is transformed) [x=20 y=443 w=95.35 h=15]
+  div layout x=20 y=468 w=350 h=188 font="Plus Jakarta Sans" 16px/normal 400
+    button layout x=21 y=469 w=348 h=62 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=37 y=481 w=256 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=37 y=481 w=256 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Free" line-boxes(untransformed only if no ancestor is transformed) [x=37 y=480.75 w=32.3 h=19]
+        span layout x=37 y=502 w=256 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "Basic chats, limited models" line-boxes(untransformed only if no ancestor is transformed) [x=37 y=501.75 w=166.96 h=16.5]
+      span layout x=305 y=490 w=20 h=19 font="Plus Jakarta Sans" 15px/normal 700
+        text "$0" line-boxes(untransformed only if no ancestor is transformed) [x=304.67 y=490 w=20.33 h=19]
+      svg bounds x=337 y=491.5 w=16 h=16 font="Plus Jakarta Sans" 13.3333px/normal 400
+    button layout x=21 y=531 w=348 h=62 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=37 y=543 w=233 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=37 y=543 w=233 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Basic" line-boxes(untransformed only if no ancestor is transformed) [x=37 y=542.75 w=39.68 h=19]
+        span layout x=37 y=564 w=233 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "More usage and model choices" line-boxes(untransformed only if no ancestor is transformed) [x=37 y=563.75 w=191.39 h=16.5]
+      span layout x=282 y=552 w=43 h=19 font="Plus Jakarta Sans" 15px/normal 700
+        text "$4.99" line-boxes(untransformed only if no ancestor is transformed) [x=281.76 y=552 w=43.24 h=19]
+      svg bounds x=337 y=553.5 w=16 h=16 font="Plus Jakarta Sans" 13.3333px/normal 400
+    button layout x=21 y=593 w=348 h=62 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=37 y=605 w=228 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=37 y=605 w=228 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Pro" line-boxes(untransformed only if no ancestor is transformed) [x=37 y=605.25 w=25.11 h=19]
+        span layout x=37 y=626 w=228 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "Premium models, highest limits" line-boxes(untransformed only if no ancestor is transformed) [x=37 y=626.25 w=190.04 h=16.5]
+      span layout x=277 y=615 w=48 h=19 font="Plus Jakarta Sans" 15px/normal 700
+        text "$19.99" line-boxes(untransformed only if no ancestor is transformed) [x=277.02 y=614.5 w=47.98 h=19]
+      svg bounds x=337 y=616 w=16 h=16 font="Plus Jakarta Sans" 13.3333px/normal 400
+  p layout x=20 y=672 w=350 h=56 font="Plus Jakarta Sans" 12px/18.6px 400
+    text "Image generation, premium models and long tasks use credits. You’ll see an estimate before anything expensive runs." line-boxes(untransformed only if no ancestor is transformed) [x=24 y=673.5 w=307.78 h=15] [x=24 y=692.09 w=318.42 h=15] [x=24 y=710.69 w=27.35 h=15]

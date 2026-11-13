@@ -1,0 +1,46 @@
+div layout x=0 y=0 w=390 h=844 font="Plus Jakarta Sans" 16px/normal 400
+  div layout x=20 y=52 w=350 h=792 font="Plus Jakarta Sans" 16px/normal 400
+    div layout x=147 y=202 w=96 h=96 font="Plus Jakarta Sans" 16px/normal 400
+      div layout x=157 y=288 w=77 h=23 font="Plus Jakarta Sans" 16px/normal 400
+      div layout x=147 y=202 w=96 h=96 font="Plus Jakarta Sans" 16px/normal 400
+      div layout x=166 y=212 w=40 h=21 transform=matrix(0.927184, -0.374607, 0.374607, 0.927184, 0, 0) transformed-bounds x=163.52 y=205.27 w=44.95 h=34.46 font="Plus Jakarta Sans" 16px/normal 400
+    div layout x=58 y=332 w=274 h=35 font="Plus Jakarta Sans" 28px/normal 700
+      text "What can I help with?" line-boxes(untransformed only if no ancestor is transformed) [x=57.86 y=332 w=274.27 h=35]
+  a layout x=0 y=0 w=390 h=844 font="Plus Jakarta Sans" 16px/normal 400 aria="Close model picker"
+  div layout x=0 y=406 w=390 h=439 font="Plus Jakarta Sans" 16px/normal 400 aria="Choose a model"
+    div layout x=177 y=416 w=36 h=4 font="Plus Jakarta Sans" 16px/normal 400
+    h1 layout x=30 y=438 w=330 h=26 font="Plus Jakarta Sans" 20px/normal 700
+      text "Model" line-boxes(untransformed only if no ancestor is transformed) [x=30 y=437.5 w=60.62 h=25.5]
+    button layout x=16 y=476 w=358 h=64 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=30 y=497 w=22 h=22 font="Plus Jakarta Sans" 13.3333px/normal 400
+        svg bounds x=35 y=501 w=12 h=12 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=66 y=489 w=204 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=66 y=489 w=204 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Auto" line-boxes(untransformed only if no ancestor is transformed) [x=66 y=488.25 w=35.32 h=19]
+        span layout x=66 y=510 w=204 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "Picks the best fit for each request" line-boxes(untransformed only if no ancestor is transformed) [x=66 y=509.25 w=203.91 h=16.5]
+    button layout x=16 y=544 w=358 h=64 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=30 y=565 w=22 h=22 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=66 y=557 w=226 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=66 y=557 w=226 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Fast" line-boxes(untransformed only if no ancestor is transformed) [x=66 y=556.25 w=31.05 h=19]
+        span layout x=66 y=578 w=226 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "Quick everyday answers, lowest cost" line-boxes(untransformed only if no ancestor is transformed) [x=66 y=577.25 w=225.71 h=16.5]
+    button layout x=16 y=612 w=358 h=64 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=30 y=633 w=22 h=22 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=66 y=625 w=233 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=66 y=625 w=233 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Smart" line-boxes(untransformed only if no ancestor is transformed) [x=66 y=624.25 w=44.29 h=19]
+        span layout x=66 y=646 w=233 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "Harder problems and long documents" line-boxes(untransformed only if no ancestor is transformed) [x=66 y=645.25 w=233.39 h=16.5]
+    button layout x=16 y=680 w=358 h=64 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=30 y=701 w=22 h=22 font="Plus Jakarta Sans" 13.3333px/normal 400
+      span layout x=66 y=693 w=140 h=38 font="Plus Jakarta Sans" 13.3333px/normal 400
+        span layout x=66 y=693 w=140 h=19 font="Plus Jakarta Sans" 15px/normal 700
+          text "Code" line-boxes(untransformed only if no ancestor is transformed) [x=66 y=692.25 w=40.5 h=19]
+        span layout x=66 y=714 w=140 h=17 font="Plus Jakarta Sans" 13px/normal 400
+          text "Writing and fixing code" line-boxes(untransformed only if no ancestor is transformed) [x=66 y=713.25 w=139.82 h=16.5]
+    div layout x=30 y=756 w=330 h=1 font="Plus Jakarta Sans" 16px/normal 400
+    button layout x=16 y=769 w=358 h=48 font="Plus Jakarta Sans" 14px/normal 600
+      text "All models and providers" line-boxes(untransformed only if no ancestor is transformed) [x=30 y=783.25 w=164.88 h=17.5]
+      svg bounds x=344 y=784 w=16 h=16 font="Plus Jakarta Sans" 14px/normal 600

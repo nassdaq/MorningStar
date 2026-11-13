@@ -1,0 +1,25 @@
+div layout x=0 y=0 w=390 h=844 font="Plus Jakarta Sans" 16px/normal 400
+  div layout x=10 y=52 w=370 h=44 font="Plus Jakarta Sans" 16px/normal 400
+    a layout x=10 y=52 w=44 h=44 font="Plus Jakarta Sans" 16px/normal 400 aria="Minimise voice"
+      svg bounds x=21 y=63 w=22 h=22 font="Plus Jakarta Sans" 16px/normal 400
+    a layout x=313 y=52 w=67 h=44 font="Plus Jakarta Sans" 13px/normal 600
+      text "Auto" line-boxes(untransformed only if no ancestor is transformed) [x=322.9 y=65.75 w=30.1 h=16.5]
+      svg bounds x=357 y=67.5 w=13 h=13 font="Plus Jakarta Sans" 13px/normal 600
+  div layout x=95 y=96 w=200 h=480 font="Plus Jakarta Sans" 16px/normal 400
+    div layout x=95 y=236 w=200 h=200 font="Plus Jakarta Sans" 16px/normal 400
+      div layout x=115 y=416 w=160 h=48 font="Plus Jakarta Sans" 16px/normal 400
+      div layout x=95 y=236 w=200 h=200 font="Plus Jakarta Sans" 16px/normal 400
+      div layout x=135 y=256 w=84 h=44 transform=matrix(0.927184, -0.374607, 0.374607, 0.927184, 0, 0) transformed-bounds x=129.82 y=241.82 w=94.37 h=72.26 font="Plus Jakarta Sans" 16px/normal 400
+  div layout x=20 y=576 w=350 h=116 font="Plus Jakarta Sans" 16px/normal 400
+    span layout x=154 y=576 w=82 h=17 font="Plus Jakarta Sans" 13px/normal 700
+      svg bounds x=153.78 y=575.91 w=17 h=17 font="Plus Jakarta Sans" 13px/normal 700
+      text "Listening" line-boxes(untransformed only if no ancestor is transformed) [x=178.78 y=576.16 w=57.43 h=16.5]
+    p layout x=28 y=603 w=334 h=89 font="Plus Jakarta Sans" 22px/29.7px 600
+      text "“Summarise the meeting I just recorded and list the action items.”" line-boxes(untransformed only if no ancestor is transformed) [x=41.46 y=603.41 w=307.08 h=28] [x=53.3 y=633.11 w=283.41 h=28] [x=156.8 y=662.8 w=76.4 h=28]
+  div layout x=81 y=728 w=228 h=72 font="Plus Jakarta Sans" 16px/normal 400
+    button layout x=81 y=736 w=56 h=56 font=Arial 13.3333px/normal 400 aria="Show Atlas what you see"
+      svg bounds x=98 y=753 w=22 h=22 font=Arial 13.3333px/normal 400
+    button layout x=159 y=728 w=72 h=72 font=Arial 13.3333px/normal 400 aria="Mute microphone"
+      svg bounds x=181 y=750 w=28 h=28 font=Arial 13.3333px/normal 400
+    a layout x=253 y=736 w=56 h=56 font="Plus Jakarta Sans" 16px/normal 400 aria="End voice and view transcript"
+      svg bounds x=270 y=753 w=22 h=22 font="Plus Jakarta Sans" 16px/normal 400
