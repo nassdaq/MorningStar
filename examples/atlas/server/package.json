@@ -1,0 +1,15 @@
+{
+  "name": "atlas-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend for the Atlas assistant app: DeepSeek answers, ElevenLabs hears and speaks, PostgreSQL keeps the chats.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}
