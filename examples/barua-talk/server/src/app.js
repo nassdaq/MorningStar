@@ -4,13 +4,16 @@
 // Barua Talk client at a local fake.
 
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 import { DatabaseDown, HttpError, badRequest, databaseUnavailable, fromTalk, rateLimited, unauthorized } from './errors.js';
-import { sendJson } from './http.js';
+import { send, sendJson } from './http.js';
 import { createRoutes } from './routes.js';
 import { createRateLimiter } from './stores.js';
 
 const DEVICE_ID = /^[A-Za-z0-9_-]{8,64}$/;
+const CONSOLE_PAGE = fileURLToPath(new URL('../web/console.html', import.meta.url));
 
 function sameToken(given, expected) {
   const a = createHash('sha256').update(given).digest();
@@ -66,7 +69,13 @@ export function createApp({ config, db, talk, log, now = Date.now, background = 
     }
     const path = url.pathname;
     try {
-      await respond(req, res, url);
+      if (req.method === 'GET' && (path === '/console' || path === '/console/')) {
+        // The browser test client (web/console.html): a page with no secret
+        // in it, which then speaks the same contract as the app.
+        send(req, res, 200, { 'Content-Type': 'text/html; charset=utf-8' }, await readFile(CONSOLE_PAGE));
+      } else {
+        await respond(req, res, url);
+      }
     } catch (thrown) {
       // A database that cannot be reached is a 503 the app can retry, not
       // a crash; a failure of Barua Talk has its own answers.

@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barua Talk test client</title>
+<!--
+  A second "phone" in a browser tab, for testing the app against a real
+  person. It speaks the same contract as the app (../API.md): the same
+  endpoints, its own device id, polling for incoming calls. Unlike the app's
+  first version it also joins the LiveKit room with the ticket the server
+  hands out, so sound and picture can be checked from this side.
+
+  Served by the server at /console. It holds no secret: every request goes
+  to this server, which holds the Barua key.
+-->
+<style>
+  :root { --bg:#0D0F15; --panel:#171A24; --line:#2A2F3D; --text:#F4F5F8; --muted:#9AA1B2; --accent:#2F6BFF; --red:#FF5A72; --green:#27C28A; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 48px; display:grid; gap:16px; grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+  @media (max-width: 800px) { main { grid-template-columns: minmax(0,1fr); } }
+  header { grid-column: 1 / -1; display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
+  h1 { font-size:20px; margin:0; }
+  h2 { font-size:13px; font-weight:600; color:var(--muted); margin:0 0 10px; text-transform:uppercase; letter-spacing:.04em; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:16px; min-width:0; }
+  .wide { grid-column: 1 / -1; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1 1 140px; min-width:0; }
+  input { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:9px 12px; font:inherit; min-width:0; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:10px; padding:9px 14px; font:inherit; font-weight:600; cursor:pointer; }
+  button.quiet { background:transparent; border:1px solid var(--line); color:var(--text); }
+  button.red { background:var(--red); }
+  button.green { background:var(--green); color:#04130d; }
+  button:disabled { opacity:.45; cursor:default; }
+  ul { list-style:none; margin:0; padding:0; display:grid; gap:8px; }
+  li { display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap; padding:8px 10px; background:var(--bg); border-radius:10px; }
+  .muted { color:var(--muted); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--line); margin-right:6px; }
+  .dot.on { background:var(--green); }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid var(--line); font-size:12px; color:var(--muted); }
+  .pill.ok { color:var(--green); border-color:var(--green); }
+  .pill.bad { color:var(--red); border-color:var(--red); }
+  #ring { border-color:var(--accent); }
+  #media { display:grid; gap:8px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); margin-top:10px; }
+  #media figure { margin:0; background:#000; border-radius:12px; overflow:hidden; position:relative; min-height:60px; }
+  #media video { width:100%; display:block; }
+  #media figcaption { position:absolute; left:8px; bottom:6px; font-size:12px; background:rgba(0,0,0,.55); padding:2px 6px; border-radius:6px; }
+  #chat { max-height:220px; overflow:auto; display:grid; gap:6px; margin:10px 0; }
+  #chat div { background:var(--bg); border-radius:10px; padding:6px 10px; overflow-wrap:anywhere; }
+  #log { font:12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space:pre-wrap; overflow-wrap:anywhere; max-height:320px; overflow:auto; background:var(--bg); border-radius:10px; padding:10px; margin:0; }
+  .err { color:var(--red); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Barua Talk test client</h1>
+    <div class="row">
+      <span id="h-talk" class="pill">talk</span>
+      <span id="h-db" class="pill">database</span>
+      <span id="h-phone" class="pill">phone calls</span>
+      <span id="h-lk" class="pill">LiveKit library</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>Who this tab is</h2>
+    <div class="row">
+      <input id="name" class="grow" placeholder="Your name in this tab" maxlength="40" aria-label="Your name">
+      <button id="save-name">Save</button>
+    </div>
+    <p class="muted" style="margin:10px 0 0">Identity: <b id="identity">none yet</b> · device <span id="device"></span>
+      <button class="quiet" id="new-device" style="padding:2px 8px;margin-left:6px">Be a new person</button></p>
+  </section>
+
+  <section id="ring" hidden>
+    <h2>Incoming call</h2>
+    <div class="row">
+      <span class="grow"><b id="ring-who"></b> <span class="muted" id="ring-kind"></span></span>
+      <button class="green" id="accept">Accept</button>
+      <button class="red" id="decline">Decline</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>People</h2>
+    <ul id="people"><li class="muted">Nobody else yet. Open the app on the phone and give it a name.</li></ul>
+  </section>
+
+  <section>
+    <h2>Rooms</h2>
+    <div class="row">
+      <input id="room-name" class="grow" placeholder="New room name" maxlength="60" aria-label="New room name">
+      <button id="make-room">Create</button>
+    </div>
+    <ul id="rooms" style="margin-top:10px"><li class="muted">No rooms.</li></ul>
+  </section>
+
+  <section class="wide">
+    <h2>Live now</h2>
+    <div class="row">
+      <span class="grow" id="live-title">Not in a call or room.</span>
+      <span id="live-status" class="pill">idle</span>
+      <button class="quiet" id="mic" disabled>Mute</button>
+      <button class="quiet" id="cam" disabled>Camera on</button>
+      <button class="red" id="hangup" disabled>Hang up</button>
+    </div>
+    <div id="media"></div>
+    <div id="chat-box" hidden>
+      <div id="chat"></div>
+      <div class="row">
+        <input id="chat-text" class="grow" placeholder="Message" maxlength="2000" aria-label="Message">
+        <button id="chat-send">Send</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="wide">
+    <h2>What happened <button class="quiet" id="clear-log" style="padding:2px 8px;margin-left:8px">Clear</button></h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.24.1/dist/livekit-client.umd.min.js"
+        integrity="sha384-bEBX66JcfDtveS4XnY3CM0ELufJ30A+CMwvispkDJIVEfQ0PNbMKMFX6aRlS93we"
+        crossorigin="anonymous"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const LK = window.LivekitClient;
+
+// ---------------------------------------------------------------- storage
+function stored(key) { try { return localStorage.getItem(key); } catch { return null; } }
+function store(key, value) { try { localStorage.setItem(key, value); } catch { /* private window */ } }
+function randomId() {
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return 'web-' + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+let deviceId = stored('barua-talk-device') || randomId();
+store('barua-talk-device', deviceId);
+
+// -------------------------------------------------------------------- log
+function mask(value) {
+  // Tickets are secrets: never show them whole.
+  return JSON.stringify(value, (key, v) => (key === 'token' && typeof v === 'string' ? v.slice(0, 12) + '…' : v));
+}
+function log(line, isError) {
+  const el = $('log');
+  const row = document.createElement('div');
+  if (isError) row.className = 'err';
+  row.textContent = new Date().toLocaleTimeString() + '  ' + line;
+  el.prepend(row);
+  while (el.childElementCount > 300) el.lastChild.remove();
+}
+
+// -------------------------------------------------------------------- api
+async function api(method, path, body, quiet) {
+  let res, json = null;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: { 'X-Device-Id': deviceId, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    try { json = await res.json(); } catch { json = null; }
+  } catch (err) {
+    if (!quiet) log(`${method} ${path} → no answer (${err.message})`, true);
+    return { ok: false, status: 0, json: null };
+  }
+  if (!quiet || !res.ok) log(`${method} ${path} → ${res.status} ${mask(json)}`, !res.ok);
+  return { ok: res.ok, status: res.status, json };
+}
+function sentence(result) {
+  return result.json?.error?.message || (result.status ? `The server answered ${result.status}.` : 'The server did not answer.');
+}
+
+// ----------------------------------------------------------------- health
+function pill(id, ok, text) { const el = $(id); el.textContent = text; el.className = 'pill ' + (ok ? 'ok' : 'bad'); }
+async function health() {
+  const r = await api('GET', '/v1/health', null, true);
+  const h = r.json || {};
+  pill('h-talk', !!h.talk, h.talk ? 'talk on' : 'talk off');
+  pill('h-db', !!h.database, h.database ? 'database on' : 'database off');
+  pill('h-phone', !!h.phone, h.phone ? 'phone calls on' : 'phone calls off');
+}
+pill('h-lk', !!LK, LK ? 'LiveKit library loaded' : 'LiveKit library missing');
+if (!LK) log('The LiveKit library did not load (no internet?). Ringing and chat still work; sound and picture will not.', true);
+
+// --------------------------------------------------------------------- me
+let me = { identity: null, name: null };
+async function loadMe() {
+  const r = await api('GET', '/v1/me');
+  if (r.ok) showMe(r.json);
+}
+function showMe(person) {
+  me = person;
+  $('identity').textContent = me.identity || 'none yet';
+  if (me.name && document.activeElement !== $('name')) $('name').value = me.name;
+  $('device').textContent = deviceId.slice(0, 10) + '…';
+}
+$('save-name').onclick = async () => {
+  const name = $('name').value.trim();
+  if (!name) return;
+  const r = await api('PUT', '/v1/me', { name });
+  if (r.ok) { showMe(r.json); refresh(); }
+};
+$('new-device').onclick = () => {
+  if (live.kind) return log('Hang up first.', true);
+  deviceId = randomId();
+  store('barua-talk-device', deviceId);
+  $('name').value = '';
+  showMe({ identity: null, name: null });
+  log('This tab is now a new, unnamed person.');
+};
+
+// ----------------------------------------------------------------- people
+async function loadPeople() {
+  const r = await api('GET', '/v1/people', null, true);
+  if (!r.ok) return;
+  const list = $('people');
+  list.replaceChildren();
+  const people = r.json.people || [];
+  if (!people.length) {
+    const li = document.createElement('li');
+    li.className = 'muted';
+    li.textContent = 'Nobody else yet. Open the app on the phone and give it a name.';
+    list.append(li);
+    return;
+  }
+  for (const p of people) {
+    const li = document.createElement('li');
+    const who = document.createElement('span');
+    who.className = 'grow';
+    const dot = document.createElement('span');
+    dot.className = 'dot' + (p.online ? ' on' : '');
+    who.append(dot, `${p.name} `);
+    const id = document.createElement('span');
+    id.className = 'muted';
+    id.textContent = p.identity + (p.online ? '' : ' · not open');
+    who.append(id);
+    const voice = document.createElement('button');
+    voice.textContent = 'Call';
+    voice.onclick = () => ring(p, false);
+    const video = document.createElement('button');
+    video.className = 'quiet';
+    video.textContent = 'Video call';
+    video.onclick = () => ring(p, true);
+    li.append(who, voice, video);
+    list.append(li);
+  }
+}
+
+// ------------------------------------------------------------------ rooms
+async function loadRooms() {
+  const r = await api('GET', '/v1/rooms', null, true);
+  if (!r.ok) return;
+  const list = $('rooms');
+  list.replaceChildren();
+  const rooms = r.json.rooms || [];
+  if (!rooms.length) {
+    const li = document.createElement('li');
+    li.className = 'muted';
+    li.textContent = 'No rooms.';
+    list.append(li);
+    return;
+  }
+  for (const room of rooms) {
+    const li = document.createElement('li');
+    const label = document.createElement('span');
+    label.className = 'grow';
+    label.textContent = (room.display_name || room.name) + ' ';
+    const small = document.createElement('span');
+    small.className = 'muted';
+    small.textContent = room.name;
+    label.append(small);
+    const voice = document.createElement('button');
+    voice.textContent = 'Join with voice';
+    voice.onclick = () => joinRoom(room, false);
+    const video = document.createElement('button');
+    video.className = 'quiet';
+    video.textContent = 'Join with video';
+    video.onclick = () => joinRoom(room, true);
+    li.append(label, voice, video);
+    list.append(li);
+  }
+}
+$('make-room').onclick = async () => {
+  const display_name = $('room-name').value.trim();
+  if (!display_name) return;
+  const r = await api('POST', '/v1/rooms', { display_name });
+  if (r.ok) { $('room-name').value = ''; loadRooms(); } else log('Could not make the room: ' + sentence(r), true);
+};
+
+// ------------------------------------------------------------------- live
+// What this tab is in right now: an in-app call or a room, and the LiveKit
+// room object when media is connected.
+const live = { kind: null, call: null, room: null, lk: null, video: false, lastMessage: 0 };
+
+function setStatus(text, ok) { const el = $('live-status'); el.textContent = text; el.className = 'pill' + (ok === true ? ' ok' : ok === false ? ' bad' : ''); }
+function showLive() {
+  const inSomething = !!live.kind;
+  $('hangup').disabled = !inSomething;
+  $('mic').disabled = !live.lk;
+  $('cam').disabled = !live.lk;
+  $('chat-box').hidden = live.kind !== 'room';
+  if (!inSomething) { $('live-title').textContent = 'Not in a call or room.'; setStatus('idle'); }
+}
+function tile(id, caption) {
+  let fig = document.getElementById('tile-' + id);
+  if (!fig) {
+    fig = document.createElement('figure');
+    fig.id = 'tile-' + id;
+    const cap = document.createElement('figcaption');
+    cap.textContent = caption;
+    fig.append(cap);
+    $('media').append(fig);
+  }
+  return fig;
+}
+function clearMedia() { $('media').replaceChildren(); }
+
+async function connectMedia(url, token, video) {
+  if (!LK) { setStatus('no LiveKit library', false); return; }
+  if (!url || !token) { setStatus('no ticket', false); log('The server gave no ticket, so there is nothing to join.', true); return; }
+  const room = new LK.Room({ adaptiveStream: true, dynacast: true });
+  live.lk = room;
+  room
+    .on(LK.RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+      const el = track.attach();
+      if (track.kind === 'video') tile(participant.identity, participant.name || participant.identity).prepend(el);
+      else { el.style.display = 'none'; document.body.append(el); }
+      log(`media: receiving ${track.kind} from ${participant.identity}`);
+    })
+    .on(LK.RoomEvent.TrackUnsubscribed, (track) => { for (const el of track.detach()) el.remove(); })
+    .on(LK.RoomEvent.ParticipantConnected, (p) => { tile(p.identity, p.name || p.identity); log(`media: ${p.identity} joined`); })
+    .on(LK.RoomEvent.ParticipantDisconnected, (p) => { document.getElementById('tile-' + p.identity)?.remove(); log(`media: ${p.identity} left`); })
+    .on(LK.RoomEvent.ActiveSpeakersChanged, (speakers) => { if (speakers.length) setStatus('speaking: ' + speakers.map((s) => s.identity).join(', '), true); else setStatus('connected', true); })
+    .on(LK.RoomEvent.Reconnecting, () => setStatus('reconnecting', false))
+    .on(LK.RoomEvent.Reconnected, () => setStatus('connected', true))
+    .on(LK.RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
+      if (topic !== 'chat') return;
+      let text = '';
+      try { const m = JSON.parse(new TextDecoder().decode(payload)); text = `${m.from ?? participant?.identity ?? '?'}: ${m.text ?? ''}`; } catch { text = '(unreadable chat data)'; }
+      log('media: chat over LiveKit → ' + text);
+    })
+    .on(LK.RoomEvent.Disconnected, (reason) => { log('media: disconnected' + (reason !== undefined ? ` (reason ${reason})` : '')); if (live.lk === room) { live.lk = null; setStatus('media off', false); showLive(); } });
+  setStatus('connecting media…');
+  try {
+    await room.connect(url, token);
+    for (const p of room.remoteParticipants.values()) tile(p.identity, p.name || p.identity);
+    log(`media: connected to ${url} as ${room.localParticipant.identity}, ${room.remoteParticipants.size} other(s) there`);
+    setStatus('connected', true);
+  } catch (err) {
+    log('media: could not connect: ' + err.message, true);
+    setStatus('media failed', false);
+    live.lk = null; showLive();
+    return;
+  }
+  try {
+    await room.localParticipant.setMicrophoneEnabled(true);
+    $('mic').textContent = 'Mute';
+  } catch (err) { log('media: the microphone was refused: ' + err.message, true); }
+  if (video) await setCamera(true);
+  showLive();
+}
+async function setCamera(on) {
+  const room = live.lk;
+  if (!room) return;
+  try {
+    await room.localParticipant.setCameraEnabled(on);
+    const pub = room.localParticipant.getTrackPublication(LK.Track.Source.Camera);
+    const fig = tile('me', 'You');
+    fig.querySelector('video')?.remove();
+    if (on && pub?.track) { const el = pub.track.attach(); el.muted = true; fig.prepend(el); } else if (!on) fig.remove();
+    $('cam').textContent = on ? 'Camera off' : 'Camera on';
+    live.video = on;
+  } catch (err) { log('media: the camera was refused or this ticket is voice-only: ' + err.message, true); }
+}
+$('mic').onclick = async () => {
+  const lp = live.lk?.localParticipant;
+  if (!lp) return;
+  const on = !lp.isMicrophoneEnabled;
+  await lp.setMicrophoneEnabled(on);
+  $('mic').textContent = on ? 'Mute' : 'Unmute';
+};
+$('cam').onclick = () => setCamera(!live.video);
+
+async function leaveMedia() {
+  const room = live.lk;
+  live.lk = null;
+  if (room) { try { await room.disconnect(); } catch { /* already gone */ } }
+  clearMedia();
+}
+async function endLive(note) {
+  await leaveMedia();
+  live.kind = null; live.call = null; live.room = null; live.video = false; live.lastMessage = 0;
+  $('chat').replaceChildren();
+  $('mic').textContent = 'Mute'; $('cam').textContent = 'Camera on';
+  showLive();
+  if (note) log(note);
+}
+
+// ---------------------------------------------------------- in-app calls
+async function ring(person, video) {
+  if (live.kind) return log('Hang up first.', true);
+  if (!me.identity) return log('Save a name first, so the other side sees who is calling.', true);
+  const r = await api('POST', '/v1/calls', { to: person.identity, video });
+  if (!r.ok) return log(`Could not ring ${person.name}: ${sentence(r)}`, true);
+  live.kind = 'call'; live.call = r.json.call; live.video = video;
+  $('live-title').textContent = `Calling ${person.name}…`;
+  setStatus('ringing');
+  showLive();
+  // The caller joins at once and waits there, as the Talk API describes.
+  connectMedia(r.json.url, r.json.token, video);
+}
+let ringing = null;
+async function pollIncoming() {
+  if (live.kind) { $('ring').hidden = true; return; }
+  const r = await api('GET', '/v1/calls/incoming', null, true);
+  if (!r.ok) return;
+  const call = (r.json.calls || [])[0] || null;
+  if (call && (!ringing || ringing.id !== call.id)) log(`Incoming ${call.video ? 'video' : 'voice'} call from ${call.peer.name}`);
+  ringing = call;
+  $('ring').hidden = !call;
+  if (call) { $('ring-who').textContent = call.peer.name; $('ring-kind').textContent = call.video ? 'in-app video call' : 'in-app voice call'; }
+}
+$('accept').onclick = async () => {
+  if (!ringing) return;
+  const call = ringing;
+  const r = await api('POST', `/v1/calls/${call.id}/accept`);
+  $('ring').hidden = true; ringing = null;
+  if (!r.ok) return log('Could not accept: ' + sentence(r), true);
+  live.kind = 'call'; live.call = r.json.call; live.video = !!call.video;
+  $('live-title').textContent = `In a call with ${call.peer.name}`;
+  showLive();
+  connectMedia(r.json.url, r.json.token, !!call.video);
+};
+$('decline').onclick = async () => {
+  if (!ringing) return;
+  await api('POST', `/v1/calls/${ringing.id}/decline`);
+  $('ring').hidden = true; ringing = null;
+};
+async function watchCall() {
+  if (live.kind !== 'call' || !live.call) return;
+  const r = await api('GET', `/v1/calls/${live.call.id}`, null, true);
+  if (!r.ok || live.kind !== 'call') return;
+  const call = r.json.call;
+  const before = live.call.status;
+  live.call = call;
+  if (call.status !== before) log(`call ${call.id}: ${before} → ${call.status}`);
+  if (call.status === 'active') $('live-title').textContent = `In a call with ${call.peer.name} · ${Math.floor(call.seconds / 60)}:${String(call.seconds % 60).padStart(2, '0')}`;
+  if (['declined', 'ended', 'missed'].includes(call.status)) endLive(`The call is over (${call.status}).`);
+}
+
+// ------------------------------------------------------------------ rooms
+async function joinRoom(room, video) {
+  if (live.kind) return log('Hang up first.', true);
+  live.kind = 'room'; live.room = room; live.video = video; live.lastMessage = 0;
+  $('live-title').textContent = `In room ${room.display_name || room.name}`;
+  setStatus('opening');
+  showLive();
+  pollChat();
+  const r = await api('POST', `/v1/rooms/${encodeURIComponent(room.name)}/ticket`, { video });
+  if (!r.ok) { setStatus('no ticket', false); return log('No ticket for the room: ' + sentence(r) + ' Chat through the server still works.', true); }
+  connectMedia(r.json.url, r.json.token, video);
+}
+async function pollChat() {
+  if (live.kind !== 'room' || !live.room) return;
+  const name = encodeURIComponent(live.room.name);
+  const r = await api('GET', `/v1/rooms/${name}/messages${live.lastMessage ? `?after=${live.lastMessage}&read=1` : '?read=1'}`, null, true);
+  if (!r.ok || live.kind !== 'room') return;
+  const box = $('chat');
+  for (const m of r.json.messages || []) {
+    const row = document.createElement('div');
+    row.textContent = `${m.mine ? 'You' : m.from_name || m.from}: ${m.text}${m.delivered === false ? '  (not forwarded to LiveKit)' : ''}`;
+    box.append(row);
+    live.lastMessage = Math.max(live.lastMessage, Number(m.id) || 0);
+  }
+  if ((r.json.messages || []).length) box.scrollTop = box.scrollHeight;
+}
+async function sendChat() {
+  const text = $('chat-text').value.trim();
+  if (!text || live.kind !== 'room') return;
+  const r = await api('POST', `/v1/rooms/${encodeURIComponent(live.room.name)}/messages`, { text, client_id: 'w-' + randomId().slice(4) });
+  if (r.ok) { $('chat-text').value = ''; pollChat(); } else log('Could not send: ' + sentence(r), true);
+}
+$('chat-send').onclick = sendChat;
+$('chat-text').onkeydown = (e) => { if (e.key === 'Enter') sendChat(); };
+
+$('hangup').onclick = async () => {
+  if (live.kind === 'call' && live.call) await api('POST', `/v1/calls/${live.call.id}/hangup`);
+  endLive(live.kind === 'room' ? 'Left the room.' : 'Hung up.');
+};
+$('clear-log').onclick = () => $('log').replaceChildren();
+window.addEventListener('pagehide', () => {
+  // Closing the tab hangs up, so the phone is not left in a dead call.
+  if (live.kind === 'call' && live.call) {
+    fetch(`/v1/calls/${live.call.id}/hangup`, { method: 'POST', headers: { 'X-Device-Id': deviceId }, keepalive: true }).catch(() => {});
+  }
+  live.lk?.disconnect();
+});
+
+// ------------------------------------------------------------------ loops
+function refresh() { loadPeople(); loadRooms(); }
+async function start() {
+  showMe(me);
+  showLive();
+  await health();
+  await loadMe();
+  refresh();
+  setInterval(pollIncoming, 2500);
+  setInterval(watchCall, 2000);
+  setInterval(pollChat, 2000);
+  setInterval(refresh, 5000);
+  setInterval(health, 15000);
+}
+start();
+</script>
+</body>
+</html>

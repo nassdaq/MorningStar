@@ -224,3 +224,14 @@ internet:
 | `src/db.js` | PostgreSQL, the migration, reconnecting |
 | `src/errors.js`, `src/stores.js`, `src/http.js`, `src/log.js`, `src/config.js` | Errors and upstream's mapped to them, rate limit and shared work, bodies, logging, environment |
 | `test/` | See "Tests" |
+
+## The browser test client
+
+`http://127.0.0.1:8789/console` (served from `web/console.html`) is a second
+person in a browser tab. It speaks the same contract as the app (`API.md`)
+with its own device id: give it a name, and it appears under People in the
+app; it can ring the app, be rung by it, make rooms and chat. It also joins
+the LiveKit room with the ticket the server hands out (the `livekit-client`
+library, loaded from a CDN with an integrity hash), so sound and picture can
+be checked from the browser's side. The page holds no secret. Open it in two
+tabs and press "Be a new person" in one to try a call without a phone.
