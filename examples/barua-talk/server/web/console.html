@@ -104,6 +104,7 @@
       <span id="live-status" class="pill">idle</span>
       <button class="quiet" id="mic" disabled>Mute</button>
       <button class="quiet" id="cam" disabled>Camera on</button>
+      <button class="quiet" id="share" disabled>Share screen</button>
       <button class="red" id="hangup" disabled>Hang up</button>
     </div>
     <div id="media"></div>
@@ -296,7 +297,7 @@ $('make-room').onclick = async () => {
 // ------------------------------------------------------------------- live
 // What this tab is in right now: an in-app call or a room, and the LiveKit
 // room object when media is connected.
-const live = { kind: null, call: null, room: null, lk: null, video: false, lastMessage: 0 };
+const live = { kind: null, call: null, room: null, lk: null, video: false, sharing: false, lastMessage: 0 };
 
 function setStatus(text, ok) { const el = $('live-status'); el.textContent = text; el.className = 'pill' + (ok === true ? ' ok' : ok === false ? ' bad' : ''); }
 function showLive() {
@@ -304,6 +305,7 @@ function showLive() {
   $('hangup').disabled = !inSomething;
   $('mic').disabled = !live.lk;
   $('cam').disabled = !live.lk;
+  $('share').disabled = !live.lk;
   $('chat-box').hidden = live.kind !== 'room';
   if (!inSomething) { $('live-title').textContent = 'Not in a call or room.'; setStatus('idle'); }
 }
@@ -329,13 +331,23 @@ async function connectMedia(url, token, video) {
   room
     .on(LK.RoomEvent.TrackSubscribed, (track, _pub, participant) => {
       const el = track.attach();
-      if (track.kind === 'video') tile(participant.identity, participant.name || participant.identity).prepend(el);
+      const who = participant.name || participant.identity;
+      // A shared screen is a second picture from the same person: its own tile.
+      const screen = track.source === LK.Track.Source.ScreenShare;
+      if (track.kind === 'video') (screen ? tile(participant.identity + '-screen', who + "'s screen") : tile(participant.identity, who)).prepend(el);
       else { el.style.display = 'none'; document.body.append(el); }
-      log(`media: receiving ${track.kind} from ${participant.identity}`);
+      log(`media: receiving ${screen ? 'a shared screen' : track.kind} from ${participant.identity}`);
     })
-    .on(LK.RoomEvent.TrackUnsubscribed, (track) => { for (const el of track.detach()) el.remove(); })
+    .on(LK.RoomEvent.TrackUnsubscribed, (track, _pub, participant) => {
+      for (const el of track.detach()) el.remove();
+      if (track.source === LK.Track.Source.ScreenShare) { document.getElementById('tile-' + participant.identity + '-screen')?.remove(); log(`media: ${participant.identity} stopped sharing`); }
+    })
+    .on(LK.RoomEvent.LocalTrackUnpublished, (pub) => {
+      // The browser's own "Stop sharing" bar ends the share without our button.
+      if (pub.source === LK.Track.Source.ScreenShare) shareStopped();
+    })
     .on(LK.RoomEvent.ParticipantConnected, (p) => { tile(p.identity, p.name || p.identity); log(`media: ${p.identity} joined`); })
-    .on(LK.RoomEvent.ParticipantDisconnected, (p) => { document.getElementById('tile-' + p.identity)?.remove(); log(`media: ${p.identity} left`); })
+    .on(LK.RoomEvent.ParticipantDisconnected, (p) => { document.getElementById('tile-' + p.identity)?.remove(); document.getElementById('tile-' + p.identity + '-screen')?.remove(); log(`media: ${p.identity} left`); })
     .on(LK.RoomEvent.ActiveSpeakersChanged, (speakers) => { if (speakers.length) setStatus('speaking: ' + speakers.map((s) => s.identity).join(', '), true); else setStatus('connected', true); })
     .on(LK.RoomEvent.Reconnecting, () => setStatus('reconnecting', false))
     .on(LK.RoomEvent.Reconnected, () => setStatus('connected', true))
@@ -344,6 +356,8 @@ async function connectMedia(url, token, video) {
       let text = '';
       try { const m = JSON.parse(new TextDecoder().decode(payload)); text = `${m.from ?? participant?.identity ?? '?'}: ${m.text ?? ''}`; } catch { text = '(unreadable chat data)'; }
       log('media: chat over LiveKit → ' + text);
+      // The server keeps the messages; the room only says "there is a new one".
+      pollChat();
     })
     .on(LK.RoomEvent.Disconnected, (reason) => { log('media: disconnected' + (reason !== undefined ? ` (reason ${reason})` : '')); if (live.lk === room) { live.lk = null; setStatus('media off', false); showLive(); } });
   setStatus('connecting media…');
@@ -386,6 +400,28 @@ $('mic').onclick = async () => {
   $('mic').textContent = on ? 'Mute' : 'Unmute';
 };
 $('cam').onclick = () => setCamera(!live.video);
+function shareStopped() {
+  live.sharing = false;
+  document.getElementById('tile-me-screen')?.remove();
+  $('share').textContent = 'Share screen';
+}
+async function setScreenShare(on) {
+  const room = live.lk;
+  if (!room) return;
+  try {
+    // The browser asks which screen, window or tab; refusing throws.
+    await room.localParticipant.setScreenShareEnabled(on);
+    if (!on) return shareStopped();
+    const pub = room.localParticipant.getTrackPublication(LK.Track.Source.ScreenShare);
+    if (!pub?.track) return shareStopped();
+    const el = pub.track.attach(); el.muted = true;
+    tile('me-screen', 'Your screen').prepend(el);
+    $('share').textContent = 'Stop sharing';
+    live.sharing = true;
+    log('media: sharing this screen');
+  } catch (err) { shareStopped(); log('media: the screen was not shared (refused, or this ticket is voice-only): ' + err.message, true); }
+}
+$('share').onclick = () => setScreenShare(!live.sharing);
 
 async function leaveMedia() {
   const room = live.lk;
@@ -395,9 +431,9 @@ async function leaveMedia() {
 }
 async function endLive(note) {
   await leaveMedia();
-  live.kind = null; live.call = null; live.room = null; live.video = false; live.lastMessage = 0;
+  live.kind = null; live.call = null; live.room = null; live.video = false; live.sharing = false; live.lastMessage = 0;
   $('chat').replaceChildren();
-  $('mic').textContent = 'Mute'; $('cam').textContent = 'Camera on';
+  $('mic').textContent = 'Mute'; $('cam').textContent = 'Camera on'; $('share').textContent = 'Share screen';
   showLive();
   if (note) log(note);
 }
