@@ -49,7 +49,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * The platform services an application can ask for: HTTP requests, recording
  * from the microphone, playing a clip, a few stored values, and the
  * clipboard. See docs/architecture/0019-effects-and-platform-services.md and
- * 0025-text-selection-and-clipboard.md.
+ * 0025-text-selection-and-clipboard.md. The live room is MorningstarLive's
+ * (0038-live-rooms.md); it shares the microphone question asked here.
  *
  * Rust asks from its render thread (MorningstarNative.onHttpRequest and
  * onServiceCommand), and those calls only hand the work on:
@@ -403,11 +404,11 @@ final class MorningstarServices {
 
     private static long finishedDurationMs;
 
-    /** The start waiting for the user's answer about the microphone, or 0. */
-    private static long startAwaitingPermission;
+    /** True while a start waits for the user's answer about the microphone. */
+    private static boolean startAwaitingPermission;
 
     private static void startRecording(long id) {
-        if (recorder != null || startAwaitingPermission != 0) {
+        if (recorder != null || startAwaitingPermission) {
             audioResult(id, MorningstarNative.AUDIO_KIND_STARTED, MorningstarNative.AUDIO_BUSY, null);
             return;
         }
@@ -424,46 +425,103 @@ final class MorningstarServices {
             audioResult(id, MorningstarNative.AUDIO_KIND_STARTED, MorningstarNative.AUDIO_UNSUPPORTED, null);
             return;
         }
+        startAwaitingPermission = true;
+        withMicrophone(
+                (granted, failure) -> {
+                    startAwaitingPermission = false;
+                    if (granted) {
+                        beginRecording(id);
+                    } else if (failure != null) {
+                        audioResult(
+                                id,
+                                MorningstarNative.AUDIO_KIND_STARTED,
+                                MorningstarNative.AUDIO_FAILED,
+                                failure);
+                    } else {
+                        audioResult(
+                                id,
+                                MorningstarNative.AUDIO_KIND_STARTED,
+                                MorningstarNative.AUDIO_PERMISSION_DENIED,
+                                null);
+                    }
+                });
+    }
+
+    // ------------------------------------------------ microphone permission
+    // Service thread. Shared by recording and by the live room
+    // (MorningstarLive), so that there is one question on screen however
+    // many asked for it.
+
+    /** The user's answer about the microphone, given on the service thread. */
+    interface MicrophoneAnswer {
+        /**
+         * granted: the microphone may be used. Otherwise failure is null
+         * when the user (or the system, for a user who refused for good)
+         * said no, and says what went wrong when nobody could be asked.
+         */
+        void answered(boolean granted, String failure);
+    }
+
+    /** Everyone waiting for the answer to the question on screen. */
+    private static final List<MicrophoneAnswer> awaitingMicrophone = new ArrayList<>();
+
+    /**
+     * Runs work on the service thread. False, having done nothing, if no
+     * activity ever prepared the services.
+     */
+    static boolean post(Runnable work) {
+        Handler handler = service;
+        return handler != null && handler.post(work);
+    }
+
+    /**
+     * Calls answer once the microphone may be used, or may not: at once if
+     * the user has already allowed it, otherwise after asking them.
+     * Android shows its dialog, or answers "denied" at once if the user
+     * has refused for good; either way the answer arrives in
+     * onPermissionResult. So a later request always asks again. Service
+     * thread; answer is called there.
+     */
+    static void withMicrophone(MicrophoneAnswer answer) {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                 == PackageManager.PERMISSION_GRANTED) {
-            beginRecording(id);
+            answer.answered(true, null);
             return;
         }
-        // Ask. Android shows its dialog, or answers "denied" at once if
-        // the user has refused for good; either way the answer arrives in
-        // onPermissionResult. So a later start always asks again.
-        startAwaitingPermission = id;
-        new Handler(Looper.getMainLooper())
-                .post(
-                        () -> {
-                            MorningstarActivity activity = MorningstarActivity.current();
-                            if (activity == null) {
-                                // Nobody to ask.
-                                service.post(() -> permissionAnswered(false, null));
-                            } else {
-                                activity.requestPermissions(
-                                        new String[] {Manifest.permission.RECORD_AUDIO},
-                                        REQUEST_RECORD_AUDIO);
-                            }
-                        });
+        boolean alreadyAsking = !awaitingMicrophone.isEmpty();
+        awaitingMicrophone.add(answer);
+        if (alreadyAsking) {
+            return;
+        }
+        MAIN.post(
+                () -> {
+                    MorningstarActivity activity = MorningstarActivity.current();
+                    if (activity == null) {
+                        // Nobody to ask.
+                        service.post(() -> permissionAnswered(false, null));
+                    } else {
+                        activity.requestPermissions(
+                                new String[] {Manifest.permission.RECORD_AUDIO},
+                                REQUEST_RECORD_AUDIO);
+                    }
+                });
     }
 
     private static void permissionAnswered(boolean granted, String failure) {
-        long id = startAwaitingPermission;
-        if (id == 0) {
+        if (awaitingMicrophone.isEmpty()) {
             return;
         }
-        startAwaitingPermission = 0;
-        if (granted) {
-            beginRecording(id);
-        } else if (failure != null) {
-            audioResult(id, MorningstarNative.AUDIO_KIND_STARTED, MorningstarNative.AUDIO_FAILED, failure);
-        } else {
+        List<MicrophoneAnswer> waiting = new ArrayList<>(awaitingMicrophone);
+        awaitingMicrophone.clear();
+        if (!granted && failure == null) {
             Log.i(TAG, "services: microphone permission denied");
-            audioResult(
-                    id, MorningstarNative.AUDIO_KIND_STARTED, MorningstarNative.AUDIO_PERMISSION_DENIED, null);
+        }
+        for (MicrophoneAnswer answer : waiting) {
+            answer.answered(granted, failure);
         }
     }
+
+    // ------------------------------------------------- recording, continued
 
     private static void beginRecording(long id) {
         // A recording nobody collected is replaced by the new one.

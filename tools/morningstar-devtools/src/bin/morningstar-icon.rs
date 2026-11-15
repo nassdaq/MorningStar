@@ -42,8 +42,10 @@ Options:
                          192, 96 and 48 pixels
   --print <what>         print one value and a newline: name, id (Android
                          application id), bundle-id (iOS), lib (the Rust
-                         library's name) or icon (the source picture, or
-                         `built-in`)
+                         library's name), icon (the source picture, or
+                         `built-in`) or services (the opt-in platform
+                         services the app declares, separated by commas;
+                         an empty line for none)
   --manifest-path <file> a Cargo.toml of the workspace, if not the current
                          directory's
   -h, --help             print this help
@@ -78,9 +80,10 @@ fn parse(mut arguments: impl Iterator<Item = String>) -> Result<Option<Arguments
             "--manifest-path" => parsed.manifest_path = Some(value()?.into()),
             "--print" => {
                 let what = value()?;
-                if !["name", "id", "bundle-id", "lib", "icon"].contains(&what.as_str()) {
+                if !["name", "id", "bundle-id", "lib", "icon", "services"].contains(&what.as_str())
+                {
                     return Err(format!(
-                        "--print {what}: expected name, id, bundle-id, lib or icon"
+                        "--print {what}: expected name, id, bundle-id, lib, icon or services"
                     ));
                 }
                 parsed.print.push(what);
@@ -109,6 +112,7 @@ fn run(arguments: &Arguments) -> Result<(), Box<dyn std::error::Error>> {
             "id" => println!("{}", identity.id),
             "bundle-id" => println!("{}", identity.bundle_id()),
             "lib" => println!("{}", identity.lib),
+            "services" => println!("{}", identity.services.join(",")),
             _ => match &identity.icon {
                 Some(path) => println!("{}", path.display()),
                 None => println!("built-in"),

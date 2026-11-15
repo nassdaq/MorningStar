@@ -14,10 +14,10 @@ import android.view.Surface;
  *
  * All native methods are called on the main thread and return immediately,
  * except nativeSurfaceDestroyed, which blocks until the renderer has let go
- * of the surface, and the four results of platform services
+ * of the surface, and the five results of platform services
  * (nativeHttpResult, nativeAudioResult, nativeLoadResult,
- * nativeClipboardResult), which are called from the thread that did the
- * work.
+ * nativeClipboardResult, nativeLiveEvent), which are called from the thread
+ * that did the work.
  *
  * Rust draws on demand: after any of these calls that can change the picture
  * it produces a frame, and between them it draws nothing.
@@ -356,6 +356,52 @@ final class MorningstarNative {
      */
     static final int SERVICE_ANNOUNCE = 9;
 
+    // The live room (docs/architecture/0038-live-rooms.md), carried out by
+    // MorningstarLive. Its answers are nativeLiveEvent.
+    /**
+     * first: the media server's address (wss://...); second: the ticket, a
+     * secret that is never logged; data: three bytes, each zero for no:
+     * the microphone is live from the start, sound goes to the loudspeaker
+     * rather than the earpiece, speaking reports are wanted. Answered with
+     * a nativeLiveEvent for each event of the room, under this id, the
+     * last of them LIVE_DISCONNECTED or LIVE_FAILED.
+     */
+    static final int SERVICE_LIVE_JOIN = 10;
+    /** Leave the room. The join's events end with LIVE_END_LEFT. */
+    static final int SERVICE_LIVE_LEAVE = 11;
+    /** data: one byte, zero to mute the microphone. Not answered. */
+    static final int SERVICE_LIVE_MICROPHONE = 12;
+    /** data: one byte, zero for the earpiece. Not answered. */
+    static final int SERVICE_LIVE_SPEAKER = 13;
+
+    // Values of nativeLiveEvent's kind argument. Must match
+    // LiveEvent::from_wire in morningstar-core.
+    static final int LIVE_CONNECTED = 0;
+    /** first: the participant's identity; second: their name. */
+    static final int LIVE_PARTICIPANT_JOINED = 1;
+    /** first: the participant's identity. */
+    static final int LIVE_PARTICIPANT_LEFT = 2;
+    /** first: the identities of who is speaking, one per line. */
+    static final int LIVE_SPEAKING = 3;
+    static final int LIVE_RECONNECTING = 4;
+    static final int LIVE_RECONNECTED = 5;
+    /** code: a LIVE_END_* reason. The last event of a room. */
+    static final int LIVE_DISCONNECTED = 6;
+    /** code: a LIVE_ERROR_*; first: what failed. The last event of a room. */
+    static final int LIVE_FAILED = 7;
+
+    // nativeLiveEvent's code with LIVE_DISCONNECTED.
+    static final int LIVE_END_LEFT = 0;
+    static final int LIVE_END_REPLACED = 1;
+    static final int LIVE_END_HIDDEN = 2;
+    static final int LIVE_END_ENDED = 3;
+    static final int LIVE_END_LOST = 4;
+
+    // nativeLiveEvent's code with LIVE_FAILED.
+    static final int LIVE_ERROR_PERMISSION_DENIED = 1;
+    static final int LIVE_ERROR_UNSUPPORTED = 2;
+    static final int LIVE_ERROR_FAILED = 3;
+
     // Values of nativeHttpResult's error argument. Must match jni.rs.
     static final int HTTP_OK = 0;
     static final int HTTP_OFFLINE = 1;
@@ -413,6 +459,15 @@ final class MorningstarNative {
     static native void nativeClipboardResult(long id, boolean found, String text);
 
     /**
+     * Something happened in the live room joined by SERVICE_LIVE_JOIN id:
+     * kind is a LIVE_* event, code and the two strings what that event
+     * says they are (unused ones 0 and null). Called as often as there are
+     * events; after LIVE_DISCONNECTED or LIVE_FAILED never again for that
+     * id. Any thread.
+     */
+    static native void nativeLiveEvent(long id, int kind, int code, String first, String second);
+
+    /**
      * Called by Rust, on its render thread, to make an HTTP request: method
      * is "GET", "POST", ...; headers is "Name: value" lines; body is empty
      * for none; timeoutMs bounds the whole exchange. Only hands the request
@@ -440,6 +495,13 @@ final class MorningstarNative {
             // Not a service with work to do off the main thread: a word
             // to the accessibility framework, on the main thread.
             MAIN.post(() -> MorningstarAccessibility.announce(first, "assertive".equals(second)));
+            return;
+        }
+        if (command >= SERVICE_LIVE_JOIN && command <= SERVICE_LIVE_SPEAKER) {
+            // The live room has its own class, which exists in two forms:
+            // the real one in an app that declares the service, and one
+            // that refuses in every other app (ADR 0038).
+            MorningstarLive.command(command, id, first, second, data);
             return;
         }
         MorningstarServices.command(command, id, first, second, data);

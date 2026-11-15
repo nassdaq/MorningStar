@@ -15,6 +15,43 @@ val iconResDir: File = providers.gradleProperty("morningstar.resDir")
     .map { file(it) }
     .getOrElse(layout.buildDirectory.dir("generated/morningstar/res").get().asFile)
 
+// The platform services the app opts into (ADR 0038): a comma-separated list
+// from the `services` key of its Cargo.toml, passed by tools/build-android.sh.
+// Empty for most apps. A service named here adds its sources and its
+// dependencies to the host; one that is not named adds nothing to the APK.
+//
+//   live: live rooms, through LiveKit's Android client (which brings WebRTC).
+//         src/live/java is compiled; otherwise src/nolive/java, whose class
+//         of the same name refuses every join.
+val knownServices = setOf("live")
+val services: Set<String> = providers.gradleProperty("morningstar.services")
+    .getOrElse("")
+    .split(',')
+    .map { it.trim() }
+    .filter { it.isNotEmpty() }
+    .toSet()
+(services - knownServices).let { unknown ->
+    if (unknown.isNotEmpty()) {
+        throw GradleException(
+            "morningstar.services names $unknown, which this host does not have. " +
+                "The services are: $knownServices."
+        )
+    }
+}
+val liveRooms = "live" in services
+
+// The ABIs the app's Rust library was built for: the directories
+// tools/build-android.sh has just filled under src/main/jniLibs. Native
+// libraries that come with a dependency are packaged for these and no
+// others. Without this a dependency that ships four ABIs (LiveKit's WebRTC)
+// would put all four into an APK whose application exists for one, where
+// the other three can never run.
+val rustAbis: List<String> = file("src/main/jniLibs")
+    .listFiles { entry -> entry.isDirectory }
+    ?.map { it.name }
+    ?.sorted()
+    .orEmpty()
+
 val checkMorningstarIcons = tasks.register("checkMorningstarIcons") {
     val marker = iconResDir.resolve("mipmap-anydpi-v26/ic_launcher.xml")
     doLast {
@@ -48,9 +85,21 @@ android {
 
         manifestPlaceholders["appName"] = appName
         manifestPlaceholders["libName"] = libName
+
+        if (rustAbis.isNotEmpty()) {
+            ndk { abiFilters.addAll(rustAbis) }
+        }
     }
 
-    sourceSets["main"].res.srcDir(iconResDir)
+    sourceSets["main"].res.directories.add(iconResDir.path)
+    // Exactly one MorningstarLive: the LiveKit one, or the one that refuses.
+    if (liveRooms) {
+        // MorningstarLive.kt, the host's one Kotlin file (LiveKit's client
+        // is called through coroutines).
+        sourceSets["main"].kotlin.directories.add("src/live/java")
+    } else {
+        sourceSets["main"].java.directories.add("src/nolive/java")
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -61,5 +110,33 @@ android {
         release {
             isMinifyEnabled = false
         }
+    }
+}
+
+// The Android Gradle plugin compiles Kotlin by itself and, for that, adds
+// the Kotlin standard library to every app, used or not: 2.4 MB of classes.
+// The host is Java; its one Kotlin file is the live room's. So an app
+// without that service ships no Kotlin either. (With the service, the
+// plugin's own choice of library stands, which is the one that matches the
+// compiler.)
+if (!liveRooms) {
+    configurations
+        .matching { it.name.endsWith("CompileClasspath") || it.name.endsWith("RuntimeClasspath") }
+        .configureEach { exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib") }
+}
+
+dependencies {
+    if (liveRooms) {
+        // LiveKit's client: the signalling, WebRTC (a native library per
+        // ABI) and the audio routing. The version is the newest stable
+        // release when this was written (2026-11-03); its own dependencies
+        // need JitPack, which settings.gradle.kts adds for this case only.
+        implementation("io.livekit:livekit-android:2.30.0")
+        // MorningstarLive.kt uses coroutines to call it. LiveKit ships
+        // them, but as a runtime dependency, which is not on the compile
+        // classpath. The version is the one LiveKit's own dependencies
+        // resolve to (it asks for 1.6.0, its livekit-ffi-android for
+        // 1.8.1), so this line adds nothing to the APK.
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     }
 }

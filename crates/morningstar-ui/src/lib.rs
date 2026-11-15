@@ -300,7 +300,7 @@ mod ui;
 mod viewport;
 
 pub use color::{ColorRef, ThemeColor, hex, hexa, rgb8, with_alpha};
-pub use effects::Effects;
+pub use effects::{Effects, LiveRoom};
 pub use element::{
     Avatar, Button, Column, Container, Divider, Element, Gradient, Icon, Picture, Pressable,
     Radial, RadialExtent, Row, SafeArea, SafeEdges, ScrollView, Spacer, Span, Stack, Text,
@@ -316,8 +316,9 @@ pub use viewport::Viewport;
 
 pub use morningstar_core::{Action, Actions, Live, Role, SemanticsNode, SemanticsTree, States};
 pub use morningstar_core::{
-    AudioClip, AudioError, HostState, HttpError, HttpMethod, HttpRequest, HttpResponse, Recording,
-    ServiceCall, ServiceId, ServiceRequest, ServiceResult,
+    AudioClip, AudioError, HostState, HttpError, HttpMethod, HttpRequest, HttpResponse,
+    LiveDisconnect, LiveError, LiveEvent, LiveJoin, LiveParticipant, Recording, ServiceCall,
+    ServiceId, ServiceRequest, ServiceResult,
 };
 pub use morningstar_core::{
     BarContent, Capitalization, CaretMove, Color, Image, ImageError, ImageFit, ImeAction,
@@ -343,7 +344,8 @@ pub mod prelude {
     };
     pub use crate::{
         AudioClip, AudioError, Effects, HttpError, HttpMethod, HttpRequest, HttpResponse,
-        Recording, ServiceRequest, ServiceResult,
+        LiveDisconnect, LiveError, LiveEvent, LiveJoin, LiveParticipant, Recording, ServiceRequest,
+        ServiceResult,
     };
     pub use crate::{BarContent, SystemBars};
     pub use crate::{Easing, Navigation, Navigator, ScrollTo, Transition, Viewport, Wrap};

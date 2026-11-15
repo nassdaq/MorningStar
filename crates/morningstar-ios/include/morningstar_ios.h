@@ -344,6 +344,8 @@ bool morningstar_ios_accessibility_action(MorningstarHost *host, int32_t node,
 //
 // Every request of a kind marked "answered" must be answered exactly once,
 // with an error if it cannot be carried out: the application is waiting.
+// The one exception is the live room's join (ADR 0038), which is answered
+// once for each event of the room.
 // Never call a *_result function after morningstar_ios_destroy: the host
 // must drop answers that arrive for a host it has destroyed.
 
@@ -378,6 +380,26 @@ enum {
   // (UIAccessibility.post(.announcement)); text2: "assertive" to interrupt
   // what it is saying, empty otherwise.
   MORNINGSTAR_SERVICE_ANNOUNCE = 10,
+  // The live room (ADR 0038): a conversation on a media server (LiveKit).
+  // Answered with morningstar_ios_live_event, once for EACH event of the
+  // room, the last of them MORNINGSTAR_LIVE_DISCONNECTED or
+  // MORNINGSTAR_LIVE_FAILED. text1: the server's address (wss://...);
+  // text2: the ticket, a secret: never log it; data: three bytes, each zero
+  // for no: microphone live from the start, sound to the loudspeaker
+  // rather than the earpiece, speaking reports wanted. One room at a time:
+  // a join ends the room that is joined (MORNINGSTAR_LIVE_END_REPLACED). A
+  // host that has no live rooms answers MORNINGSTAR_LIVE_FAILED with
+  // MORNINGSTAR_LIVE_ERROR_UNSUPPORTED.
+  MORNINGSTAR_SERVICE_LIVE_JOIN = 11,
+  // Not answered; the room's events end with MORNINGSTAR_LIVE_END_LEFT.
+  // Ignored when no room is joined.
+  MORNINGSTAR_SERVICE_LIVE_LEAVE = 12,
+  // Not answered. data: one byte, zero to mute the microphone. A host that
+  // cannot mute ends the room as failed rather than leave it open.
+  MORNINGSTAR_SERVICE_LIVE_MICROPHONE = 13,
+  // Not answered. data: one byte, zero for the earpiece, otherwise the
+  // loudspeaker.
+  MORNINGSTAR_SERVICE_LIVE_SPEAKER = 14,
 };
 
 // One request. Strings are NUL-terminated UTF-8 and never NULL (unused ones
@@ -457,6 +479,50 @@ void morningstar_ios_load_result(MorningstarHost *host, uint64_t id,
 // pasteboard's string, or found false when it holds no text. Main thread.
 void morningstar_ios_clipboard_result(MorningstarHost *host, uint64_t id,
                                       bool found, const char *utf8);
+
+// morningstar_ios_live_event's kind: what happened in the live room.
+enum {
+  MORNINGSTAR_LIVE_CONNECTED = 0,
+  // first: the participant's identity; second: their name. Also given,
+  // after CONNECTED, for everyone who was already in the room.
+  MORNINGSTAR_LIVE_PARTICIPANT_JOINED = 1,
+  // first: the participant's identity.
+  MORNINGSTAR_LIVE_PARTICIPANT_LEFT = 2,
+  // first: the identities of who is speaking, one per line ('\n'); empty
+  // when nobody is. Only when the join asked for speaking reports.
+  MORNINGSTAR_LIVE_SPEAKING = 3,
+  MORNINGSTAR_LIVE_RECONNECTING = 4,
+  MORNINGSTAR_LIVE_RECONNECTED = 5,
+  // Final. code: a MORNINGSTAR_LIVE_END_* reason.
+  MORNINGSTAR_LIVE_DISCONNECTED = 6,
+  // Final. code: a MORNINGSTAR_LIVE_ERROR_*; first: what failed, for
+  // MORNINGSTAR_LIVE_ERROR_FAILED. Never put the ticket in it.
+  MORNINGSTAR_LIVE_FAILED = 7,
+};
+
+// morningstar_ios_live_event's code with MORNINGSTAR_LIVE_DISCONNECTED.
+enum {
+  MORNINGSTAR_LIVE_END_LEFT = 0,     // the application left
+  MORNINGSTAR_LIVE_END_REPLACED = 1, // the application joined another room
+  MORNINGSTAR_LIVE_END_HIDDEN = 2,   // the app left the screen
+  MORNINGSTAR_LIVE_END_ENDED = 3,    // closed or removed from the other side
+  MORNINGSTAR_LIVE_END_LOST = 4,     // the connection could not be kept
+};
+
+// morningstar_ios_live_event's code with MORNINGSTAR_LIVE_FAILED.
+enum {
+  MORNINGSTAR_LIVE_ERROR_PERMISSION_DENIED = 1, // the microphone was refused
+  MORNINGSTAR_LIVE_ERROR_UNSUPPORTED = 2,       // this host has no live rooms
+  MORNINGSTAR_LIVE_ERROR_FAILED = 3,            // anything else; see first
+};
+
+// Something happened in the room joined by the
+// MORNINGSTAR_SERVICE_LIVE_JOIN request id. Called once per event; after a
+// final one (DISCONNECTED or FAILED) never again for that id, by which time
+// the microphone must be closed. Unused strings may be NULL. Main thread.
+void morningstar_ios_live_event(MorningstarHost *host, uint64_t id,
+                                uint32_t kind, uint32_t code,
+                                const char *first, const char *second);
 
 void morningstar_ios_destroy(MorningstarHost *host);
 

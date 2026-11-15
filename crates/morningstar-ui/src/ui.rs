@@ -18,7 +18,7 @@ use morningstar_runtime::{
 
 use crate::color::{ColorRef, with_alpha};
 use crate::edit::{self, EditConfig, EditKind, EditState, History};
-use crate::effects::{EffectState, Effects};
+use crate::effects::{EffectState, Effects, LiveRoom};
 use crate::element::{
     Axis, BoxNode, Container, DashKind, Element, Fill, IconNode, ImageNode, InputHandler,
     InputNode, Kind, LineHeight, PictureSource, SpacerKind, TextNode, key_hash,
@@ -28,7 +28,7 @@ use crate::scroll::{ScrollTarget, ScrollTo};
 use crate::semantics::{AccessibilityIssue, Backdrop, Collector, Entered, RawKind};
 use crate::theme::Theme;
 use crate::viewport::Viewport;
-use morningstar_core::{Action, SemanticsTree};
+use morningstar_core::{Action, LiveEvent, SemanticsTree};
 
 /// A finger must travel this far (dp) before a press turns into a scroll.
 const TOUCH_SLOP: f32 = 8.0;
@@ -797,6 +797,10 @@ impl<A: Application> Ui<A> {
     /// * Playback behaves as on a device: `stop_playback`, or a second
     ///   `play`, ends a clip that is still pending with
     ///   [`AudioError::Interrupted`].
+    /// * A live room is played by the test: [`live_room`](Self::live_room)
+    ///   says what the application joined and how it has set the
+    ///   microphone and the loudspeaker, and
+    ///   [`live_event`](Self::live_event) makes something happen in it.
     ///
     /// ```
     /// use morningstar_ui::prelude::*;
@@ -955,6 +959,32 @@ impl<A: Application> Ui<A> {
             |request| matches!(request, ServiceRequest::Play(_)),
             ServiceResult::Played(result),
         )
+    }
+
+    /// The live room the application has joined, under the test driver:
+    /// what it joined with (the address and the ticket it used), and
+    /// whether its microphone and loudspeaker are on now. `None` when no
+    /// room is joined, and always without a driver.
+    pub fn live_room(&self) -> Option<&LiveRoom> {
+        self.effects.live().map(|(_, room)| room)
+    }
+
+    /// Something happens in the live room the application has joined:
+    /// "the room connected", "Baraka came in", "the connection was lost".
+    /// The application gets its message at once. An event that is
+    /// [final](LiveEvent::is_final) ends the room, as on a device.
+    /// Returns false, and does nothing, if no room is joined.
+    ///
+    /// The driver itself behaves as a host does: leaving the room ends it
+    /// with [`LiveDisconnect::Left`](morningstar_core::LiveDisconnect::Left),
+    /// joining another with `Replaced`, and both are delivered at the
+    /// start of the next frame or by
+    /// [`deliver_effects`](Self::deliver_effects).
+    pub fn live_event(&mut self, event: LiveEvent) -> bool {
+        match self.effects.live() {
+            Some((id, _)) => self.deliver_result(id, ServiceResult::Live(event)),
+            None => false,
+        }
     }
 
     fn answer_oldest(

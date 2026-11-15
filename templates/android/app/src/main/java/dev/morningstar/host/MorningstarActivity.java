@@ -77,7 +77,9 @@ import android.window.OnBackInvokedDispatcher;
  * Platform services (HTTP, recording, playback, stored values) are in
  * MorningstarServices; this class only tells it when the activity comes and
  * goes and passes on the answer to the microphone permission. See
- * docs/architecture/0019-effects-and-platform-services.md.
+ * docs/architecture/0019-effects-and-platform-services.md. The live
+ * room is MorningstarLive's and is told the same comings and goings
+ * (docs/architecture/0038-live-rooms.md).
  */
 public final class MorningstarActivity extends Activity implements SurfaceHolder.Callback2 {
     private static final String LIB_NAME_KEY = "dev.morningstar.lib_name";
@@ -186,6 +188,7 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
     protected void onStart() {
         super.onStart();
         MorningstarServices.activityStarted();
+        MorningstarLive.activityStarted();
         // The setting may have changed while the app was off screen, and
         // is watched while it is on.
         sendReduceMotion();
@@ -205,6 +208,9 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
         // Sound stops with the screen: a clip ends as interrupted and a
         // recording is closed and kept (ADR 0019).
         MorningstarServices.activityStopped();
+        // And so does a live room: it is left, so that the microphone is
+        // never open behind a screen the user cannot see (ADR 0038).
+        MorningstarLive.activityStopped();
         getContentResolver().unregisterContentObserver(animatorScaleObserver);
         MorningstarNative.nativePause();
         super.onStop();

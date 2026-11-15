@@ -8,7 +8,9 @@
 //! thread and answers later. Everything here is data that crosses that
 //! boundary: no platform type, no callback, no thread. The plumbing is in
 //! the runtime (`Engine::take_service_requests`, `Engine::service_result`)
-//! and the application-facing API in the UI layer (`Effects`). See ADR 0019.
+//! and the application-facing API in the UI layer (`Effects`). See ADR 0019,
+//! and ADR 0038 for the live room, the one request here that is answered
+//! more than once.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -341,6 +343,248 @@ impl fmt::Display for AudioError {
 
 impl std::error::Error for AudioError {}
 
+/// What a live room is joined with: where it is, the ticket that lets this
+/// person in, and how the microphone and the loudspeaker start.
+///
+/// A live room is a conversation carried by a media server (LiveKit): the
+/// people in it hear each other. The address and the token are what the
+/// application's own server hands out for one person and one room; the
+/// token is a secret, which is why this type does not print it.
+///
+/// ```
+/// use morningstar_core::LiveJoin;
+///
+/// let join = LiveJoin::new("wss://live.example.com", "a-ticket").speaker(true);
+/// assert!(join.microphone && join.speaker && !join.report_speaking);
+/// assert!(!format!("{join:?}").contains("a-ticket"));
+/// ```
+#[derive(Clone, PartialEq, Eq)]
+pub struct LiveJoin {
+    /// The media server's address: `wss://...`.
+    pub url: String,
+    /// The ticket for this person and this room. A secret: never logged.
+    pub token: String,
+    /// Whether the microphone is live from the start. With `false` the
+    /// room is joined muted; either way the user is asked for the
+    /// microphone before joining, because a room is a conversation.
+    pub microphone: bool,
+    /// Whether sound comes out of the loudspeaker (`true`) or the earpiece
+    /// (`false`) while nothing else, such as a headset, is connected.
+    pub speaker: bool,
+    /// Whether [`LiveEvent::Speaking`] is wanted. Off unless asked for:
+    /// every such event is a message and a frame.
+    pub report_speaking: bool,
+}
+
+impl LiveJoin {
+    /// Joins with the microphone live, sound in the earpiece, and no
+    /// speaking reports.
+    pub fn new(url: impl Into<String>, token: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            token: token.into(),
+            microphone: true,
+            speaker: false,
+            report_speaking: false,
+        }
+    }
+
+    /// Whether the microphone is live from the start.
+    pub fn microphone(mut self, live: bool) -> Self {
+        self.microphone = live;
+        self
+    }
+
+    /// Whether sound starts in the loudspeaker rather than the earpiece.
+    pub fn speaker(mut self, on: bool) -> Self {
+        self.speaker = on;
+        self
+    }
+
+    /// Asks for [`LiveEvent::Speaking`] events.
+    pub fn report_speaking(mut self, wanted: bool) -> Self {
+        self.report_speaking = wanted;
+        self
+    }
+}
+
+impl fmt::Debug for LiveJoin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The token is a secret and the address says whose server it is:
+        // neither is printed, so that neither reaches a log or a failed
+        // test's output by accident.
+        f.debug_struct("LiveJoin")
+            .field("url", &format_args!("<{} bytes>", self.url.len()))
+            .field("token", &format_args!("<{} bytes>", self.token.len()))
+            .field("microphone", &self.microphone)
+            .field("speaker", &self.speaker)
+            .field("report_speaking", &self.report_speaking)
+            .finish()
+    }
+}
+
+/// Someone else in a live room.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveParticipant {
+    /// Who they are to the media server: unique in the room.
+    pub identity: String,
+    /// The name to show; may be empty.
+    pub name: String,
+}
+
+/// Something that happened to the live room an application joined. A join
+/// is answered with a sequence of these, which always ends with exactly
+/// one [`Disconnected`](Self::Disconnected) or [`Failed`](Self::Failed);
+/// nothing follows that.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LiveEvent {
+    /// The room is joined: sound from the others plays, and the microphone
+    /// is heard by them unless the room was joined muted. A
+    /// [`ParticipantJoined`](Self::ParticipantJoined) follows for everyone
+    /// who was already there.
+    Connected,
+    /// Someone is in the room: they were there already, or have come in.
+    ParticipantJoined(LiveParticipant),
+    /// Someone left. Their `identity`.
+    ParticipantLeft(String),
+    /// Who is speaking now, loudest first, by identity (this device's own
+    /// person included, under the identity of its ticket); empty when
+    /// nobody is. Only sent when the join asked for it.
+    Speaking(Vec<String>),
+    /// The connection dropped and is being made again; nothing is heard
+    /// meanwhile. Followed by [`Reconnected`](Self::Reconnected), or by
+    /// the end of the room.
+    Reconnecting,
+    /// The connection is back.
+    Reconnected,
+    /// The room is over for this device, for the reason given. Final.
+    Disconnected(LiveDisconnect),
+    /// The room could not be joined, or broke. Final.
+    Failed(LiveError),
+}
+
+impl LiveEvent {
+    /// True for the event that ends a room: nothing follows it, and the
+    /// microphone is closed.
+    pub fn is_final(&self) -> bool {
+        matches!(self, Self::Disconnected(_) | Self::Failed(_))
+    }
+
+    /// The event a host reports with these four values, which is how one
+    /// crosses the boundary on both platforms (`nativeLiveEvent` on
+    /// Android, `morningstar_ios_live_event` on iOS). `None` for a kind
+    /// this library does not know: a newer host, whose event is ignored
+    /// rather than guessed at.
+    ///
+    /// | `kind` | Event | `code` | `first` | `second` |
+    /// | --- | --- | --- | --- | --- |
+    /// | 0 | `Connected` | | | |
+    /// | 1 | `ParticipantJoined` | | identity | name |
+    /// | 2 | `ParticipantLeft` | | identity | |
+    /// | 3 | `Speaking` | | identities, one per line | |
+    /// | 4 | `Reconnecting` | | | |
+    /// | 5 | `Reconnected` | | | |
+    /// | 6 | `Disconnected` | 0 left, 1 replaced, 2 hidden, 3 ended, 4 lost | | |
+    /// | 7 | `Failed` | 1 permission denied, 2 unsupported, 3 failed | the reason, for `failed` | |
+    ///
+    /// An unknown reason for a disconnection is read as `Ended` and an
+    /// unknown failure as `Failed`, so that the end of a room is never
+    /// lost to a code this library has not heard of.
+    pub fn from_wire(kind: u32, code: u32, first: &str, second: &str) -> Option<Self> {
+        Some(match kind {
+            0 => Self::Connected,
+            1 => Self::ParticipantJoined(LiveParticipant {
+                identity: first.to_owned(),
+                name: second.to_owned(),
+            }),
+            2 => Self::ParticipantLeft(first.to_owned()),
+            3 => Self::Speaking(
+                first
+                    .lines()
+                    .filter(|identity| !identity.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            ),
+            4 => Self::Reconnecting,
+            5 => Self::Reconnected,
+            6 => Self::Disconnected(match code {
+                0 => LiveDisconnect::Left,
+                1 => LiveDisconnect::Replaced,
+                2 => LiveDisconnect::Hidden,
+                4 => LiveDisconnect::Lost,
+                _ => LiveDisconnect::Ended,
+            }),
+            7 => Self::Failed(match code {
+                1 => LiveError::PermissionDenied,
+                2 => LiveError::Unsupported,
+                _ => LiveError::Failed(first.to_owned()),
+            }),
+            _ => return None,
+        })
+    }
+}
+
+/// Why a live room ended without anything having gone wrong on this
+/// device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LiveDisconnect {
+    /// The application left it.
+    Left,
+    /// The application joined another room: there is one at a time.
+    Replaced,
+    /// The app left the screen. A room does not continue in the
+    /// background: the microphone would stay open where the user cannot
+    /// see it.
+    Hidden,
+    /// The other side ended it: the room was closed, this person was
+    /// removed, or the same ticket joined from somewhere else.
+    Ended,
+    /// The connection was lost and could not be made again.
+    Lost,
+}
+
+impl fmt::Display for LiveDisconnect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Left => "the room was left",
+            Self::Replaced => "another room was joined",
+            Self::Hidden => "the app left the screen",
+            Self::Ended => "the room was ended from the other side",
+            Self::Lost => "the connection was lost",
+        })
+    }
+}
+
+/// Why a live room could not be joined, or broke.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LiveError {
+    /// The user has not allowed the microphone. Joining again asks them
+    /// again, unless they refused for good, in which case only the
+    /// system's settings can change it.
+    PermissionDenied,
+    /// Nothing can join a live room here: there is no host (a test without
+    /// a driver, a screenshot tool), the host is older than this library,
+    /// the app was built without the live service (it is opt-in, see ADR
+    /// 0038), or the platform has none yet (iOS).
+    Unsupported,
+    /// Anything else, described by the platform: the server refused the
+    /// ticket, the address is wrong, the network is down. For logs; do not
+    /// match on the text.
+    Failed(String),
+}
+
+impl fmt::Display for LiveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PermissionDenied => f.write_str("the microphone is not allowed"),
+            Self::Unsupported => f.write_str("live rooms are not available here"),
+            Self::Failed(reason) => write!(f, "the live room failed: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for LiveError {}
+
 /// Identifies one request an application made, so that its answer can be
 /// matched to it. Chosen by the application side, opaque to hosts, never
 /// zero, and not reused while the application lives.
@@ -397,6 +641,21 @@ pub enum ServiceRequest {
         /// Say it at once, interrupting what is being said.
         assertive: bool,
     },
+    /// Join a live room (ADR 0038), leaving the one that is joined: there
+    /// is one at a time. The only request answered more than once: with a
+    /// [`ServiceResult::Live`] for each [`LiveEvent`], under this
+    /// request's id, the last of them [final](LiveEvent::is_final).
+    LiveJoin(LiveJoin),
+    /// Leave the live room. Not answered: the join's own events end with
+    /// [`LiveDisconnect::Left`]. Nothing happens when no room is joined.
+    LiveLeave,
+    /// Open (`true`) or mute the microphone in the live room. Not
+    /// answered. A host that cannot mute ends the room as failed rather
+    /// than leave the microphone open.
+    LiveMicrophone(bool),
+    /// Send the live room's sound to the loudspeaker (`true`) or the
+    /// earpiece. Not answered.
+    LiveSpeaker(bool),
 }
 
 impl ServiceRequest {
@@ -404,7 +663,13 @@ impl ServiceRequest {
     pub fn expects_result(&self) -> bool {
         !matches!(
             self,
-            Self::StopPlayback | Self::Store { .. } | Self::SetClipboard(_) | Self::Announce { .. }
+            Self::StopPlayback
+                | Self::Store { .. }
+                | Self::SetClipboard(_)
+                | Self::Announce { .. }
+                | Self::LiveLeave
+                | Self::LiveMicrophone(_)
+                | Self::LiveSpeaker(_)
         )
     }
 
@@ -419,10 +684,14 @@ impl ServiceRequest {
             Self::Play(_) => ServiceResult::Played(Err(AudioError::Unsupported)),
             Self::Load { .. } => ServiceResult::Loaded(None),
             Self::ReadClipboard => ServiceResult::Clipboard(None),
+            Self::LiveJoin(_) => ServiceResult::Live(LiveEvent::Failed(LiveError::Unsupported)),
             Self::StopPlayback
             | Self::Store { .. }
             | Self::SetClipboard(_)
-            | Self::Announce { .. } => return None,
+            | Self::Announce { .. }
+            | Self::LiveLeave
+            | Self::LiveMicrophone(_)
+            | Self::LiveSpeaker(_) => return None,
         })
     }
 
@@ -439,6 +708,12 @@ impl ServiceRequest {
             Self::SetClipboard(_) => "set clipboard",
             Self::ReadClipboard => "read clipboard",
             Self::Announce { .. } => "announce",
+            Self::LiveJoin(_) => "join live room",
+            Self::LiveLeave => "leave live room",
+            Self::LiveMicrophone(true) => "live microphone on",
+            Self::LiveMicrophone(false) => "live microphone muted",
+            Self::LiveSpeaker(true) => "live sound to the loudspeaker",
+            Self::LiveSpeaker(false) => "live sound to the earpiece",
         }
     }
 }
@@ -460,6 +735,10 @@ pub enum ServiceResult {
     /// For [`ServiceRequest::ReadClipboard`]: the clipboard's text, or
     /// `None` if it is empty, holds no text, or cannot be read here.
     Clipboard(Option<String>),
+    /// For [`ServiceRequest::LiveJoin`]: one event of the room. Given
+    /// under the join's id as often as there are events, until one that
+    /// is [final](LiveEvent::is_final).
+    Live(LiveEvent),
 }
 
 /// A request on its way to the host, with the id its answer must carry.
@@ -606,6 +885,15 @@ mod tests {
                 ServiceRequest::Load { key: "k".into() },
                 Some(ServiceResult::Loaded(None)),
             ),
+            (
+                ServiceRequest::LiveJoin(LiveJoin::new("wss://live.example.com", "t")),
+                Some(ServiceResult::Live(LiveEvent::Failed(
+                    LiveError::Unsupported,
+                ))),
+            ),
+            (ServiceRequest::LiveLeave, None),
+            (ServiceRequest::LiveMicrophone(false), None),
+            (ServiceRequest::LiveSpeaker(true), None),
             (ServiceRequest::StopPlayback, None),
             (
                 ServiceRequest::Store {
@@ -651,5 +939,124 @@ mod tests {
         assert_eq!(state.stored("device_id"), Some("abc"));
         assert_eq!(state.stored("other"), None);
         assert_eq!(state.stored_len(), 1);
+    }
+
+    #[test]
+    fn a_join_starts_with_the_microphone_live_and_the_earpiece() {
+        let join = LiveJoin::new("wss://live.example.com", "ticket");
+        assert!(join.microphone && !join.speaker && !join.report_speaking);
+        let join = join.microphone(false).speaker(true).report_speaking(true);
+        assert!(!join.microphone && join.speaker && join.report_speaking);
+    }
+
+    #[test]
+    fn a_join_never_prints_its_ticket_or_its_address() {
+        let request = ServiceRequest::LiveJoin(LiveJoin::new(
+            "wss://secret-host.example.com",
+            "eyJhbGciOi.secret.ticket",
+        ));
+        let printed = format!("{request:?} {}", request.name());
+        assert!(!printed.contains("secret"), "{printed}");
+        assert!(!printed.contains("eyJ"), "{printed}");
+        let call = ServiceCall {
+            id: ServiceId(1),
+            request,
+        };
+        assert!(!format!("{call:?}").contains("secret"));
+    }
+
+    #[test]
+    fn only_the_two_endings_of_a_room_are_final() {
+        let someone = LiveParticipant {
+            identity: "baraka".into(),
+            name: "Baraka".into(),
+        };
+        for event in [
+            LiveEvent::Connected,
+            LiveEvent::ParticipantJoined(someone),
+            LiveEvent::ParticipantLeft("baraka".into()),
+            LiveEvent::Speaking(vec!["baraka".into()]),
+            LiveEvent::Reconnecting,
+            LiveEvent::Reconnected,
+        ] {
+            assert!(!event.is_final(), "{event:?}");
+        }
+        for reason in [
+            LiveDisconnect::Left,
+            LiveDisconnect::Replaced,
+            LiveDisconnect::Hidden,
+            LiveDisconnect::Ended,
+            LiveDisconnect::Lost,
+        ] {
+            assert!(LiveEvent::Disconnected(reason).is_final());
+            assert!(!reason.to_string().is_empty());
+        }
+        for error in [
+            LiveError::PermissionDenied,
+            LiveError::Unsupported,
+            LiveError::Failed("refused".into()),
+        ] {
+            assert!(!error.to_string().is_empty());
+            assert!(LiveEvent::Failed(error).is_final());
+        }
+    }
+
+    #[test]
+    fn an_event_is_read_from_the_four_values_a_host_reports() {
+        let read = LiveEvent::from_wire;
+        assert_eq!(read(0, 0, "", ""), Some(LiveEvent::Connected));
+        assert_eq!(
+            read(1, 0, "baraka", "Baraka M."),
+            Some(LiveEvent::ParticipantJoined(LiveParticipant {
+                identity: "baraka".into(),
+                name: "Baraka M.".into(),
+            }))
+        );
+        assert_eq!(
+            read(2, 0, "baraka", ""),
+            Some(LiveEvent::ParticipantLeft("baraka".into()))
+        );
+        assert_eq!(
+            read(3, 0, "baraka\nneema\n", ""),
+            Some(LiveEvent::Speaking(vec!["baraka".into(), "neema".into()]))
+        );
+        assert_eq!(read(3, 0, "", ""), Some(LiveEvent::Speaking(Vec::new())));
+        assert_eq!(read(4, 0, "", ""), Some(LiveEvent::Reconnecting));
+        assert_eq!(read(5, 0, "", ""), Some(LiveEvent::Reconnected));
+        let reasons = [
+            LiveDisconnect::Left,
+            LiveDisconnect::Replaced,
+            LiveDisconnect::Hidden,
+            LiveDisconnect::Ended,
+            LiveDisconnect::Lost,
+        ];
+        for (code, reason) in reasons.into_iter().enumerate() {
+            assert_eq!(
+                read(6, code as u32, "", ""),
+                Some(LiveEvent::Disconnected(reason))
+            );
+        }
+        assert_eq!(
+            read(7, 1, "", ""),
+            Some(LiveEvent::Failed(LiveError::PermissionDenied))
+        );
+        assert_eq!(
+            read(7, 2, "ignored", ""),
+            Some(LiveEvent::Failed(LiveError::Unsupported))
+        );
+        assert_eq!(
+            read(7, 3, "refused", ""),
+            Some(LiveEvent::Failed(LiveError::Failed("refused".into())))
+        );
+    }
+
+    #[test]
+    fn an_unknown_ending_still_ends_the_room_and_an_unknown_kind_is_ignored() {
+        let ended = LiveEvent::from_wire(6, 99, "", "").expect("still a disconnection");
+        assert_eq!(ended, LiveEvent::Disconnected(LiveDisconnect::Ended));
+        let failed = LiveEvent::from_wire(7, 99, "why", "").expect("still a failure");
+        assert_eq!(failed, LiveEvent::Failed(LiveError::Failed("why".into())));
+        assert!(ended.is_final() && failed.is_final());
+        assert_eq!(LiveEvent::from_wire(8, 0, "", ""), None);
     }
 }

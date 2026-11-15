@@ -97,8 +97,8 @@ templates/
 examples/hello-gpu/       low-level example (a tap counter)
 examples/showcase/        three realistic screens built with the UI layer
 examples/atlas/           ten screens of an AI-assistant design; answers from a real model through its server, scripted without it
-examples/barua-talk/      five screens of a rooms-and-calls design with photographs; real rooms, chat and call signalling through its server, scripted without it
-examples/services-check/  device smoke test for HTTP, recording, playback and stored values
+examples/barua-talk/      five screens of a rooms-and-calls design with photographs; real rooms, chat and calls with sound (a LiveKit room) through its server, scripted without it
+examples/services-check/  device smoke test for HTTP, recording, playback, stored values and a live room
 docs/architecture/        architecture decision records
 benchmarks/               method, scripts and reports
 tools/

@@ -78,7 +78,7 @@ It must have:
 | Path | Owns |
 | --- | --- |
 | `crates/morningstar` | Public developer API. The only crate an app depends on. |
-| `crates/morningstar-core` | Dependency-free types: `Color`, `Lifecycle`, `FrameStats`, and the data of platform services (`HttpRequest`, `Recording`, `ServiceRequest`, ...). |
+| `crates/morningstar-core` | Dependency-free types: `Color`, `Lifecycle`, `FrameStats`, and the data of platform services (`HttpRequest`, `Recording`, `LiveJoin`, `LiveEvent`, `ServiceRequest`, ...). |
 | `crates/morningstar-gpu` | The only crate that uses `wgpu`. No `wgpu` type appears in its public API. |
 | `crates/morningstar-text` | Fonts and families, shaping, layout cache, glyph atlas, vector icons and multi-colour vector pictures. The only crate that uses `cosmic-text` and `zeno`. |
 | `crates/morningstar-layout` | Layout engine: fixed / hug / fill boxes to rectangles. Depends only on core. |
@@ -86,15 +86,15 @@ It must have:
 | `crates/morningstar-runtime` | `Engine`: lifecycle in, frames out, and platform service requests out and answers in. The one object a host drives. |
 | `crates/morningstar-android` | JNI entry points, the Rust-to-Java upcalls (`java.rs`) and the render thread. Empty off Android. |
 | `crates/morningstar-ios` | C ABI for the UIKit host. Empty off iOS. |
-| `templates/android`, `templates/ios` | Thin native host projects. No application logic. They implement the platform services (`MorningstarServices.java`, `HostServices.swift`). |
+| `templates/android`, `templates/ios` | Thin native host projects. No application logic. They implement the platform services (`MorningstarServices.java`, `HostServices.swift`). The live room is `MorningstarLive`, which exists twice on Android: `app/src/live/java` (Kotlin, LiveKit) for an app that declares `services = ["live"]`, `app/src/nolive/java` (refuses) for every other. |
 | `tools/morningstar-devtools` | Renders an app to a PNG with no device, and compares it with a design image (`morningstar-diff`). Generates an app's launcher icons and reads its name and id from its `Cargo.toml` (`morningstar-icon`, ADR 0020). |
 | `examples/hello-gpu` | The low-level example: paints and hit-tests by hand. |
 | `examples/showcase` | Three realistic screens written with the UI layer. |
-| `examples/services-check` | Device smoke test for platform services: one button per service. Also the smallest app that uses every effect, with scripted tests. |
+| `examples/services-check` | Device smoke test for platform services: one button per service, the live room included. Also the smallest app that uses every effect, with scripted tests. |
 | `examples/fundidesk` | Twelve screens reproduced from a real design, each tested against its reference image. The model to imitate; start with its `SCREENS.md`. |
 | `examples/callready` | Five illustrated screens from a second design: turned elements, multi-colour vector pictures, text effects. Tested against its references. |
 | `examples/atlas` | Ten screens from a third design, an AI assistant: radial gradients, blur, inner shadows, a bottom sheet, a sideways chip row. With its server (`server/`, DeepSeek and optional voice) the chat is real; without it, scripted. Tested against its references. Start with its `SCREENS.md`. |
-| `examples/barua-talk` | Five screens from a fourth design, rooms, chat and calls: photographs beside the drawing, a blurred backdrop, an arched bar. With its server (`server/`, the Barua Talk API) rooms, messages, in-app calls and phone calls are real, without live audio or video; without it, scripted from the design's own people. Tested against its references. Start with its `SCREENS.md`. |
+| `examples/barua-talk` | Five screens from a fourth design, rooms, chat and calls: photographs beside the drawing, a blurred backdrop, an arched bar. With its server (`server/`, the Barua Talk API) rooms, messages, in-app calls and phone calls are real and carry sound through a live room (ADR 0038), without video; without it, scripted from the design's own people. Tested against its references. Start with its `SCREENS.md`. |
 | `docs/architecture` | Architecture Decision Records. Read before changing a subsystem. |
 | `benchmarks` | Benchmark method and reports. |
 
@@ -109,7 +109,7 @@ cargo run -q -p morningstar-devtools --bin morningstar-diff -- design.png out/id
 cargo run -q -p morningstar-devtools --bin morningstar-svg -- art.svg out/art.png --scale 3   # an SVG file as an app would draw it
 cargo clippy --workspace --all-targets
 cargo ndk -t arm64-v8a clippy -p hello-gpu   # type-check and lint the Android code
-tools/build-android.sh [--install]     # APK (MORNINGSTAR_APP=showcase, MORNINGSTAR_ABIS=arm64-v8a)
+tools/build-android.sh [--install]     # APK (MORNINGSTAR_APP=showcase, MORNINGSTAR_ABIS=arm64-v8a; the app's `services` decide what the host is built with)
 cargo run -p showcase --example screenshot out/ 3   # the showcase screens as PNGs at scale 3
 cargo run -p fundidesk --example screenshot -- out/ 07 --diff --phone   # one FundiDesk screen, compared with its design
 tools/build-ios.sh                     # XCFramework, icon and names for the example (MORNINGSTAR_APP; needs full Xcode)
@@ -124,9 +124,11 @@ Read `docs/building-screens.md` and `docs/design-to-code.md`, imitate `examples/
 ### Rules specific to this codebase
 
 - The Java/Swift hosts and their Rust counterparts are two halves of one interface. `MorningstarNative.java` ↔ `morningstar-android/src/jni.rs` and `java.rs`, and `morningstar_ios.h` ↔ `morningstar-ios/src/lib.rs`, must change together. An app library and a host from different sides of such a change must never be combined: rebuild both.
-- An application never does I/O itself: no sockets, files, threads or sleeps in `update` or `view`. Work that takes time goes through `Application::effects` (ADR 0019), and tests answer it with `Ui::testing`.
+- An application never does I/O itself: no sockets, files, threads or sleeps in `update` or `view`. Work that takes time goes through `Application::effects` (ADR 0019; a live room: ADR 0038), and tests answer it with `Ui::testing`.
 - Record a new ADR in `docs/architecture` when a decision there is changed or a new cross-cutting one is made. Do not edit an accepted ADR's decision; supersede it.
 - Dependency versions move quickly (wgpu's API changed materially between major versions). Check the version in `Cargo.lock` and its docs rather than relying on memory.
+- A platform service that costs every app that carries it something (the live room: LiveKit and WebRTC, about 20 MB) is opt-in: the app names it in `services = [...]` under `[package.metadata.morningstar]` (ADR 0038), the build script passes that to the host's build, and an app that does not name it must not carry any of it. Check by listing the APK, not by reading the build file.
+- A live room holds the microphone open. Nothing may leave one connected by accident: it is left when the app leaves the screen, on `forget_pending`, and when the engine goes, and a change there comes with a test of what happens to the room.
 - An app's name, id and launcher icon are declared in its `Cargo.toml` under `[package.metadata.morningstar]` and nowhere else. The hosts' icon resources are generated by the build scripts into `build/` directories: never add an icon to `templates/`, and never special-case an app in a script.
 - After changing anything visual, render a screenshot and look at it. Passing tests do not show that a screen looks right.
 - The offscreen pixel tests are the specification of the renderer. A new drawing operation comes with pixel tests.

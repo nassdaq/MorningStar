@@ -838,7 +838,12 @@ mod tests {
             let Some(index) = probe.waiting.iter().position(|waiting| *waiting == id) else {
                 return false;
             };
-            probe.waiting.remove(index);
+            // A live room's join is waited for until the event that ends
+            // the room (ADR 0038); everything else is answered once.
+            let more_follows = matches!(&result, ServiceResult::Live(event) if !event.is_final());
+            if !more_follows {
+                probe.waiting.remove(index);
+            }
             probe.results.push((id, result));
             if let Some(call) = probe.follow_up.take() {
                 probe.outbox.push(call);
@@ -1992,6 +1997,57 @@ mod tests {
         assert!(!h.engine.service_result(ServiceId(3), ok(500)));
         assert_eq!(h.run(), 0);
         assert_eq!(h.probe.lock().unwrap().results.len(), 1);
+    }
+
+    #[test]
+    fn a_live_rooms_join_is_answered_once_per_event_until_its_final_one() {
+        use morningstar_core::{LiveDisconnect, LiveEvent, LiveJoin};
+        let live = |event| ServiceResult::Live(event);
+        let mut h = Harness::idle();
+        h.ask(ServiceCall {
+            id: ServiceId(4),
+            request: ServiceRequest::LiveJoin(LiveJoin::new("wss://live.example.com", "t")),
+        });
+        assert_eq!(h.take().len(), 1);
+        assert!(
+            !h.engine.needs_frame(),
+            "idle while the room is being joined"
+        );
+
+        // Each event is delivered at once and is followed by one frame.
+        for event in [LiveEvent::Connected, LiveEvent::Reconnecting] {
+            assert!(h.engine.service_result(ServiceId(4), live(event)));
+            assert_eq!(h.run(), 1);
+            assert!(!h.engine.needs_frame(), "idle between events");
+        }
+        let ended = LiveEvent::Disconnected(LiveDisconnect::Ended);
+        assert!(h.engine.service_result(ServiceId(4), live(ended)));
+        assert_eq!(h.run(), 1);
+        // What a host still had on its way after the end changes nothing.
+        assert!(
+            !h.engine
+                .service_result(ServiceId(4), live(LiveEvent::Reconnected))
+        );
+        assert_eq!(h.run(), 0);
+        assert_eq!(h.probe.lock().unwrap().results.len(), 3);
+    }
+
+    #[test]
+    fn a_live_rooms_events_reach_a_hidden_app() {
+        use morningstar_core::{LiveDisconnect, LiveEvent, LiveJoin};
+        let mut h = Harness::idle();
+        h.ask(ServiceCall {
+            id: ServiceId(1),
+            request: ServiceRequest::LiveJoin(LiveJoin::new("wss://live.example.com", "t")),
+        });
+        h.take();
+        h.engine.pause();
+        // The host left the room because the app left the screen: the app
+        // must hear it while hidden, or it would come back believing it
+        // is still in a call.
+        let hidden = ServiceResult::Live(LiveEvent::Disconnected(LiveDisconnect::Hidden));
+        assert!(h.engine.service_result(ServiceId(1), hidden.clone()));
+        assert_eq!(h.probe.lock().unwrap().results, [(ServiceId(1), hidden)]);
     }
 
     #[test]

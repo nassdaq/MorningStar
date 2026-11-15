@@ -34,9 +34,9 @@ use std::time::Duration;
 
 use morningstar_runtime::{
     App, AudioError, BarContent, Capitalization, CaretMove, Engine, FrameOutcome, HostState,
-    HttpError, HttpResponse, ImeAction, Insets, KeyboardType, NativeSurface, Point, PointerEvent,
-    PointerPhase, Recording, ServiceCall, ServiceId, ServiceRequest, ServiceResult, SurfaceSize,
-    TextInputCommand, TextInputEvent,
+    HttpError, HttpResponse, ImeAction, Insets, KeyboardType, LiveEvent, NativeSurface, Point,
+    PointerEvent, PointerPhase, Recording, ServiceCall, ServiceId, ServiceRequest, ServiceResult,
+    SurfaceSize, TextInputCommand, TextInputEvent,
 };
 
 unsafe extern "Rust" {
@@ -62,6 +62,10 @@ pub struct MorningstarHost {
     /// pointers in the host's `MorningstarServiceRequest` point into, and
     /// is kept until the next one is handed out.
     lent: Option<LentRequest>,
+    /// The few bytes of a live-room request (ADR 0038) that are not part
+    /// of the request itself: its yes-or-no settings, one byte each. Lent
+    /// like `lent`, and overwritten by the next such request handed out.
+    flags: [u8; 3],
     /// The update of the semantics tree most recently handed out (ADR
     /// 0032): the memory `morningstar_ios_take_semantics` points into,
     /// kept until the next call. Empty, and never grown, while VoiceOver
@@ -87,6 +91,7 @@ impl MorningstarHost {
             calls: VecDeque::new(),
             scratch: Vec::new(),
             lent: None,
+            flags: [0; 3],
             semantics: Vec::new(),
         });
         // What the application asked for while it was being set up.
@@ -847,13 +852,14 @@ pub struct MorningstarServiceRequest {
     /// HTTP: whole-exchange timeout in milliseconds, at least 1.
     pub timeout_ms: u32,
     /// HTTP: the method. Play: the media type. Store, remove, load: the
-    /// key. Set clipboard: the text.
+    /// key. Set clipboard: the text. Live join: the server's address.
     pub text1: *const c_char,
-    /// HTTP: the URL. Store: the value.
+    /// HTTP: the URL. Store: the value. Live join: the ticket.
     pub text2: *const c_char,
     /// HTTP: the headers, as `Name: value` lines each ended by `\n`.
     pub text3: *const c_char,
-    /// HTTP: the body. Play: the audio file.
+    /// HTTP: the body. Play: the audio file. Live join, microphone and
+    /// speaker: one byte per setting, zero for no.
     pub data: *const u8,
     pub data_len: usize,
 }
@@ -871,9 +877,12 @@ fn c_string(text: &str) -> CString {
 /// [`morningstar_ios_take_text_input`]: requests appear only inside them.
 ///
 /// Every request whose kind is answered (all but stop-playback, store,
-/// remove, set-clipboard and announce) must be answered exactly once with the matching
+/// remove, set-clipboard, announce, and the live room's leave, microphone
+/// and speaker) must be answered exactly once with the matching
 /// `morningstar_ios_*_result` function, on the main thread, with an error
-/// if it cannot be carried out; the application waits for it.
+/// if it cannot be carried out; the application waits for it. A live
+/// room's join is answered with [`morningstar_ios_live_event`], once for
+/// each event of the room and at least once: with its end.
 ///
 /// # Safety
 /// `host` must be null or a pointer from [`morningstar_ios_create`]; `out`
@@ -946,6 +955,28 @@ pub unsafe extern "C" fn morningstar_ios_take_service_request(
             ],
             no_data,
         ),
+        // The live room (ADR 0038). The flags are lent as three bytes.
+        ServiceRequest::LiveJoin(join) => {
+            host.flags = [
+                u8::from(join.microphone),
+                u8::from(join.speaker),
+                u8::from(join.report_speaking),
+            ];
+            (
+                11,
+                [join.url.clone(), join.token.clone(), String::new()],
+                &host.flags[..],
+            )
+        }
+        ServiceRequest::LiveLeave => (12, Default::default(), no_data),
+        ServiceRequest::LiveMicrophone(live) => {
+            host.flags = [u8::from(*live), 0, 0];
+            (13, Default::default(), &host.flags[..1])
+        }
+        ServiceRequest::LiveSpeaker(on) => {
+            host.flags = [u8::from(*on), 0, 0];
+            (14, Default::default(), &host.flags[..1])
+        }
     };
     let strings = texts.map(|text| c_string(&text));
     *out = MorningstarServiceRequest {
@@ -1136,6 +1167,43 @@ pub unsafe extern "C" fn morningstar_ios_clipboard_result(
     let value = found.then(|| unsafe { text(utf8) });
     host.engine
         .service_result(ServiceId(id), ServiceResult::Clipboard(value));
+}
+
+/// Something happened in the live room joined by the request `id` (ADR
+/// 0038). Unlike the other answers this one is given as often as there are
+/// events, the last of them a disconnection or a failure; after that never
+/// again for that id. `kind` is a `MORNINGSTAR_LIVE_*` constant, `code` a
+/// `MORNINGSTAR_LIVE_END_*` or `MORNINGSTAR_LIVE_ERROR_*` one where the
+/// kind has one, and `first` and `second` what the kind says they are:
+/// the four values of `LiveEvent::from_wire`.
+///
+/// Main thread, and not after [`morningstar_ios_destroy`].
+///
+/// # Safety
+/// `host` must be null or a live pointer from [`morningstar_ios_create`];
+/// `first` and `second` must each be null or a NUL-terminated string,
+/// which is copied.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn morningstar_ios_live_event(
+    host: *mut MorningstarHost,
+    id: u64,
+    kind: u32,
+    code: u32,
+    first: *const c_char,
+    second: *const c_char,
+) {
+    // SAFETY: guaranteed by the caller.
+    let Some(host) = (unsafe { host.as_mut() }) else {
+        return;
+    };
+    // SAFETY: each null or NUL-terminated (caller).
+    let (first, second) = unsafe { (text(first), text(second)) };
+    // A kind this library does not know comes from a newer host; ignoring
+    // is safer than guessing.
+    if let Some(event) = LiveEvent::from_wire(kind, code, &first, &second) {
+        host.engine
+            .service_result(ServiceId(id), ServiceResult::Live(event));
+    }
 }
 
 /// Destroys the host and releases every GPU resource.

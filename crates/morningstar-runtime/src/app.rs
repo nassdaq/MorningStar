@@ -952,8 +952,10 @@ pub trait App: Send + 'static {
     /// What is handed over is in the host's hands: each request that
     /// [expects a result](morningstar_core::ServiceRequest::expects_result)
     /// is answered exactly once through
-    /// [`service_result`](Self::service_result). The default asks for
-    /// nothing.
+    /// [`service_result`](Self::service_result); a live room's join (ADR
+    /// 0038) is answered once for each event of the room, the last of
+    /// them [final](morningstar_core::LiveEvent::is_final). The default
+    /// asks for nothing.
     fn service_requests(&mut self, out: &mut Vec<ServiceCall>) {
         let _ = out;
     }
@@ -963,6 +965,8 @@ pub trait App: Send + 'static {
     /// `true` if the app was waiting for it: a frame then follows. An
     /// answer the app is not waiting for (it gave up on the request) must
     /// be ignored and `false` returned, which is what the default does.
+    /// The same id comes more than once only for a live room's join,
+    /// whose every event is delivered here.
     fn service_result(&mut self, id: ServiceId, result: ServiceResult) -> bool {
         let _ = (id, result);
         false

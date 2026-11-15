@@ -22,6 +22,8 @@ Status: Accepted (2026-11-11)
 
 Build tooling, not linked into apps: `cargo-ndk`, Android Gradle Plugin 9.5.1 with Gradle 9.6.0 (wrapper), XcodeGen.
 
+In the Android host, and only of an app that opts in (`services = ["live"]`, [ADR 0038](0038-live-rooms.md)): `io.livekit:livekit-android` 2.30.0 with what it brings (WebRTC, OkHttp, the Kotlin library, coroutines), for live rooms. No Rust crate depends on it or names a type of it; it costs such an app 19.6 MB of a debug APK for one ABI, and every other app nothing.
+
 ## Deliberately absent
 
 - **`winit`, `android-activity`**: would own the application (ADR 0003).

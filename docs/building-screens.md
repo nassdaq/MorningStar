@@ -595,7 +595,9 @@ What each request does, and what comes back:
 | `out.stop_playback()` | nothing | The clip's own message says `Interrupted`. |
 | `out.store(key, value)`, `out.remove(key)` | nothing | A few small strings. Not for secrets. |
 | `out.load(key, f)` | `Option<String>` | Usually not needed: `setup.stored(key)` has it at start. |
-| `out.forget_pending()` | nothing | Drops the answers of everything asked before it. |
+| `out.forget_pending()` | nothing | Drops the answers of everything asked before it, and leaves a live room. |
+| `out.join_live(join, f)` | a `LiveEvent`, **again and again** | Joins a live room (voice). `f` is called for every event until a final one. See "A live room" below. |
+| `out.leave_live()`, `out.set_live_microphone(bool)`, `out.set_live_speaker(bool)` | nothing | Act on the room that is joined; ignored when none is. |
 
 - **Build a request** with `HttpRequest::get(url)`, `::post`, `::put`, `::delete`, then `.header(name, value)`, `.body(bytes)` or `.json_body(bytes)` (sets `Content-Type: application/json`; encode the JSON yourself), `.timeout(Duration)` (30 s if not set, for the whole exchange). Read a response with `.status`, `.header("content-type")`, `.body`, `.text()`.
 - **HTTPS only.** Plain `http://` works only to `127.0.0.1`, `localhost` and `10.0.2.2`, for a server on your own machine (`adb reverse tcp:8787 tcp:8787`, then `http://127.0.0.1:8787`). Anything else fails as `Failed`.
@@ -604,6 +606,35 @@ What each request does, and what comes back:
 - **A recording stops by itself** after 60 seconds and when the app leaves the screen; `stop_recording` still returns what was recorded. Sound does not play, and recording does not start, while the app is off screen. Drive your own "3 seconds" with `tick` and call `stop_recording` when it runs out (`examples/services-check` does).
 - **`view` never does any of this**, and `effects` must not change what `view` shows.
 - **Not there**: streaming, upload or download progress, cancelling a request on the wire, cookies, recording levels, pausing or seeking a clip.
+
+### A live room
+
+A live room is a conversation on a media server (LiveKit): the people in it hear each other. It is for calls ([ADR 0038](architecture/0038-live-rooms.md)). Your own server hands the app a ticket for one person and one room, an address (`wss://...`) and a token; the app joins with it:
+
+```rust
+// In effects, when update has noted that the call is answered:
+out.join_live(
+    LiveJoin::new(ticket.url, ticket.token).speaker(true),   // microphone live; .microphone(false) joins muted
+    Message::Live,
+);
+
+// In update:
+Message::Live(LiveEvent::Connected) => self.sound = Sound::On,
+Message::Live(LiveEvent::ParticipantJoined(who)) => self.others.push(who.name),
+Message::Live(LiveEvent::Reconnecting) => self.sound = Sound::Reconnecting,
+Message::Live(LiveEvent::Disconnected(reason)) => { /* final: Left, Replaced, Hidden, Ended, Lost */ }
+Message::Live(LiveEvent::Failed(error)) => { /* final: PermissionDenied, Unsupported, Failed(text) */ }
+```
+
+- **It is the one request that is answered more than once.** Every event of the room is a message, in order. The last is always exactly one `Disconnected` or `Failed`, and nothing comes after it; by then the microphone is closed.
+- **Say you use it**, or the app is built without it and every join answers `Unsupported`: `services = ["live"]` under `[package.metadata.morningstar]` in the app's `Cargo.toml`. It costs the APK about 20 MB (LiveKit's client and WebRTC), which is why it is not in every app.
+- **One room at a time.** Joining another ends this one with `Disconnected(Replaced)`. If a late event could be mistaken for the current room's, number the joins: `move |event| Message::Live(serial, event)`.
+- **The microphone** is asked for at the join, also when joining muted. Refusal is `Failed(PermissionDenied)`: say so, and say that Settings can change it.
+- **Mute and loudspeaker**: `out.set_live_microphone(false)`, `out.set_live_speaker(true)`. Keep the buttons' state yourself; a room joined later should start as they stand (`LiveJoin::microphone`, `::speaker`).
+- **A room does not survive the background.** When the app leaves the screen the platform leaves the room and you get `Disconnected(Hidden)`. Join again when you are back: your `tick` only runs while the app is on screen, so the next tick after `Hidden` is the moment (`examples/barua-talk` does this).
+- **Leave it when the call ends**, whatever ended it: one place that compares "the call in progress" with "the room I asked for" after every message is harder to get wrong than a `leave_live` beside every way out. `forget_pending` leaves the room too.
+- **Never log or show the token.** `LiveJoin` does not print it; keep it out of your own `Debug` as well.
+- **Not there**: video, screen sharing, a room in the background, Bluetooth headsets, iOS (every join answers `Unsupported` there).
 
 **Testing** needs no server and no phone. `Ui::testing(app)` holds each request until the test answers it:
 
@@ -643,6 +674,7 @@ assert_eq!(ui.app().error.as_deref(), Some("the microphone is not allowed"));
 - `ui.answer_http`, `answer_recording_started`, `answer_recording`, `answer_playback` answer the **oldest** pending request of their kind and return `false` if there is none. `ui.resolve(id, ServiceResult::..)` answers a particular one, with `id` from `ui.pending_effects()`. The message is delivered at once.
 - **Stored values are in the driver's memory**: `out.store` shows in `ui.stored("device_id")`, `ui.set_stored(key, value)` seeds a later `out.load`. A `load`'s message is delivered at the start of the next `ui.frame(..)`, or by `ui.deliver_effects()`. What `setup.stored` sees is separate: it comes from the `HostState` given to `Frame::for_app_with_host`.
 - **A pretend server for a whole test**: `Ui::with_services(app, |request| match request { ServiceRequest::Http(r) if r.url.ends_with("/turn") => Some(ServiceResult::Http(Ok(HttpResponse::new(200)))), _ => None })`. `None` leaves that request pending. Its answers arrive with the next frame or `deliver_effects()`, not inside the `update` that asked, so the "sending" state can be asserted first.
+- **A live room is played by the test**: `ui.live_room()` is `Some(room)` once the app has joined, with `room.join.url`, `room.join.token` and the current `room.microphone` and `room.speaker`; `ui.live_event(LiveEvent::Connected)` makes something happen in it and delivers the message at once. Leaving, a second join and `forget_pending` end the room as a phone would (`Left`, `Replaced`), delivered with the next frame or `deliver_effects()`.
 - **With plain `Ui::new`** and no device (the screenshot example), every request fails as `Unsupported` at the next frame: screenshots show your error state unless you set the state up directly.
 - `examples/services-check` is a complete small application with these tests (`tests/script.rs`), and the thing to install on a phone to see each service work.
 

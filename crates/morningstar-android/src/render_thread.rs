@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use morningstar_runtime::{
     App, BarContent, Capitalization, Engine, FrameOutcome, HostState, ImeAction, Insets,
-    KeyboardType, NativeSurface, PointerEvent, ServiceCall, ServiceId, ServiceRequest,
+    KeyboardType, LiveEvent, NativeSurface, PointerEvent, ServiceCall, ServiceId, ServiceRequest,
     ServiceResult, SurfaceSize, TextInputCommand, TextInputEvent, TextInputRequest,
     byte_to_utf16_offset,
 };
@@ -322,6 +322,19 @@ fn run(messages: Receiver<Message>, host: &HostState) {
         }
     }
 
+    // The engine is about to go, and with it whoever would hear how a live
+    // room ends: the host is told to leave it, so that no room stays
+    // connected, microphone open, behind an application that is gone (ADR
+    // 0038). A host with no room ignores this.
+    if let Some(java) = java.as_ref() {
+        java.service_command(&ServiceCommand {
+            command: SERVICE_LIVE_LEAVE,
+            id: 0,
+            first: "",
+            second: "",
+            data: &[],
+        });
+    }
     engine.surface_destroyed();
     drop(window);
 }
@@ -448,6 +461,13 @@ const SERVICE_LOAD: i32 = 6;
 const SERVICE_SET_CLIPBOARD: i32 = 7;
 const SERVICE_READ_CLIPBOARD: i32 = 8;
 const SERVICE_ANNOUNCE: i32 = 9;
+// The live room (ADR 0038). Join: first the address, second the ticket,
+// data three bytes (microphone live, loudspeaker, speaking reports; zero
+// is no). Microphone and speaker: data one byte.
+const SERVICE_LIVE_JOIN: i32 = 10;
+const SERVICE_LIVE_LEAVE: i32 = 11;
+const SERVICE_LIVE_MICROPHONE: i32 = 12;
+const SERVICE_LIVE_SPEAKER: i32 = 13;
 
 /// How many times in a row the application may answer a request that
 /// could not be made with another request before the render thread moves
@@ -544,6 +564,21 @@ fn send_to_host(java: &Env, call: &ServiceCall) -> bool {
             if *assertive { "assertive" } else { "" },
             &[],
         ),
+        ServiceRequest::LiveJoin(join) => command(
+            SERVICE_LIVE_JOIN,
+            &join.url,
+            &join.token,
+            &[
+                u8::from(join.microphone),
+                u8::from(join.speaker),
+                u8::from(join.report_speaking),
+            ],
+        ),
+        ServiceRequest::LiveLeave => command(SERVICE_LIVE_LEAVE, "", "", &[]),
+        ServiceRequest::LiveMicrophone(live) => {
+            command(SERVICE_LIVE_MICROPHONE, "", "", &[u8::from(*live)])
+        }
+        ServiceRequest::LiveSpeaker(on) => command(SERVICE_LIVE_SPEAKER, "", "", &[u8::from(*on)]),
     }
 }
 
@@ -561,6 +596,21 @@ fn describe_request(request: &ServiceRequest) -> String {
             "announce chars={}{}",
             message.chars().count(),
             if *assertive { " assertive" } else { "" },
+        ),
+        // Never the address or the ticket.
+        ServiceRequest::LiveJoin(join) => format!(
+            "join live room microphone={} sound={}{}",
+            if join.microphone { "live" } else { "muted" },
+            if join.speaker {
+                "loudspeaker"
+            } else {
+                "earpiece"
+            },
+            if join.report_speaking {
+                " speaking reports"
+            } else {
+                ""
+            },
         ),
         other => other.name().to_owned(),
     }
@@ -596,6 +646,17 @@ fn describe_result(result: &ServiceResult) -> String {
         ServiceResult::Clipboard(text) => match text {
             Some(text) => format!("clipboard chars={}", text.chars().count()),
             None => "clipboard empty or not text".to_owned(),
+        },
+        // Never who: identities and names are people's.
+        ServiceResult::Live(event) => match event {
+            LiveEvent::Connected => "live room connected".to_owned(),
+            LiveEvent::ParticipantJoined(_) => "live room: someone is in it".to_owned(),
+            LiveEvent::ParticipantLeft(_) => "live room: someone left".to_owned(),
+            LiveEvent::Speaking(who) => format!("live room: {} speaking", who.len()),
+            LiveEvent::Reconnecting => "live room reconnecting".to_owned(),
+            LiveEvent::Reconnected => "live room reconnected".to_owned(),
+            LiveEvent::Disconnected(reason) => format!("live room over: {reason}"),
+            LiveEvent::Failed(error) => format!("live room: {error}"),
         },
     }
 }

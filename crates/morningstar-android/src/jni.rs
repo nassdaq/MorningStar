@@ -4,11 +4,11 @@
 //! render thread (an accessibility action included: ADR 0032). The one exception is `nativeSurfaceDestroyed`, which
 //! Android requires to block until the surface is no longer in use.
 //!
-//! They are called on the Android main thread, except the four that carry
+//! They are called on the Android main thread, except the five that carry
 //! the answer to a platform service request (`nativeHttpResult`,
-//! `nativeAudioResult`, `nativeLoadResult`, `nativeClipboardResult`; ADRs
-//! 0019 and 0025), which the host calls from whichever thread finished the
-//! work. That is sound: each
+//! `nativeAudioResult`, `nativeLoadResult`, `nativeClipboardResult`,
+//! `nativeLiveEvent`; ADRs 0019, 0025 and 0038), which the host calls from
+//! whichever thread finished the work. That is sound: each
 //! copies its arguments with the calling thread's own `JNIEnv*` and sends
 //! them through the channel to the render thread, whose sender may be used
 //! from any thread.
@@ -18,7 +18,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use morningstar_runtime::{
-    AudioError, CaretMove, HostState, HttpError, HttpResponse, ImeAction, Insets, Point,
+    AudioError, CaretMove, HostState, HttpError, HttpResponse, ImeAction, Insets, LiveEvent, Point,
     PointerEvent, PointerPhase, Recording, ServiceId, ServiceResult, SurfaceSize, TextEditState,
     TextInputEvent, utf16_to_byte_offset,
 };
@@ -564,5 +564,41 @@ pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_native
     render_thread::send(Message::Service {
         id: ServiceId(id.cast_unsigned()),
         result: ServiceResult::Clipboard(text),
+    });
+}
+
+/// Something happened in the live room joined by the request `id` (ADR
+/// 0038). Unlike the other results this one comes as often as there are
+/// events, the last of them a disconnection or a failure. `kind`, `code`,
+/// `first` and `second` are the four values of `LiveEvent::from_wire`
+/// (the `LIVE_*` constants of `MorningstarNative.java`).
+///
+/// # Safety
+/// Called by the JVM with a valid `JNIEnv*` and two `String`s (or null).
+/// May be called on any thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeLiveEvent(
+    env: JniEnv,
+    _class: JObject,
+    id: i64,
+    kind: i32,
+    code: i32,
+    first: JObject,
+    second: JObject,
+) {
+    // SAFETY: the JVM passes this thread's env and live String references
+    // (or null, which `java::string` reads as the empty string).
+    let (first, second) = unsafe { (java::string(env, first), java::string(env, second)) };
+    let (Ok(kind), Ok(code)) = (u32::try_from(kind), u32::try_from(code)) else {
+        return;
+    };
+    // A kind this library does not know comes from a newer host; ignoring
+    // is safer than guessing.
+    let Some(event) = LiveEvent::from_wire(kind, code, &first, &second) else {
+        return;
+    };
+    render_thread::send(Message::Service {
+        id: ServiceId(id.cast_unsigned()),
+        result: ServiceResult::Live(event),
     });
 }

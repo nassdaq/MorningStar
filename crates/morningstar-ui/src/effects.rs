@@ -8,14 +8,19 @@
 use std::collections::{HashMap, VecDeque};
 
 use morningstar_core::{
-    AudioClip, AudioError, HttpError, HttpRequest, HttpResponse, Recording, ServiceCall, ServiceId,
-    ServiceRequest, ServiceResult,
+    AudioClip, AudioError, HttpError, HttpRequest, HttpResponse, LiveDisconnect, LiveError,
+    LiveEvent, LiveJoin, Recording, ServiceCall, ServiceId, ServiceRequest, ServiceResult,
 };
 
 use crate::scroll::ScrollTo;
 
 /// Turns the platform's answer into the application's message.
 type Handler<M> = Box<dyn FnOnce(ServiceResult) -> M + Send>;
+
+/// Turns each event of a live room into the application's message. Unlike
+/// a [`Handler`] it is called as often as there are events, and dropped
+/// after the one that ends the room.
+type LiveHandler<M> = Box<dyn FnMut(LiveEvent) -> M + Send>;
 
 /// What a stand-in for the host answers to each request: `Some` to answer,
 /// `None` to leave it pending for the test to answer by hand.
@@ -25,7 +30,27 @@ const WRONG_KIND: &str = "the host answered with a result of the wrong kind";
 
 enum Entry<M> {
     Request(ServiceRequest, Option<Handler<M>>),
+    /// A live room to join: the one request with a handler that is called
+    /// more than once.
+    Join(LiveJoin, LiveHandler<M>),
     Forget,
+}
+
+/// The live room an application has joined under the test driver
+/// ([`Ui::live_room`](crate::Ui::live_room)): what it was joined with, and
+/// how the application has set the microphone and the loudspeaker since.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveRoom {
+    /// What the application joined with. `microphone` and `speaker` in it
+    /// are the values at the join; the two fields below are the current
+    /// ones.
+    pub join: LiveJoin,
+    /// Whether the microphone is live now.
+    pub microphone: bool,
+    /// Whether sound goes to the loudspeaker now.
+    pub speaker: bool,
+    /// Whether a [`LiveEvent::Connected`] has been delivered.
+    pub connected: bool,
 }
 
 /// The work an application wants started: requests to the platform, each
@@ -249,12 +274,74 @@ impl<M> Effects<M> {
         );
     }
 
+    /// Joins a live room (ADR 0038): a conversation on a media server,
+    /// where the people in it hear each other. `join` carries the server's
+    /// address and the ticket the application's own server handed out,
+    /// and says how the microphone and the loudspeaker start.
+    ///
+    /// Unlike every other request, this one is answered more than once:
+    /// `on_event` makes a message from each [`LiveEvent`] of the room, in
+    /// order, for as long as it lasts. The first is
+    /// [`LiveEvent::Connected`], unless the room cannot be joined; the
+    /// last is always exactly one [`LiveEvent::Disconnected`] or
+    /// [`LiveEvent::Failed`], after which the microphone is closed and
+    /// nothing more arrives.
+    ///
+    /// * The first time, the platform asks the user for the microphone,
+    ///   also when joining muted. A refusal is
+    ///   [`LiveError::PermissionDenied`].
+    /// * There is one room at a time: joining another ends this one with
+    ///   [`LiveDisconnect::Replaced`].
+    /// * A room does not outlive the screen: when the app goes to the
+    ///   background the host leaves it and the application is told
+    ///   [`LiveDisconnect::Hidden`]. It may join again when it is back.
+    /// * [`forget_pending`](Self::forget_pending) leaves the room as well
+    ///   as dropping its events: a room nobody listens to is never left
+    ///   connected.
+    /// * Where nothing can join (no host, an app built without the live
+    ///   service, iOS for now) the answer is [`LiveError::Unsupported`].
+    ///
+    /// ```ignore
+    /// out.join_live(LiveJoin::new(ticket.url, ticket.token).speaker(true), Message::Live);
+    /// // update: Message::Live(LiveEvent::Connected) => self.sound = Sound::On, ...
+    /// ```
+    pub fn join_live(
+        &mut self,
+        join: LiveJoin,
+        on_event: impl FnMut(LiveEvent) -> M + Send + 'static,
+    ) {
+        self.entries.push(Entry::Join(join, Box::new(on_event)));
+    }
+
+    /// Leaves the live room. There is no message of its own: the room's
+    /// events end with [`LiveDisconnect::Left`]. Nothing happens when no
+    /// room is joined.
+    pub fn leave_live(&mut self) {
+        self.push(ServiceRequest::LiveLeave, None);
+    }
+
+    /// Opens (`true`) or mutes the microphone in the live room. Muted, the
+    /// others hear nothing from this device. Nothing happens when no room
+    /// is joined. If the platform cannot mute, it ends the room
+    /// ([`LiveEvent::Failed`]) rather than leave the microphone open.
+    pub fn set_live_microphone(&mut self, live: bool) {
+        self.push(ServiceRequest::LiveMicrophone(live), None);
+    }
+
+    /// Sends the live room's sound to the loudspeaker (`true`) or the
+    /// earpiece. A headset that is connected keeps the sound either way.
+    /// Nothing happens when no room is joined.
+    pub fn set_live_speaker(&mut self, on: bool) {
+        self.push(ServiceRequest::LiveSpeaker(on), None);
+    }
+
     /// Gives up on every request made before this call that has not been
     /// answered yet: their messages will never arrive. The platform may
     /// still finish the work (a request already sent reaches the server),
     /// but its result is dropped. For leaving a screen or signing out;
     /// playback is not stopped by this, [`stop_playback`](Self::stop_playback)
-    /// does that.
+    /// does that. A live room is the exception: it is left, because its
+    /// events are what would have said that it is still connected.
     pub fn forget_pending(&mut self) {
         self.entries.push(Entry::Forget);
     }
@@ -290,6 +377,8 @@ struct Driver {
     /// Requests waiting for the test to answer them, oldest first.
     held: Vec<ServiceCall>,
     stored: HashMap<String, String>,
+    /// The live room that is joined, and the id of its join.
+    live: Option<(ServiceId, LiveRoom)>,
 }
 
 /// Everything [`Ui`](crate::Ui) keeps about effects.
@@ -299,6 +388,10 @@ pub(crate) struct EffectState<M> {
     next_id: u64,
     /// The requests still waiting for an answer.
     handlers: HashMap<u64, Handler<M>>,
+    /// The live rooms whose events are still wanted, by the id of their
+    /// join. One, except between joining a second room and hearing that
+    /// the first has ended.
+    rooms: HashMap<u64, LiveHandler<M>>,
     /// Requests made and not yet taken by a host.
     outbox: Vec<ServiceCall>,
     /// Answers that are known and not yet delivered: they are delivered at
@@ -320,6 +413,7 @@ impl<M> EffectState<M> {
             scratch: Effects::new(),
             next_id: 0,
             handlers: HashMap::new(),
+            rooms: HashMap::new(),
             outbox: Vec::new(),
             ready: VecDeque::new(),
             carrier: Carrier::Host { attached: false },
@@ -334,6 +428,7 @@ impl<M> EffectState<M> {
                 fake,
                 held: Vec::new(),
                 stored: HashMap::new(),
+                live: None,
             }),
             ..Self::new()
         }
@@ -357,6 +452,15 @@ impl<M> EffectState<M> {
         for entry in entries.drain(..) {
             match entry {
                 Entry::Forget => self.forget(),
+                Entry::Join(join, handler) => {
+                    self.next_id += 1;
+                    let id = ServiceId(self.next_id);
+                    self.rooms.insert(id.0, handler);
+                    self.dispatch(ServiceCall {
+                        id,
+                        request: ServiceRequest::LiveJoin(join),
+                    });
+                }
                 Entry::Request(request, handler) => {
                     self.next_id += 1;
                     let id = ServiceId(self.next_id);
@@ -412,6 +516,19 @@ impl<M> EffectState<M> {
         if let Carrier::Driver(driver) = &mut self.carrier {
             driver.held.clear();
         }
+        // A live room is not a request that merely finishes unheard: it
+        // would stay connected, microphone open, with nobody listening
+        // for its end. So giving up on it leaves it. (If its join never
+        // reached the host it was dropped just above and this leaves
+        // nothing, which a host ignores.)
+        if !self.rooms.is_empty() {
+            self.rooms.clear();
+            self.next_id += 1;
+            self.dispatch(ServiceCall {
+                id: ServiceId(self.next_id),
+                request: ServiceRequest::LiveLeave,
+            });
+        }
     }
 
     fn dispatch(&mut self, call: ServiceCall) {
@@ -439,6 +556,37 @@ impl<M> EffectState<M> {
                     .push_back((call.id, ServiceResult::Clipboard(text)));
             }
             ServiceRequest::StopPlayback => interrupt_playback(driver, &mut self.ready),
+            // The live room behaves as on a device: one at a time, and
+            // leaving it is what ends its events.
+            ServiceRequest::LiveLeave => {
+                end_live(driver, &mut self.ready, LiveDisconnect::Left);
+            }
+            ServiceRequest::LiveMicrophone(live) => {
+                if let Some((_, room)) = &mut driver.live {
+                    room.microphone = *live;
+                }
+            }
+            ServiceRequest::LiveSpeaker(on) => {
+                if let Some((_, room)) = &mut driver.live {
+                    room.speaker = *on;
+                }
+            }
+            ServiceRequest::LiveJoin(join) => {
+                end_live(driver, &mut self.ready, LiveDisconnect::Replaced);
+                driver.live = Some((
+                    call.id,
+                    LiveRoom {
+                        microphone: join.microphone,
+                        speaker: join.speaker,
+                        connected: false,
+                        join: join.clone(),
+                    },
+                ));
+                match (driver.fake)(&call.request) {
+                    Some(result) => self.ready.push_back((call.id, result)),
+                    None => driver.held.push(call),
+                }
+            }
             request => {
                 if matches!(request, ServiceRequest::Play(_)) {
                     // As on a device: a new clip replaces the one playing.
@@ -507,13 +655,56 @@ impl<M> EffectState<M> {
         if let Carrier::Driver(driver) = &mut self.carrier {
             driver.held.retain(|call| call.id != id);
         }
+        if self.rooms.contains_key(&id.0) {
+            return self.live_message(id, result);
+        }
         self.ready.retain(|(ready, _)| *ready != id);
         let handler = self.handlers.remove(&id.0)?;
         Some(handler(result))
     }
 
+    /// The message one event of the live room joined under `id` becomes.
+    /// The event that ends the room is the last: its handler is dropped
+    /// with it, so nothing that arrives afterwards under that id reaches
+    /// the application.
+    fn live_message(&mut self, id: ServiceId, result: ServiceResult) -> Option<M> {
+        let event = match result {
+            ServiceResult::Live(event) => event,
+            // A host that answers a join with something else has not
+            // joined anything the application could ever hear the end of.
+            _ => LiveEvent::Failed(LiveError::Failed(WRONG_KIND.to_owned())),
+        };
+        if let Carrier::Driver(driver) = &mut self.carrier
+            && let Some((joined, room)) = &mut driver.live
+            && *joined == id
+        {
+            if event.is_final() {
+                driver.live = None;
+            } else if event == LiveEvent::Connected {
+                room.connected = true;
+            }
+        }
+        if event.is_final() {
+            // Other events of this room that were waiting for a frame are
+            // not delivered after its end.
+            self.ready.retain(|(ready, _)| *ready != id);
+            let mut handler = self.rooms.remove(&id.0)?;
+            Some(handler(event))
+        } else {
+            self.rooms.get_mut(&id.0).map(|handler| handler(event))
+        }
+    }
+
+    /// The live room joined under the test driver, and the id of its join.
+    pub(crate) fn live(&self) -> Option<(ServiceId, &LiveRoom)> {
+        match &self.carrier {
+            Carrier::Driver(driver) => driver.live.as_ref().map(|(id, room)| (*id, room)),
+            Carrier::Host { .. } => None,
+        }
+    }
+
     pub(crate) fn waiting(&self) -> usize {
-        self.handlers.len()
+        self.handlers.len() + self.rooms.len()
     }
 
     pub(crate) fn held(&self) -> &[ServiceCall] {
@@ -563,4 +754,17 @@ fn interrupt_playback(driver: &mut Driver, ready: &mut VecDeque<(ServiceId, Serv
         }
         !playing
     });
+}
+
+/// What a host does to the room that is joined when the application leaves
+/// it or joins another: its events end, with the reason.
+fn end_live(
+    driver: &mut Driver,
+    ready: &mut VecDeque<(ServiceId, ServiceResult)>,
+    reason: LiveDisconnect,
+) {
+    if let Some((id, _)) = driver.live.take() {
+        driver.held.retain(|call| call.id != id);
+        ready.push_back((id, ServiceResult::Live(LiveEvent::Disconnected(reason))));
+    }
 }

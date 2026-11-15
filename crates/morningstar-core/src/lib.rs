@@ -39,6 +39,7 @@ pub use semantics::{
 };
 pub use services::{
     AudioClip, AudioError, DEFAULT_HTTP_TIMEOUT, HostState, HttpError, HttpMethod, HttpRequest,
-    HttpResponse, MAX_HTTP_RESPONSE_BYTES, MAX_RECORDING_DURATION, NO_INSTALL_ID, Recording,
-    ServiceCall, ServiceId, ServiceRequest, ServiceResult,
+    HttpResponse, LiveDisconnect, LiveError, LiveEvent, LiveJoin, LiveParticipant,
+    MAX_HTTP_RESPONSE_BYTES, MAX_RECORDING_DURATION, NO_INSTALL_ID, Recording, ServiceCall,
+    ServiceId, ServiceRequest, ServiceResult,
 };

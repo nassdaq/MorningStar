@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Platform services (ADR 0019). INTERNET is granted at install.
          RECORD_AUDIO is asked of the user the first time the application
@@ -13,6 +14,26 @@
     <uses-feature
         android:name="android.hardware.microphone"
         android:required="false" />
+
+    <!-- The live room (ADR 0038) is voice only. LiveKit's client, which is
+         in the APK only of an app that declares the service, brings a
+         manifest that also asks for the camera, for screen sharing in a
+         foreground service and (up to Android 11) for Bluetooth, and with
+         them tells a store that the device must have a camera and
+         Bluetooth. None of that is used, so none of it is declared: these
+         four lines take them out of the merged manifest, and take out
+         nothing in an app without the service, where they are not there.
+         What LiveKit's manifest leaves in such an app is
+         ACCESS_NETWORK_STATE (to notice a network change and reconnect)
+         and MODIFY_AUDIO_SETTINGS (the call's audio mode and the
+         loudspeaker); neither is asked of the user. A Bluetooth headset is
+         therefore not used by a live room in this version. -->
+    <uses-permission android:name="android.permission.CAMERA" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
+        tools:node="remove" />
+    <uses-permission android:name="android.permission.BLUETOOTH" tools:node="remove" />
 
     <!-- enableOnBackInvokedCallback: from API 33 the system's Back goes to
          the callback MorningstarActivity registers, on every release rather

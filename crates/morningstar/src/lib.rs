@@ -41,10 +41,12 @@ pub use morningstar_runtime::{RasterPicture, SvgAsset, SvgError, SvgErrorKind, S
 pub use morningstar_runtime::{BarContent, CaretMove, SystemBars};
 // Platform services (ADR 0019): the data of a request to the device and of
 // its answer. Applications reach them through `ui::Effects`; a low-level
-// `App` through `App::service_requests` and `App::service_result`.
+// `App` through `App::service_requests` and `App::service_result`. The
+// `Live*` types are the live room's (ADR 0038).
 pub use morningstar_runtime::{
-    AudioClip, AudioError, HostState, HttpError, HttpMethod, HttpRequest, HttpResponse, Recording,
-    ServiceCall, ServiceId, ServiceRequest, ServiceResult,
+    AudioClip, AudioError, HostState, HttpError, HttpMethod, HttpRequest, HttpResponse,
+    LiveDisconnect, LiveError, LiveEvent, LiveJoin, LiveParticipant, Recording, ServiceCall,
+    ServiceId, ServiceRequest, ServiceResult,
 };
 
 /// The declarative UI layer: widgets, layout, state and events.

@@ -61,6 +61,18 @@ fn prints_what_the_build_scripts_read_one_value_per_line() {
         "dev.morningstar.hello\nMorningstar\nhello_gpu\n"
     );
 
+    // The opt-in services (ADR 0038) are the last line build-android.sh
+    // reads: empty for an app that declares none, which is most.
+    let output = run(&["hello-gpu", "--print", "lib", "--print", "services"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "hello_gpu\n\n");
+    let output = run(&["barua-talk", "--print", "lib", "--print", "services"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "barua_talk\nlive\n");
+    let output = run(&["atlas", "--print", "services"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "\n");
+
     // An app that declares only a name gets the default id; iOS cannot
     // have the underscore.
     let output = run(&[

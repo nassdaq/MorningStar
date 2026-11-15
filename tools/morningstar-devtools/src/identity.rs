@@ -8,7 +8,13 @@
 //! icon = "assets/icon.png"
 //! icon_foreground = "assets/icon-foreground.png"
 //! icon_background = "#0E0E0E"
+//! services = ["live"]
 //! ```
+//!
+//! `services` (ADR 0038) lists the platform services the app opts into:
+//! the ones that cost every app that carries them something (a large
+//! native library, in the case of `live`), and are therefore built into
+//! the host only for an app that says it uses them.
 //!
 //! Every key is optional, and so is the table. The manifest is read by
 //! Cargo, not here: [`cargo_metadata`] runs `cargo metadata` and
@@ -25,8 +31,14 @@ use std::process::Command;
 use crate::image::ImageError;
 use crate::json::{self, Value};
 
-/// The keys of `[package.metadata.morningstar]`.
+/// The keys of `[package.metadata.morningstar]` whose value is a string.
 const KEYS: [&str; 5] = ["name", "id", "icon", "icon_foreground", "icon_background"];
+
+/// The key whose value is a list: the opt-in platform services.
+const SERVICES_KEY: &str = "services";
+
+/// The opt-in platform services there are. `live`: live rooms (ADR 0038).
+pub const SERVICES: [&str; 1] = ["live"];
 
 /// Where an icon is looked for when the manifest does not say.
 const DEFAULT_ICON: &str = "assets/icon.png";
@@ -51,6 +63,8 @@ pub enum IconError {
     },
     /// A key this tool does not know: most likely a misspelling.
     UnknownKey { package: String, key: String },
+    /// `services` is not a list of the names of services.
+    BadServices { package: String, reason: String },
     /// A key whose value is not a string.
     NotAString {
         package: String,
@@ -108,8 +122,13 @@ impl fmt::Display for IconError {
             ),
             Self::UnknownKey { package, key } => write!(
                 f,
-                "unknown key `{key}` in {TABLE} of `{package}` (the keys are: {})",
+                "unknown key `{key}` in {TABLE} of `{package}` (the keys are: {}, {SERVICES_KEY})",
                 KEYS.join(", ")
+            ),
+            Self::BadServices { package, reason } => write!(
+                f,
+                "`{SERVICES_KEY}` in {TABLE} of `{package}` {reason} (the services are: {})",
+                SERVICES.join(", ")
             ),
             Self::NotAString {
                 package,
@@ -195,6 +214,9 @@ pub struct Identity {
     pub icon_foreground: Option<PathBuf>,
     /// The adaptive background colour as sRGB bytes, if given.
     pub icon_background: Option<[u8; 3]>,
+    /// The opt-in platform services the app declares (ADR 0038), each one
+    /// of [`SERVICES`], in that order and without repeats. Default: none.
+    pub services: Vec<&'static str>,
 }
 
 impl Identity {
@@ -266,7 +288,35 @@ impl Identity {
             }
         };
         let mut values: [Option<&str>; KEYS.len()] = [None; KEYS.len()];
+        let mut declared: Vec<&str> = Vec::new();
         for (key, value) in table {
+            if key == SERVICES_KEY {
+                let bad = |reason: String| IconError::BadServices {
+                    package: package.to_owned(),
+                    reason,
+                };
+                let Some(list) = value.as_array() else {
+                    return Err(bad(format!(
+                        "must be a list of names, such as [\"live\"], not {}",
+                        value.kind()
+                    )));
+                };
+                for item in list {
+                    match item.as_str() {
+                        Some(name) if SERVICES.contains(&name) => declared.push(name),
+                        Some(name) => {
+                            return Err(bad(format!("names `{name}`, which is not a service")));
+                        }
+                        None => {
+                            return Err(bad(format!(
+                                "must hold names in quotes, not {}",
+                                item.kind()
+                            )));
+                        }
+                    }
+                }
+                continue;
+            }
             let Some(index) = KEYS.iter().position(|known| known == key) else {
                 return Err(IconError::UnknownKey {
                     package: package.to_owned(),
@@ -316,6 +366,11 @@ impl Identity {
             None => None,
         };
         let icon_background = icon_background.map(parse_colour).transpose()?;
+        // In the order of `SERVICES`, each once, however the app wrote them.
+        let services = SERVICES
+            .into_iter()
+            .filter(|service| declared.contains(service))
+            .collect();
 
         Ok(Self {
             package: package.to_owned(),
@@ -326,6 +381,7 @@ impl Identity {
             icon,
             icon_foreground,
             icon_background,
+            services,
         })
     }
 
@@ -492,6 +548,47 @@ pub(crate) mod tests {
         assert_eq!(identity.id, "com.example.fundi_desk");
         assert_eq!(identity.bundle_id(), "com.example.fundi-desk");
         assert_eq!(identity.icon_background, Some([0x1E, 0x84, 0x16]));
+    }
+
+    #[test]
+    fn an_app_opts_into_services_by_naming_them() {
+        assert!(identity("null").unwrap().services.is_empty());
+        assert!(
+            identity(r#"{"morningstar":{"name":"A"}}"#)
+                .unwrap()
+                .services
+                .is_empty()
+        );
+        assert!(
+            identity(r#"{"morningstar":{"services":[]}}"#)
+                .unwrap()
+                .services
+                .is_empty()
+        );
+        let app = identity(r#"{"morningstar":{"name":"A","services":["live"]}}"#).unwrap();
+        assert_eq!(app.services, ["live"]);
+        assert_eq!(app.name, "A");
+        // Named twice is still built in once.
+        let app = identity(r#"{"morningstar":{"services":["live","live"]}}"#).unwrap();
+        assert_eq!(app.services, ["live"]);
+    }
+
+    #[test]
+    fn a_service_that_does_not_exist_or_is_not_a_name_is_refused() {
+        for (metadata, expected) in [
+            (r#"{"morningstar":{"services":["video"]}}"#, "names `video`"),
+            (r#"{"morningstar":{"services":"live"}}"#, "not a string"),
+            (r#"{"morningstar":{"services":[true]}}"#, "not a boolean"),
+            (
+                r#"{"morningstar":{"services":{"live":true}}}"#,
+                "must be a list",
+            ),
+        ] {
+            let error = identity(metadata).expect_err(metadata).to_string();
+            assert!(error.contains(expected), "{metadata}: {error}");
+            assert!(error.contains("`services`"), "{error}");
+            assert!(error.contains("the services are: live"), "{error}");
+        }
     }
 
     #[test]

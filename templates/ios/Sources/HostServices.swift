@@ -12,6 +12,7 @@ import UIKit
 
 /// The platform services an application can ask for: HTTP requests,
 /// recording from the microphone, playing a clip, and a few stored values.
+/// The live room (ADR 0038) is answered "not available on iOS yet".
 ///
 /// `HostViewController` owns one. After every call into the engine it calls
 /// `drain(_:)`, which takes the application's requests and starts the work;
@@ -197,6 +198,27 @@ final class HostServices: NSObject, URLSessionDataDelegate, AVAudioRecorderDeleg
                         morningstar_ios_clipboard_result(engine, id, false, nil)
                     }
                 }
+            // The live room (ADR 0038). NOT COMPILED, like the rest of this
+            // file, and not implemented: iOS has no live rooms yet. The
+            // join is refused at once, honestly, so that the application
+            // shows "not available" instead of a call that never connects.
+            // The address (text1) and the ticket (text2) are neither used
+            // nor logged. What an implementation needs is in the ADR:
+            // LiveKit's Swift client, an AVAudioSession in .playAndRecord
+            // with mode .voiceChat for the length of the room, and the
+            // microphone question this class already asks for recording.
+            case MORNINGSTAR_SERVICE_LIVE_JOIN:
+                NSLog("%@", "morningstar: live: join id=\(id) refused: live rooms are not available on iOS yet")
+                answer { engine in
+                    morningstar_ios_live_event(
+                        engine, id, UInt32(MORNINGSTAR_LIVE_FAILED),
+                        UInt32(MORNINGSTAR_LIVE_ERROR_UNSUPPORTED), nil, nil)
+                }
+            // No room is ever joined, so there is none to leave, to mute or
+            // to route; none of the three is answered.
+            case MORNINGSTAR_SERVICE_LIVE_LEAVE, MORNINGSTAR_SERVICE_LIVE_MICROPHONE,
+                MORNINGSTAR_SERVICE_LIVE_SPEAKER:
+                break
             default:
                 // A library newer than this host. Nothing here knows whether
                 // the request expects an answer, so none can be given.
