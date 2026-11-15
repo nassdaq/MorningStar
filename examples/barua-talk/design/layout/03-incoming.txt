@@ -1,0 +1,29 @@
+div layout x=0 y=0 w=390 h=844 font=Inter 16px/normal 400
+  img layout x=-60 y=-60 w=510 h=964 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+  div layout x=0 y=0 w=390 h=844 font=Inter 16px/normal 400
+    span layout x=118.69 y=96 w=152.63 h=31.5 font=Inter 13px/normal 400
+      svg bounds x=132.69 y=104.75 w=14 h=14 font=Inter 13px/normal 400
+      text "In-app video call" line-boxes [x=154.69 y=104 w=102.63 h=15.5] drawn-with Inter (Inter-Regular, web font, 17 glyphs)
+    div layout x=102 y=183.5 w=186 h=186 font=Inter 16px/normal 400
+      div layout x=118 y=199.5 w=154 h=154 font=Inter 16px/normal 400
+        img layout x=133 y=214.5 w=124 h=124 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt="Baraka Mushi"
+    span layout x=97.96 y=401.5 w=194.07 h=38.5 font="Space Grotesk" 30px/normal 600
+      text "Baraka Mushi" line-boxes [x=97.96 y=401.5 w=194.07 h=38.5] drawn-with Space Grotesk Light (SpaceGrotesk-Light_wght2580000, web font, 12 glyphs)
+    span layout x=149.11 y=448 w=91.77 h=18 font=Inter 15px/normal 400
+      text "Anakupigia…" line-boxes [x=149.11 y=448 w=91.77 h=18] drawn-with Inter (Inter-Regular, web font, 11 glyphs)
+    div layout x=195 y=466 w=0 h=144.5 font=Inter 16px/normal 400
+    div layout x=24 y=610.5 w=342 h=48 font=Inter 16px/normal 400
+      svg bounds x=40 y=624.5 w=20 h=20 font=Inter 16px/normal 400
+      span layout x=72 y=626 w=196.23 h=17 font=Inter 14px/normal 400
+        text "Reply with a message instead" line-boxes [x=72 y=626 w=196.23 h=17] drawn-with Inter (Inter-Regular, web font, 28 glyphs)
+    div layout x=24 y=690.5 w=342 h=97.5 font=Inter 16px/normal 400
+      div layout x=52 y=690.5 w=72 h=97.5 font=Inter 16px/normal 400
+        a layout x=52 y=690.5 w=72 h=72 font=Inter 16px/normal 400 aria="Decline call"
+          svg bounds x=73 y=711.5 w=30 h=30 font=Inter 16px/normal 400
+        span layout x=65.02 y=772.5 w=45.95 h=15.5 font=Inter 13px/normal 400
+          text "Decline" line-boxes [x=65.02 y=772.5 w=45.95 h=15.5] drawn-with Inter (Inter-Regular, web font, 7 glyphs)
+      div layout x=266 y=690.5 w=72 h=97.5 font=Inter 16px/normal 400
+        a layout x=266 y=690.5 w=72 h=72 font=Inter 16px/normal 400 aria="Accept call"
+          svg bounds x=287 y=711.5 w=30 h=30 font=Inter 16px/normal 400
+        span layout x=280.19 y=772.5 w=43.62 h=15.5 font=Inter 13px/normal 400
+          text "Accept" line-boxes [x=280.19 y=772.5 w=43.62 h=15.5] drawn-with Inter (Inter-Regular, web font, 6 glyphs)

@@ -1,0 +1,118 @@
+div layout x=0 y=0 w=390 h=844 font=Inter 16px/normal 400
+  div layout x=24 y=56 w=342 h=48 font=Inter 16px/normal 400
+    img layout x=24 y=56 w=48 h=48 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt="Neema"
+    div layout x=84 y=59 w=170 h=42 font=Inter 16px/normal 400
+      span layout x=84 y=59 w=170 h=14.5 font=Inter 12px/normal 400
+        text "Habari za asubuhi" line-boxes [x=84 y=59 w=102.13 h=14.5] drawn-with Inter (Inter-Regular, web font, 17 glyphs)
+      span layout x=84 y=75.5 w=170 h=25.5 font="Space Grotesk" 20px/normal 600
+        text "Neema" line-boxes [x=84 y=75.5 w=65.25 h=25.5] drawn-with Space Grotesk Light (SpaceGrotesk-Light_wght2580000, web font, 5 glyphs)
+    button layout x=266 y=58 w=44 h=44 font=Inter 13.3333px/normal 400 aria="Search"
+      svg bounds x=278 y=70 w=20 h=20 font=Inter 13.3333px/normal 400
+    button layout x=322 y=58 w=44 h=44 font=Inter 13.3333px/normal 400 aria="Dial a phone number"
+      svg bounds x=334 y=70 w=20 h=20 font=Inter 13.3333px/normal 400
+  div layout x=24 y=132 w=342 h=17 font=Inter 16px/normal 400
+    span layout x=24 y=132 w=72.48 h=17 font=Inter 14px/normal 400
+      text "Live rooms" line-boxes [x=24 y=132 w=72.48 h=17] drawn-with Inter (Inter-Regular, web font, 10 glyphs)
+    span layout x=257.73 y=134 w=108.27 h=14.5 font=Inter 12px/normal 400
+      text "Free, however long" line-boxes [x=257.73 y=134 w=108.27 h=14.5] drawn-with Inter (Inter-Regular, web font, 18 glyphs)
+  div layout x=24 y=163 w=342 h=82.5 font=Inter 16px/normal 400
+    div layout x=24 y=163 w=60 h=82.5 font=Inter 16px/normal 400
+      button layout x=24 y=163 w=60 h=60 font=Inter 13.3333px/normal 400 aria="Create a room"
+        svg bounds x=43 y=182 w=22 h=22 font=Inter 13.3333px/normal 400
+      span layout x=24.88 y=231 w=58.24 h=14.5 font=Inter 12px/normal 400
+        text "New room" line-boxes [x=24.88 y=231 w=58.24 h=14.5] drawn-with Inter (Inter-Regular, web font, 8 glyphs)
+    div layout x=100 y=163 w=60 h=82.5 font=Inter 16px/normal 400
+      img layout x=100 y=163 w=60 h=60 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+      span layout x=107.34 y=231 w=45.32 h=14.5 font=Inter 12px/normal 400
+        text "Support" line-boxes [x=107.34 y=231 w=45.32 h=14.5] drawn-with Inter (Inter-Regular, web font, 7 glyphs)
+    div layout x=176 y=163 w=60 h=82.5 font=Inter 16px/normal 400
+      img layout x=176 y=163 w=60 h=60 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+      span layout x=190.28 y=231 w=31.43 h=14.5 font=Inter 12px/normal 400
+        text "Clinic" line-boxes [x=190.28 y=231 w=31.43 h=14.5] drawn-with Inter (Inter-Regular, web font, 6 glyphs)
+    div layout x=252 y=163 w=60 h=82.5 font=Inter 16px/normal 400
+      img layout x=252 y=163 w=60 h=60 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+      span layout x=267.45 y=231 w=29.09 h=14.5 font=Inter 12px/normal 400
+        text "Duka" line-boxes [x=267.45 y=231 w=29.09 h=14.5] drawn-with Inter (Inter-Regular, web font, 4 glyphs)
+    div layout x=328 y=163 w=60 h=82.5 font=Inter 16px/normal 400
+      img layout x=328 y=163 w=60 h=60 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+      span layout x=342.4 y=231 w=31.2 h=14.5 font=Inter 12px/normal 400
+        text "Juma" line-boxes [x=342.4 y=231 w=31.2 h=14.5] drawn-with Inter (Inter-Regular, web font, 4 glyphs)
+  div layout x=24 y=269.5 w=342 h=52 font=Inter 16px/normal 400
+    button layout x=28 y=273.5 w=108.66 h=44 font=Inter 14px/normal 600
+      text "All" line-boxes [x=59.57 y=287 w=17.52 h=17] drawn-with Inter (Inter-Regular_SemiBold, web font, 3 glyphs)
+      span layout x=85.09 y=285.5 w=20 h=20 font=Inter 12px/normal 600
+        text "6" line-boxes [x=91.24 y=288.25 w=7.68 h=14.5] drawn-with Inter (Inter-Regular_SemiBold, web font, 1 glyphs)
+    button layout x=140.66 y=273.5 w=108.67 h=44 font=Inter 14px/normal 500
+      text "Rooms" line-boxes [x=172.11 y=287 w=45.77 h=17] drawn-with Inter (Inter-Regular_Medium, web font, 5 glyphs)
+    button layout x=253.34 y=273.5 w=108.66 h=44 font=Inter 14px/normal 500
+      text "Calls" line-boxes [x=291.26 y=287 w=32.81 h=17] drawn-with Inter (Inter-Regular_Medium, web font, 5 glyphs)
+  div layout x=24 y=333.5 w=342 h=380 font=Inter 16px/normal 400
+    a layout x=24 y=333.5 w=342 h=76 font=Inter 16px/normal 400
+      img layout x=24 y=345.5 w=52 h=52 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+      div layout x=90 y=352 w=228.66 h=39 font=Inter 16px/normal 400
+        span layout x=90 y=352 w=228.66 h=19.5 font=Inter 16px/normal 600
+          text "Baraka Mushi" line-boxes [x=90 y=352 w=104.78 h=19.5] drawn-with Inter (Inter-Regular_SemiBold, web font, 12 glyphs)
+        span layout x=90 y=375.5 w=228.66 h=15.5 font=Inter 13px/normal 400
+          text "Nipigie ukipata nafasi" line-boxes [x=90 y=375.5 w=131.94 h=15.5] drawn-with Inter (Inter-Regular, web font, 22 glyphs)
+      div layout x=332.66 y=351.25 w=33.34 h=40.5 font=Inter 16px/normal 400
+        span layout x=332.66 y=351.25 w=33.34 h=14.5 font=Inter 12px/normal 400
+          text "08:02" line-boxes [x=332.66 y=351.25 w=33.34 h=14.5] drawn-with Inter (Inter-Regular, web font, 5 glyphs)
+        span layout x=346 y=371.75 w=20 h=20 font=Inter 12px/normal 600
+          text "2" line-boxes [x=352.26 y=374.5 w=7.48 h=14.5] drawn-with Inter (Inter-Regular_SemiBold, web font, 1 glyphs)
+    a layout x=24 y=409.5 w=342 h=76 font=Inter 16px/normal 400
+      div layout x=24 y=421.5 w=52 h=52 font=Inter 16px/normal 400
+        img layout x=28 y=425.5 w=21 h=21 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+        img layout x=51 y=425.5 w=21 h=21 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+        img layout x=28 y=448.5 w=21 h=21 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+        span layout x=51 y=448.5 w=21 h=21 font=Inter 11px/normal 400
+          text "+1" line-boxes [x=55.62 y=452.5 w=11.76 h=13] drawn-with Inter (Inter-Regular, web font, 2 glyphs)
+      div layout x=90 y=428 w=229.64 h=39 font=Inter 16px/normal 400
+        span layout x=90 y=428 w=229.64 h=19.5 font=Inter 16px/normal 600
+          text "Support desk" line-boxes [x=90 y=428 w=103.59 h=19.5] drawn-with Inter (Inter-Regular_SemiBold, web font, 12 glyphs)
+        span layout x=90 y=451.5 w=229.64 h=15.5 font=Inter 13px/normal 400
+          text "Zawadi: Picha ya duka jana usiku" line-boxes [x=90 y=451.5 w=202.99 h=15.5] drawn-with Inter (Inter-Regular, web font, 32 glyphs)
+      div layout x=333.64 y=427.25 w=32.36 h=40.5 font=Inter 16px/normal 400
+        span layout x=333.64 y=427.25 w=32.36 h=14.5 font=Inter 12px/normal 400
+          text "07:48" line-boxes [x=333.64 y=427.25 w=32.36 h=14.5] drawn-with Inter (Inter-Regular, web font, 5 glyphs)
+        span layout x=346 y=447.75 w=20 h=20 font=Inter 12px/normal 600
+          text "4" line-boxes [x=352 y=450.5 w=8 h=14.5] drawn-with Inter (Inter-Regular_SemiBold, web font, 1 glyphs)
+    a layout x=24 y=485.5 w=342 h=76 font=Inter 16px/normal 400
+      img layout x=24 y=497.5 w=52 h=52 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+      div layout x=90 y=504 w=234.58 h=39 font=Inter 16px/normal 400
+        span layout x=90 y=504 w=234.58 h=19.5 font=Inter 16px/normal 600
+          text "Dr. Asha Mrema" line-boxes [x=90 y=504 w=122.84 h=19.5] drawn-with Inter (Inter-Regular_SemiBold, web font, 14 glyphs)
+        span layout x=90 y=527.5 w=234.58 h=15.5 font=Inter 13px/normal 400
+          svg bounds x=90 y=528.25 w=14 h=14 font=Inter 13px/normal 400
+          text "Video call · 12 min" line-boxes [x=110 y=527.5 w=110.41 h=15.5] drawn-with Inter (Inter-Regular, web font, 19 glyphs)
+      span layout x=338.58 y=503.5 w=27.42 h=14.5 font=Inter 12px/normal 400
+        text "Jana" line-boxes [x=338.58 y=503.5 w=27.42 h=14.5] drawn-with Inter (Inter-Regular, web font, 4 glyphs)
+    a layout x=24 y=561.5 w=342 h=76 font=Inter 16px/normal 400
+      img layout x=24 y=573.5 w=52 h=52 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+      div layout x=90 y=580 w=234.58 h=39 font=Inter 16px/normal 400
+        span layout x=90 y=580 w=234.58 h=19.5 font=Inter 16px/normal 600
+          text "Mzee Hamisi" line-boxes [x=90 y=580 w=99.16 h=19.5] drawn-with Inter (Inter-Regular_SemiBold, web font, 11 glyphs)
+        span layout x=90 y=603.5 w=234.58 h=15.5 font=Inter 13px/normal 400
+          svg bounds x=90 y=604.25 w=14 h=14 font=Inter 13px/normal 400
+          text "Phone call · +255 712 345 678" line-boxes [x=110 y=603.5 w=185.39 h=15.5] drawn-with Inter (Inter-Regular, web font, 29 glyphs)
+      span layout x=338.58 y=579.5 w=27.42 h=14.5 font=Inter 12px/normal 400
+        text "Jana" line-boxes [x=338.58 y=579.5 w=27.42 h=14.5] drawn-with Inter (Inter-Regular, web font, 4 glyphs)
+    a layout x=24 y=637.5 w=342 h=76 font=Inter 16px/normal 400
+      img layout x=24 y=649.5 w=52 h=52 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+      div layout x=90 y=656 w=224.78 h=39 font=Inter 16px/normal 400
+        span layout x=90 y=656 w=224.78 h=19.5 font=Inter 16px/normal 600
+          text "Juma Kileo" line-boxes [x=90 y=656 w=85.68 h=19.5] drawn-with Inter (Inter-Regular_SemiBold, web font, 10 glyphs)
+        span layout x=90 y=679.5 w=224.78 h=15.5 font=Inter 13px/normal 400
+          text "Sawa, tutaonana kesho" line-boxes [x=90 y=679.5 w=142.72 h=15.5] drawn-with Inter (Inter-Regular, web font, 21 glyphs)
+      span layout x=328.78 y=655.5 w=37.22 h=14.5 font=Inter 12px/normal 400
+        text "Ijumaa" line-boxes [x=328.78 y=655.5 w=37.22 h=14.5] drawn-with Inter (Inter-Regular, web font, 6 glyphs)
+  div layout x=0 y=748 w=390 h=96 font=Inter 16px/normal 400
+    button layout x=26.59 y=766.5 w=48 h=48 font=Inter 13.3333px/normal 400 aria="Home"
+      svg bounds x=38.59 y=778.5 w=24 h=24 font=Inter 13.3333px/normal 400
+    button layout x=95.8 y=766.5 w=48 h=48 font=Inter 13.3333px/normal 400 aria="Notifications"
+      svg bounds x=107.8 y=778.5 w=24 h=24 font=Inter 13.3333px/normal 400
+    button layout x=164.99 y=760.5 w=60 h=60 font=Inter 13.3333px/normal 400 aria="Start a call or room"
+      svg bounds x=181.99 y=777.5 w=26 h=26 font=Inter 13.3333px/normal 400
+    button layout x=246.2 y=766.5 w=48 h=48 font=Inter 13.3333px/normal 400 aria="Calls"
+      svg bounds x=258.2 y=778.5 w=24 h=24 font=Inter 13.3333px/normal 400
+    button layout x=315.39 y=766.5 w=48 h=48 font=Inter 13.3333px/normal 400 aria="Contacts"
+      svg bounds x=327.39 y=778.5 w=24 h=24 font=Inter 13.3333px/normal 400

@@ -15,6 +15,7 @@ members = [
     "examples/fundidesk",
     "examples/callready",
     "examples/atlas",
+    "examples/barua-talk",
     "examples/services-check",
     "tools/morningstar-devtools",
 ]

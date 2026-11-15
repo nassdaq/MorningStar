@@ -1,0 +1,57 @@
+div layout x=0 y=0 w=390 h=844 font=Inter 16px/normal 400
+  div layout x=20 y=56 w=350 h=63 font=Inter 16px/normal 400
+    a layout x=10 y=56 w=44 h=44 font=Inter 16px/normal 400 aria="Back to home"
+      svg bounds x=21 y=67 w=22 h=22 font=Inter 16px/normal 400
+    img layout x=64 y=56 w=44 h=44 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+    div layout x=118 y=59 w=152 h=38 font=Inter 16px/normal 400
+      span layout x=118 y=59 w=152 h=21.5 font="Space Grotesk" 17px/normal 600
+        text "Support desk" line-boxes [x=118 y=59 w=110.85 h=21.5] drawn-with Space Grotesk Light (SpaceGrotesk-Light_wght2580000, web font, 12 glyphs)
+      span layout x=118 y=82.5 w=152 h=14.5 font=Inter 12px/normal 400
+        text "4 active" line-boxes [x=118 y=82.5 w=45.06 h=14.5] drawn-with Inter (Inter-Regular, web font, 8 glyphs)
+    a layout x=280 y=56 w=44 h=44 font=Inter 16px/normal 400 aria="Add a phone call to this room"
+      svg bounds x=291 y=67 w=22 h=22 font=Inter 16px/normal 400
+    a layout x=334 y=56 w=44 h=44 font=Inter 16px/normal 400 aria="Start video in this room"
+      svg bounds x=345 y=67 w=22 h=22 font=Inter 16px/normal 400
+  div layout x=20 y=139 w=350 h=486 font=Inter 16px/normal 400
+    div layout x=20 y=139 w=350 h=93.5 font=Inter 16px/normal 400
+      img layout x=20 y=139 w=36 h=36 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+      div layout x=66 y=139 w=251.91 h=93.5 font=Inter 16px/normal 400
+        div layout x=80 y=151 w=223.91 h=15.5 font=Inter 16px/normal 400
+          span layout x=80 y=151 w=85.13 h=15.5 font=Inter 13px/normal 600
+            text "Baraka Mushi" line-boxes [x=80 y=151 w=85.13 h=15.5] drawn-with Inter (Inter-Regular_SemiBold, web font, 12 glyphs)
+          span layout x=173.13 y=152 w=29.58 h=14.5 font=Inter 12px/normal 400
+            text "07:41" line-boxes [x=173.13 y=152 w=29.58 h=14.5] drawn-with Inter (Inter-Regular, web font, 5 glyphs)
+        div layout x=80 y=176.5 w=223.91 h=44 font=Inter 16px/normal 400
+          button layout x=80 y=176.5 w=44 h=44 font=Inter 13.3333px/normal 400 aria="Play voice message"
+            svg bounds x=93 y=189.5 w=18 h=18 font=Inter 13.3333px/normal 400
+          svg bounds x=136 y=182.5 w=130 h=32 font=Inter 16px/normal 400
+          span layout x=278 y=191.25 w=25.91 h=14.5 font=Inter 12px/normal 400
+            text "0:24" line-boxes [x=278 y=191.25 w=25.91 h=14.5] drawn-with Inter (Inter-Regular, web font, 4 glyphs)
+    div layout x=20 y=248.5 w=350 h=247.5 font=Inter 16px/normal 400
+      img layout x=20 y=248.5 w=36 h=36 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+      div layout x=66 y=248.5 w=260 h=247.5 font=Inter 16px/normal 400
+        div layout x=78 y=260.5 w=236 h=15.5 font=Inter 16px/normal 400
+          span layout x=80 y=260.5 w=86.88 h=15.5 font=Inter 13px/normal 600
+            text "Zawadi Mollel" line-boxes [x=80 y=260.5 w=86.88 h=15.5] drawn-with Inter (Inter-Regular_SemiBold, web font, 13 glyphs)
+          span layout x=174.88 y=261.5 w=32.36 h=14.5 font=Inter 12px/normal 400
+            text "07:48" line-boxes [x=174.88 y=261.5 w=32.36 h=14.5] drawn-with Inter (Inter-Regular, web font, 5 glyphs)
+        img layout x=78 y=286 w=236 h=168 font=Inter 16px/normal 400 image=1000x750 fit=cover position="50% 50%" alt="A small shop lit with neon at night, a bajaji parked in front"
+        span layout x=78 y=464 w=236 h=20 font=Inter 14px/20px 400
+          text "Picha ya duka jana usiku" line-boxes [x=80 y=465.5 w=162.69 h=17] drawn-with Inter (Inter-Regular, web font, 24 glyphs)
+    div layout x=71.93 y=512 w=246.14 h=32.5 font=Inter 12px/normal 400
+      svg bounds x=86.93 y=521.25 w=14 h=14 font=Inter 12px/normal 400
+      text "server · Rehema joins in 2 minutes" line-boxes [x=108.93 y=521 w=194.14 h=14.5] drawn-with Inter (Inter-Regular, web font, 34 glyphs)
+    div layout x=105.46 y=560.5 w=264.54 h=64.5 font=Inter 16px/normal 400
+      div layout x=105.46 y=560.5 w=264.54 h=44 font=Inter 14px/20px 400
+        text "Asante Zawadi! Tuanze video sasa." line-boxes [x=121.46 y=574 w=232.54 h=17] drawn-with Inter (Inter-Regular, web font, 33 glyphs)
+      span layout x=293.2 y=610.5 w=76.8 h=14.5 font=Inter 12px/normal 400
+        svg bounds x=293.2 y=610.75 w=14 h=14 font=Inter 12px/normal 400
+        text "Seen by 3" line-boxes [x=313.2 y=610.5 w=56.8 h=14.5] drawn-with Inter (Inter-Regular, web font, 9 glyphs)
+  div layout x=0 y=755 w=390 h=89 font=Inter 16px/normal 400
+    button layout x=20 y=770 w=44 h=44 font=Inter 13.3333px/normal 400 aria="Attach a file"
+      svg bounds x=31 y=781 w=22 h=22 font=Inter 13.3333px/normal 400
+    label layout x=20 y=791.5 w=1 h=1 font=Inter 16px/normal 400
+      text "Message" line-boxes [x=20 y=791.5 w=68.8 h=19.5] drawn-with Inter (Inter-Regular, web font, 7 glyphs)
+    input layout x=74 y=768 w=238 h=48 font=Inter 15px/normal 400 placeholder="Andika ujumbe…"
+    button layout x=322 y=768 w=48 h=48 font=Inter 13.3333px/normal 400 aria="Send message"
+      svg bounds x=336 y=782 w=20 h=20 font=Inter 13.3333px/normal 400

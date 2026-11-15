@@ -1,0 +1,50 @@
+div layout x=0 y=0 w=390 h=844 font=Inter 16px/normal 400
+  div layout x=24 y=56 w=342 h=44 font=Inter 16px/normal 400
+    a layout x=14 y=56 w=44 h=44 font=Inter 16px/normal 400 aria="Back to home"
+      svg bounds x=25 y=67 w=22 h=22 font=Inter 16px/normal 400
+    span layout x=137.08 y=61.25 w=115.85 h=33.5 font=Inter 13px/normal 400
+      svg bounds x=152.08 y=71 w=14 h=14 font=Inter 13px/normal 400
+      text "Phone call" line-boxes [x=174.08 y=70.25 w=63.85 h=15.5] drawn-with Inter (Inter-Regular, web font, 10 glyphs)
+    span layout x=332 y=78 w=34 h=0 font=Inter 16px/normal 400
+  img layout x=122 y=144 w=146 h=146 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt="Mzee Hamisi"
+  span layout x=111.88 y=314 w=166.23 h=35.5 font="Space Grotesk" 28px/normal 600
+    text "Mzee Hamisi" line-boxes [x=111.88 y=314 w=166.23 h=35.5] drawn-with Space Grotesk Light (SpaceGrotesk-Light_wght2580000, web font, 11 glyphs)
+  span layout x=125.73 y=355.5 w=138.53 h=18 font=Inter 15px/normal 400
+    text "+255 712 345 678" line-boxes [x=125.73 y=355.5 w=138.53 h=18] drawn-with Inter (Inter-Regular, web font, 16 glyphs)
+  span layout x=134.38 y=393.5 w=121.25 h=56.5 font="Space Grotesk" 44px/normal 500
+    text "02:14" line-boxes [x=134.38 y=393.5 w=121.25 h=56.5] drawn-with Space Grotesk Light (SpaceGrotesk-Light_Medium, web font, 5 glyphs)
+  div layout x=24 y=478 w=342 h=158 font=Inter 16px/normal 400
+    div layout x=42 y=484 w=306 h=49 font=Inter 16px/normal 400
+      span layout x=42 y=500.25 w=52.1 h=15.5 font=Inter 13px/normal 400
+        text "Caller ID" line-boxes [x=42 y=500.25 w=52.1 h=15.5] drawn-with Inter (Inter-Regular, web font, 9 glyphs)
+      span layout x=218.7 y=499.5 w=129.3 h=17 font=Inter 14px/normal 400
+        text "+255 800 110 011" line-boxes [x=218.7 y=499.5 w=129.3 h=17] drawn-with Inter (Inter-Regular, web font, 16 glyphs)
+    div layout x=42 y=533 w=306 h=49 font=Inter 16px/normal 400
+      span layout x=42 y=549.25 w=27.31 h=15.5 font=Inter 13px/normal 400
+        text "Rate" line-boxes [x=42 y=549.25 w=27.31 h=15.5] drawn-with Inter (Inter-Regular, web font, 4 glyphs)
+      span layout x=233.72 y=548.5 w=114.28 h=17 font=Inter 14px/normal 400
+        text "TSh 300 / minute" line-boxes [x=233.72 y=548.5 w=114.28 h=17] drawn-with Inter (Inter-Regular, web font, 16 glyphs)
+    div layout x=42 y=582 w=306 h=48 font=Inter 16px/normal 400
+      span layout x=42 y=598.25 w=59.05 h=15.5 font=Inter 13px/normal 400
+        text "Paid from" line-boxes [x=42 y=598.25 w=59.05 h=15.5] drawn-with Inter (Inter-Regular, web font, 9 glyphs)
+      span layout x=217.03 y=597.5 w=130.97 h=17 font=Inter 14px/normal 400
+        text "Workspace balance" line-boxes [x=217.03 y=597.5 w=130.97 h=17] drawn-with Inter (Inter-Regular, web font, 17 glyphs)
+  div layout x=195 y=636 w=0 h=0 font=Inter 16px/normal 400
+  div layout x=24 y=636 w=342 h=82.5 font=Inter 16px/normal 400
+    div layout x=24 y=636 w=106 h=82.5 font=Inter 16px/normal 400
+      button layout x=47 y=636 w=60 h=60 font=Inter 13.3333px/normal 400 aria="Mute microphone"
+        svg bounds x=65 y=654 w=24 h=24 font=Inter 13.3333px/normal 400
+      span layout x=62.63 y=704 w=28.74 h=14.5 font=Inter 12px/normal 400
+        text "Mute" line-boxes [x=62.63 y=704 w=28.74 h=14.5] drawn-with Inter (Inter-Regular, web font, 4 glyphs)
+    div layout x=142 y=636 w=106 h=82.5 font=Inter 16px/normal 400
+      button layout x=165 y=636 w=60 h=60 font=Inter 13.3333px/normal 400 aria="Open keypad"
+        svg bounds x=183 y=654 w=24 h=24 font=Inter 13.3333px/normal 400
+      span layout x=173.67 y=704 w=42.65 h=14.5 font=Inter 12px/normal 400
+        text "Keypad" line-boxes [x=173.67 y=704 w=42.65 h=14.5] drawn-with Inter (Inter-Regular, web font, 6 glyphs)
+    div layout x=260 y=636 w=106 h=82.5 font=Inter 16px/normal 400
+      button layout x=283 y=636 w=60 h=60 font=Inter 13.3333px/normal 400 aria="Speaker"
+        svg bounds x=301 y=654 w=24 h=24 font=Inter 13.3333px/normal 400
+      span layout x=289.63 y=704 w=46.73 h=14.5 font=Inter 12px/normal 400
+        text "Speaker" line-boxes [x=289.63 y=704 w=46.73 h=14.5] drawn-with Inter (Inter-Regular, web font, 7 glyphs)
+  a layout x=159 y=746.5 w=72 h=49.5 font=Inter 16px/normal 400 aria="Hang up"
+    svg bounds x=180 y=756.25 w=30 h=30 font=Inter 16px/normal 400

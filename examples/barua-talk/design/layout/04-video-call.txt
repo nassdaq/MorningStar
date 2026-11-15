@@ -1,0 +1,35 @@
+div layout x=0 y=0 w=390 h=844 font=Inter 16px/normal 400
+  img layout x=0 y=0 w=390 h=844 font=Inter 16px/normal 400 image=960x1356 fit=cover position="30% 0px" alt="Baraka on video"
+  div layout x=0 y=0 w=390 h=200 font=Inter 16px/normal 400
+  div layout x=20 y=56 w=350 h=44 font=Inter 16px/normal 400
+    a layout x=10 y=56 w=44 h=44 font=Inter 16px/normal 400 aria="Back to chat"
+      svg bounds x=21 y=67 w=22 h=22 font=Inter 16px/normal 400
+    img layout x=64 y=56 w=44 h=44 font=Inter 16px/normal 400 image=480x480 fit=cover position="50% 50%" alt=""
+    div layout x=118 y=58.5 w=198 h=39 font=Inter 16px/normal 400
+      span layout x=118 y=58.5 w=198 h=21.5 font="Space Grotesk" 17px/normal 600
+        text "Baraka Mushi" line-boxes [x=118 y=58.5 w=109.98 h=21.5] drawn-with Space Grotesk Light (SpaceGrotesk-Light_wght2580000, web font, 12 glyphs)
+      span layout x=118 y=82 w=198 h=15.5 font=Inter 13px/normal 400
+        text "12:25" line-boxes [x=118 y=82 w=37.21 h=15.5] drawn-with Inter (Inter-Regular, web font, 5 glyphs)
+    button layout x=326 y=56 w=44 h=44 font=Inter 13.3333px/normal 400 aria="Add someone to the call"
+      svg bounds x=338 y=68 w=20 h=20 font=Inter 13.3333px/normal 400
+  div layout x=20 y=124 w=180.3 h=30.5 font=Inter 12px/normal 400
+    span layout x=32 y=135.25 w=8 h=8 font=Inter 12px/normal 400
+    text "Recording · TSh 30 / min" line-boxes [x=48 y=132 w=140.3 h=14.5] drawn-with Inter (Inter-Regular, web font, 24 glyphs)
+  div layout x=262 y=180 w=108 h=150 font=Inter 16px/normal 400
+    img layout x=264 y=182 w=104 h=146 font=Inter 16px/normal 400 image=790x800 fit=cover position="50% 20%" alt="Your camera"
+  div layout x=20 y=380 w=48 h=180 font=Inter 16px/normal 400
+    div layout x=42 y=394 w=4 h=120 font=Inter 16px/normal 400
+      div layout x=42 y=438 w=4 h=76 font=Inter 16px/normal 400
+      div layout x=35 y=438 w=18 h=6 font=Inter 16px/normal 400
+    svg bounds x=34 y=526 w=20 h=20 font=Inter 16px/normal 400 aria="Speaker volume"
+  div layout x=0 y=696 w=390 h=148 font=Inter 16px/normal 400
+    button layout x=13 y=736 w=52 h=52 font=Inter 13.3333px/normal 400 aria="Turn camera off"
+      svg bounds x=28 y=751 w=22 h=22 font=Inter 13.3333px/normal 400
+    button layout x=87 y=736 w=52 h=52 font=Inter 13.3333px/normal 400 aria="Share your screen"
+      svg bounds x=102 y=751 w=22 h=22 font=Inter 13.3333px/normal 400
+    a layout x=161 y=728 w=68 h=68 font=Inter 16px/normal 400 aria="Hang up"
+      svg bounds x=181 y=748 w=28 h=28 font=Inter 16px/normal 400
+    button layout x=251 y=736 w=52 h=52 font=Inter 13.3333px/normal 400 aria="Stop recording"
+      svg bounds x=266 y=751 w=22 h=22 font=Inter 13.3333px/normal 400
+    button layout x=325 y=736 w=52 h=52 font=Inter 13.3333px/normal 400 aria="Mute microphone"
+      svg bounds x=340 y=751 w=22 h=22 font=Inter 13.3333px/normal 400

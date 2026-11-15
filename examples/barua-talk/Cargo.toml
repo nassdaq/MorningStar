@@ -1,0 +1,24 @@
+[package]
+name = "barua-talk"
+description = "Barua Talk: rooms, chat, in-app calls and phone calls. Five screens reproduced from a design (the test of Morningstar's photographs beside its drawing) and seven of its own. With its server (server/) rooms, messages and calls are real; without it the app works end to end from the design's own people and messages. Live audio and video are not in it yet."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The home-screen icon and name (ADR 0020). The picture is drawn by
+# `cargo run -p barua-talk --example icon`.
+[package.metadata.morningstar]
+name = "Barua Talk"
+icon = "assets/icon.png"
+
+[lib]
+# cdylib for Android; tools/build-ios.sh requests the static library itself.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+morningstar.workspace = true
+
+[dev-dependencies]
+morningstar-devtools.workspace = true

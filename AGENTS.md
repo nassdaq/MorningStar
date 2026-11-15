@@ -94,6 +94,7 @@ It must have:
 | `examples/fundidesk` | Twelve screens reproduced from a real design, each tested against its reference image. The model to imitate; start with its `SCREENS.md`. |
 | `examples/callready` | Five illustrated screens from a second design: turned elements, multi-colour vector pictures, text effects. Tested against its references. |
 | `examples/atlas` | Ten screens from a third design, an AI assistant: radial gradients, blur, inner shadows, a bottom sheet, a sideways chip row. With its server (`server/`, DeepSeek and optional voice) the chat is real; without it, scripted. Tested against its references. Start with its `SCREENS.md`. |
+| `examples/barua-talk` | Five screens from a fourth design, rooms, chat and calls: photographs beside the drawing, a blurred backdrop, an arched bar. With its server (`server/`, the Barua Talk API) rooms, messages, in-app calls and phone calls are real, without live audio or video; without it, scripted from the design's own people. Tested against its references. Start with its `SCREENS.md`. |
 | `docs/architecture` | Architecture Decision Records. Read before changing a subsystem. |
 | `benchmarks` | Benchmark method and reports. |
 
