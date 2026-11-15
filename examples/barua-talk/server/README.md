@@ -144,11 +144,13 @@ There is no per-day spending cap here. Add one before real people use it.
 
 ## What is stored
 
-In PostgreSQL, in eight tables this server creates (an idempotent migration
+In PostgreSQL, in ten tables this server creates (an idempotent migration
 at start-up): `barua_talk_schema_version`, `barua_talk_people` (device id,
 identity, name, last seen), `barua_talk_rooms`, `barua_talk_members` (who
 is in which room, and their read mark), `barua_talk_messages` (the chat),
-`barua_talk_calls` (in-app calls), `barua_talk_phone_calls` (number
+`barua_talk_direct_messages` and `barua_talk_direct_reads` (messages
+between two people and each one's read mark; kept here only, never sent
+upstream), `barua_talk_calls` (in-app calls), `barua_talk_phone_calls` (number
 dialled, caller id, status, seconds, charge) and `barua_talk_recordings`
 (status, seconds, charge, and the current download link). No ticket is
 ever stored. A device is an opaque id the app's installation made up.

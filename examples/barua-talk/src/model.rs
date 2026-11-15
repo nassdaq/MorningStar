@@ -167,6 +167,9 @@ pub struct Person {
     pub face: Face,
     /// Their app is open (the server saw it in the last half minute).
     pub online: bool,
+    /// Unread messages from them in the conversation with the user (with
+    /// a server; the scripted app counts on Home's rows only).
+    pub unread: u32,
     /// A phone number, for a contact reached by phone rather than in the
     /// app (the design's Mzee Hamisi).
     pub phone: Option<String>,
@@ -278,6 +281,25 @@ pub struct Room {
     pub recording: Option<String>,
     /// Who answers in the scripted app, if anyone.
     pub replier: Option<(String, Photo)>,
+}
+
+/// What the address of a conversation between two people starts with. A
+/// room's address never does (`[a-z0-9-]` only), so the two cannot meet.
+pub const DIRECT: char = '@';
+
+/// The address, among the app's rooms, of the conversation with the person
+/// `identity`: the same screen and the same list as a room, kept by the
+/// server under `/v1/people/{identity}` instead.
+pub fn direct_room(identity: &str) -> String {
+    format!("{DIRECT}{identity}")
+}
+
+impl Room {
+    /// The other person, when this is a conversation between two people
+    /// that a server keeps; `None` for a room.
+    pub fn peer(&self) -> Option<&str> {
+        self.name.strip_prefix(DIRECT)
+    }
 }
 
 // --------------------------------------------------------------- the list

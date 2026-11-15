@@ -94,7 +94,8 @@ export function defineScenarios(open, { again = () => false, attempts = 3, pause
     await ok(api('GET', '/v1/people', { as: B })); // B is seen now; the others 31 s ago
     const { people, now: stamp } = await ok(api('GET', '/v1/people'));
     assert.match(stamp, ISO);
-    assert.deepEqual(Object.keys(people[0]), ['identity', 'name', 'seen_at', 'online']);
+    assert.deepEqual(Object.keys(people[0]), ['identity', 'name', 'seen_at', 'online', 'unread', 'last_message']);
+    assert.deepEqual([people[0].unread, people[0].last_message], [0, null]);
     assert.deepEqual(people.map((p) => [p.identity.replace(/-[0-9a-f]{6}$/, '-x'), p.online]).sort(), [['baraka', true], ['chausiku', false], ['guest-x', false]]);
     const guest = people.find((p) => p.identity.startsWith('guest-'));
     assert.equal(guest.name, guest.identity);
@@ -251,6 +252,77 @@ export function defineScenarios(open, { again = () => false, attempts = 3, pause
     // One try each: nothing was sent a second time.
     assert.equal(fake.count('POST', '/rooms/desk/chat'), 3);
     assert.deepEqual(fake.chat.get('desk'), []);
+  });
+
+  scenario('messages between two people: kept here, read marks, only the two can read them', {}, async ({ api, fake, now }) => {
+    await introduce(api);
+    const upstreamBefore = fake.requests.length;
+    assert.deepEqual(await ok(api('GET', '/v1/people/baraka/messages')), {
+      peer: { identity: 'baraka', name: 'Baraka', online: true },
+      messages: [], last_id: 0, more: false, unread: 0, now: '2026-11-15T07:00:00Z',
+    });
+
+    now.advance(1000);
+    const first = (await ok(api('POST', '/v1/people/baraka/messages', { body: { text: '  Habari\nBaraka  ', client_id: 'direct-0001' } }), 201)).message;
+    assert.deepEqual(Object.keys(first), ['id', 'from', 'from_name', 'mine', 'text', 'created_at', 'delivered']);
+    assert.deepEqual(
+      [first.from, first.from_name, first.mine, first.text, first.created_at, first.delivered],
+      ['neema', 'Neema', true, 'Habari\nBaraka', '2026-11-15T07:00:01Z', true],
+    );
+    // The same client id again: the first message, nothing new.
+    const again = await api('POST', '/v1/people/baraka/messages', { body: { text: 'Habari\nBaraka', client_id: 'direct-0001' } });
+    assert.deepEqual([again.status, again.json.message.id], [200, first.id]);
+    // …and not for a message to someone else.
+    await fails(api('POST', '/v1/people/chausiku/messages', { body: { text: 'Habari', client_id: 'direct-0001' } }), 409, 'client_id_used');
+
+    now.advance(1000);
+    const second = (await ok(api('POST', '/v1/people/neema/messages', { as: B, body: { text: 'Nzuri!' } }), 201)).message;
+    const third = (await ok(api('POST', '/v1/people/neema/messages', { as: B, body: { text: 'Karibu   sana' } }), 201)).message;
+    assert.ok(second.id > first.id && third.id > second.id);
+
+    // The author's own messages are never unread; the other's are, and the people list says so.
+    let people = (await ok(api('GET', '/v1/people'))).people;
+    const baraka = people.find((p) => p.identity === 'baraka');
+    assert.deepEqual([baraka.unread, baraka.last_message.text, baraka.last_message.mine, baraka.last_message.from_name], [2, 'Karibu   sana', false, 'Baraka']);
+    assert.deepEqual(people.find((p) => p.identity === 'chausiku').last_message, null);
+    people = (await ok(api('GET', '/v1/people', { as: B }))).people;
+    assert.deepEqual([people.find((p) => p.identity === 'neema').unread, people.find((p) => p.identity === 'neema').last_message.mine], [0, true]);
+
+    // Looking does not mark read; `read=1` does, up to what was returned.
+    const opened = await ok(api('GET', '/v1/people/baraka/messages'));
+    assert.deepEqual(opened.messages.map((m) => [m.id, m.mine]), [[first.id, true], [second.id, false], [third.id, false]]);
+    assert.deepEqual([opened.last_id, opened.more, opened.unread], [third.id, false, 2]);
+    const page = await ok(api('GET', `/v1/people/baraka/messages?after=${first.id}&limit=1&read=1`));
+    assert.deepEqual([page.messages.map((m) => m.id), page.more, page.unread], [[second.id], true, 1]);
+    assert.deepEqual(await ok(api('POST', '/v1/people/baraka/read', { body: {} })), { unread: 0 });
+    // A mark never moves back.
+    assert.deepEqual(await ok(api('POST', '/v1/people/baraka/read', { body: { up_to: 0 } })), { unread: 0 });
+    const quiet = await ok(api('GET', `/v1/people/baraka/messages?after=${third.id}`));
+    assert.deepEqual([quiet.messages, quiet.last_id, quiet.unread], [[], third.id, 0]);
+
+    // The conversation is in the activity list, for both, and for nobody else.
+    const mine = (await ok(api('GET', '/v1/activity'))).items;
+    assert.deepEqual(mine, [{
+      kind: 'person', id: 'baraka', title: 'Baraka', preview: 'Karibu sana', at: '2026-11-15T07:00:02Z',
+      unread: 0, live: false, status: 'open', direction: null, video: null, seconds: null, peer: { identity: 'baraka', name: 'Baraka' },
+    }]);
+    assert.deepEqual((await ok(api('GET', '/v1/activity', { as: B }))).items.map((i) => [i.kind, i.id, i.preview]), [['person', 'neema', 'You: Karibu sana']]);
+    assert.deepEqual((await ok(api('GET', '/v1/activity', { as: C }))).items, []);
+    // A third person asking for "their" conversation with either sees their own, empty one.
+    assert.deepEqual((await ok(api('GET', '/v1/people/neema/messages', { as: C }))).messages, []);
+    assert.deepEqual((await ok(api('GET', '/v1/people/baraka/messages', { as: C }))).messages, []);
+
+    // Refusals.
+    await fails(api('GET', '/v1/people/nobody/messages'), 404, 'not_found');
+    await fails(api('POST', '/v1/people/nobody/messages', { body: { text: 'x' } }), 404, 'not_found');
+    await fails(api('POST', '/v1/people/neema/messages', { body: { text: 'to myself' } }), 400, 'bad_request');
+    await fails(api('POST', '/v1/people/baraka/messages', { body: { text: '   ' } }), 400, 'bad_request');
+    await fails(api('POST', '/v1/people/baraka/messages', { body: { text: 'x'.repeat(2001) } }), 400, 'bad_request');
+    await fails(api('POST', '/v1/people/baraka/messages', { body: { text: 'x', client_id: 'short' } }), 400, 'bad_request');
+    await fails(api('GET', '/v1/people/baraka/messages?after=-1'), 400, 'bad_request');
+    await fails(api('POST', '/v1/people/baraka/read', { body: { up_to: 'x' } }), 400, 'bad_request');
+    // Nothing of this went to Barua Talk.
+    assert.equal(fake.requests.length, upstreamBefore);
   });
 
   scenario('without a Barua key: 503 where upstream is needed, the rest works', { key: false, env: { PHONE_CALLS: 'on' } }, async ({ api, fake, db }) => {

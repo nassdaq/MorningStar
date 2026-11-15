@@ -121,7 +121,36 @@ const MIGRATIONS = [
   create unique index if not exists #recordings_running_idx
     on @recordings (target_room) where status in ('starting', 'recording');
   `,
+  // Messages between two people. `low` and `high` are the two identities
+  // in the order the server's own string comparison gives (never the
+  // database's collation), so a pair has exactly one spelling.
+  `
+  create table if not exists @direct_messages (
+    id             bigserial primary key,
+    low            text not null,
+    high           text not null,
+    from_identity  text not null,
+    text           text not null,
+    client_id      text,
+    created_at     timestamptz not null default now()
+  );
+  create index if not exists #direct_messages_pair_idx on @direct_messages (low, high, id);
+  create index if not exists #direct_messages_high_idx on @direct_messages (high);
+  create unique index if not exists #direct_messages_client_idx
+    on @direct_messages (from_identity, client_id) where client_id is not null;
+  create table if not exists @direct_reads (
+    identity      text not null,
+    peer          text not null,
+    last_read_id  bigint not null default 0,
+    primary key (identity, peer)
+  );
+  `,
 ];
+
+/** The one spelling of a pair of identities: `[low, high]`. */
+export function pairOf(a, b) {
+  return a < b ? [a, b] : [b, a];
+}
 
 const NETWORK_CODES = new Set([
   'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'EHOSTUNREACH', 'ENETUNREACH',
@@ -316,7 +345,8 @@ export function createDb(config, log, { Pool = pg.Pool, now = Date.now } = {}) {
     async truncateTestData() {
       if (!schema.startsWith('barua_talk_test_')) throw new Error('only a barua_talk_test_ schema may be emptied');
       await query(
-        `truncate @people, @rooms, @members, @messages, @calls, @phone_calls, @recordings restart identity cascade`,
+        `truncate @people, @rooms, @members, @messages, @calls, @phone_calls, @recordings,
+                  @direct_messages, @direct_reads restart identity cascade`,
       );
     },
 
@@ -517,6 +547,101 @@ export function createDb(config, log, { Pool = pg.Pool, now = Date.now } = {}) {
       rows = rows.map(message);
       const more = after !== null && rows.length > 0 && rows[rows.length - 1].id < lastId;
       return { rows, lastId, more };
+    },
+
+    // ---- messages between two people ------------------------------------
+
+    /**
+     * Stores a message from one person to another. With a `clientId` the
+     * sender has already used, nothing is stored and that first message is
+     * returned: `{row, created}`.
+     */
+    async addDirect({ from, to, text, clientId = null, at }) {
+      const [low, high] = pairOf(from, to);
+      const made = await one(
+        `insert into @direct_messages (low, high, from_identity, text, client_id, created_at)
+         values ($1, $2, $3, $4, $5, $6)
+         on conflict (from_identity, client_id) where client_id is not null do nothing
+         returning *`,
+        [low, high, from, text, clientId, at],
+      );
+      if (made) return { row: message(made), created: true };
+      const first = await one('select * from @direct_messages where from_identity = $1 and client_id = $2', [from, clientId]);
+      return { row: message(first), created: false };
+    },
+
+    /** As `listMessages`, for the conversation between `a` and `b`. */
+    async listDirect(a, b, { after = null, limit }) {
+      const [low, high] = pairOf(a, b);
+      const page =
+        after === null
+          ? query('select * from @direct_messages where low = $1 and high = $2 order by id desc limit $3', [low, high, limit])
+          : query('select * from @direct_messages where low = $1 and high = $2 and id > $3 order by id limit $4', [low, high, after, limit]);
+      const [top, found] = await Promise.all([
+        one('select coalesce(max(id), 0) as id from @direct_messages where low = $1 and high = $2', [low, high]),
+        page,
+      ]);
+      const lastId = Number(top.id);
+      let { rows } = found;
+      if (after === null) rows.reverse();
+      rows = rows.map(message);
+      const more = after !== null && rows.length > 0 && rows[rows.length - 1].id < lastId;
+      return { rows, lastId, more };
+    },
+
+    /**
+     * Moves `identity`'s read mark in the conversation with `peer` forward
+     * to `upTo` (null: the newest message), never beyond the newest and
+     * never backwards. Returns their unread count afterwards.
+     */
+    async markDirectRead(identity, peer, upTo) {
+      const [low, high] = pairOf(identity, peer);
+      const row = await one(
+        `with mark as (
+           insert into @direct_reads (identity, peer, last_read_id)
+           select $1::text, $2::text, least(coalesce($5::bigint, top.id), top.id)
+             from (select coalesce(max(id), 0) as id from @direct_messages where low = $3::text and high = $4::text) top
+           on conflict (identity, peer) do update set
+             last_read_id = greatest(@direct_reads.last_read_id, excluded.last_read_id)
+           returning last_read_id
+         )
+         select count(*)::int as unread
+           from @direct_messages x
+          where x.low = $3::text and x.high = $4::text and x.from_identity <> $1::text
+            and x.id > (select last_read_id from mark)`,
+        [identity, peer, low, high, upTo],
+      );
+      return row.unread;
+    },
+
+    /**
+     * The conversations `identity` has, newest message first: `peer`,
+     * `unread` and the last message as `last_id`, `last_from`,
+     * `last_text`, `last_at`.
+     */
+    async listConversations(identity, limit) {
+      const { rows } = await query(
+        `select c.peer, lm.id as last_id, lm.from_identity as last_from, lm.text as last_text, lm.created_at as last_at,
+                (select count(*) from @direct_messages x
+                  where ((x.low = $1 and x.high = c.peer) or (x.low = c.peer and x.high = $1))
+                    and x.from_identity <> $1 and x.id > coalesce(r.last_read_id, 0))::int as unread
+           from (
+             select high as peer from @direct_messages where low = $1
+             union
+             select low as peer from @direct_messages where high = $1
+           ) c
+           left join @direct_reads r on r.identity = $1 and r.peer = c.peer
+           join lateral (
+             select x.id, x.from_identity, x.text, x.created_at
+               from @direct_messages x
+              where (x.low = $1 and x.high = c.peer) or (x.low = c.peer and x.high = $1)
+              order by x.id desc limit 1
+           ) lm on true
+          order by lm.id desc
+          limit $2`,
+        [identity, limit],
+      );
+      return rows.map((row) => ({ ...row, last_id: Number(row.last_id) }));
     },
 
     // ---- in-app calls ---------------------------------------------------

@@ -9,7 +9,7 @@
 
 mod support;
 
-use barua_talk::model::{CallStatus, Delivery, Entry, PhoneStatus, Recording};
+use barua_talk::model::{CallStatus, Delivery, Entry, PhoneStatus, Recording, Target, direct_room};
 use barua_talk::{
     BaruaTalk, Link, POLL_ACTIVE, POLL_HOME, POLL_INCOMING, POLL_PHONE, POLL_RINGING, POLL_ROOM,
     Screen, sound,
@@ -337,15 +337,22 @@ fn a_ringing_call_can_be_declined_or_missed() {
         Some("Missed call from Baraka Mushi.")
     );
 
-    // "Reply with a message instead" declines, and says that there is no
-    // conversation between two people on the server.
+    // "Reply with a message instead" declines, and opens the caller's
+    // conversation, the one the server keeps between the two.
     lock(&world).ring("c3", "baraka", "Baraka Mushi", true);
     device.ticks(POLL_INCOMING + 3);
     device.tap("reply-instead");
     device.ticks(2);
-    assert_eq!(device.screen(), Screen::Home);
     assert_eq!(lock(&world).call("c3").status, "declined");
-    assert!(device.app().notice().unwrap().starts_with("Declined."));
+    assert_eq!(device.screen(), Screen::Room);
+    let room = device.app().room().expect("the conversation");
+    assert_eq!(
+        (room.title.as_str(), room.peer()),
+        ("Baraka Mushi", Some("baraka"))
+    );
+    assert_eq!(lock(&world).asked("GET /v1/people/baraka/messages"), 1);
+    assert!(device.back());
+    assert_eq!(device.screen(), Screen::Home);
 
     // Accepting a call the caller has just given up says so.
     lock(&world).ring("c4", "baraka", "Baraka Mushi", true);
@@ -356,6 +363,160 @@ fn a_ringing_call_can_be_declined_or_missed() {
     device.ticks(2);
     assert_eq!(device.screen(), Screen::Home);
     assert_eq!(device.app().notice(), Some("The caller hung up first."));
+}
+
+#[test]
+fn two_people_write_to_each_other_and_call_from_the_conversation() {
+    let world = world();
+    let mut device = online(Screen::Home, &world);
+    // From People: the person is the way into their conversation.
+    device.tap("tab-contacts");
+    device.ticks(2);
+    device.tap(("person-message", 0usize));
+    device.ticks(2);
+    assert_eq!(device.screen(), Screen::Room);
+    {
+        let room = device.app().room().expect("the conversation");
+        assert_eq!(room.peer(), Some("baraka"));
+        assert_eq!(
+            (room.title.as_str(), room.status.as_str()),
+            ("Baraka Mushi", "Online")
+        );
+    }
+    assert!(messages(&device).is_empty());
+    assert_eq!(
+        lock(&world).asked("GET /v1/people/baraka/messages?read=1"),
+        1
+    );
+    // It has no ring on Home and is not one of the server's rooms.
+    assert_eq!(device.app().live_rooms().len(), 1);
+
+    // Written: stored by the server under the person, never in a room.
+    device.fill("draft-field", "Habari Baraka");
+    device.tap("send");
+    device.ticks(2);
+    assert_eq!(
+        messages(&device),
+        [("Habari Baraka".to_owned(), Delivery::Sent)]
+    );
+    {
+        let mut world = lock(&world);
+        assert_eq!(world.asked("POST /v1/people/baraka/messages"), 1);
+        assert_eq!(world.asked("POST /v1/rooms"), 0);
+        assert_eq!(world.direct("baraka").messages.len(), 1);
+        // The other one answers; the open conversation finds it by asking.
+        world.whisper("baraka", "Baraka Mushi", "Nzuri, karibu.");
+    }
+    device.ticks(POLL_ROOM + 3);
+    assert_eq!(
+        messages(&device),
+        [
+            ("Habari Baraka".to_owned(), Delivery::Sent),
+            ("Nzuri, karibu.".to_owned(), Delivery::Received),
+        ]
+    );
+    // Read as it is shown.
+    assert_eq!(lock(&world).direct("baraka").unread(), 0);
+
+    // The header's two buttons ring the other person, in the app.
+    device.tap("room-video");
+    device.ticks(2);
+    assert_eq!(device.screen(), Screen::Incoming);
+    {
+        let call = device.app().call().expect("a call");
+        assert!(call.video && !call.incoming);
+        assert_eq!(call.subject.title(), "Baraka Mushi");
+        assert_eq!(lock(&world).asked("POST /v1/calls"), 1);
+        assert_eq!(lock(&world).asked("/ticket"), 0);
+    }
+    device.tap("decline");
+    device.ticks(2);
+    assert_eq!(device.screen(), Screen::Room);
+
+    // Home lists the conversation beside the room, with what was said
+    // last; while the user is away, a new message counts as unread.
+    lock(&world).whisper("baraka", "Baraka Mushi", "Uko wapi?");
+    assert!(device.back());
+    assert!(device.back());
+    device.tap("tab-home");
+    device.ticks(3);
+    assert_eq!(device.screen(), Screen::Home);
+    let row = device
+        .app()
+        .items()
+        .iter()
+        .position(|item| item.target == Target::Room(direct_room("baraka")))
+        .expect("the conversation's row");
+    {
+        let item = &device.app().items()[row];
+        assert_eq!((item.preview.as_str(), item.unread), ("Uko wapi?", 1));
+        assert!(!item.is_call());
+        assert!(device.app().notifications().contains(&row));
+    }
+    // People says so too.
+    device.tap("tab-contacts");
+    device.ticks(3);
+    assert_eq!(device.app().people()[0].unread, 1);
+    device.tap("tab-home");
+    device.ticks(3);
+
+    // The row opens the same conversation, with everything in it.
+    device.tap(("item", row));
+    device.ticks(3);
+    assert_eq!(device.screen(), Screen::Room);
+    assert_eq!(device.app().room().unwrap().peer(), Some("baraka"));
+    assert_eq!(messages(&device).len(), 3);
+    assert_eq!(device.app().items()[row].unread, 0);
+    assert_eq!(lock(&world).direct("baraka").unread(), 0);
+
+    // A refresh of Home's rooms does not take the conversation away.
+    device.ticks(POLL_HOME + POLL_ROOM + 3);
+    assert_eq!(device.screen(), Screen::Room);
+    assert_eq!(messages(&device).len(), 3);
+    assert_eq!(device.app().notice(), None);
+}
+
+/// The conversation and the People screen as a person would see them, kept
+/// to look at: `target/barua-talk-conversation.png` and
+/// `target/barua-talk-people.png`.
+#[test]
+fn the_conversation_and_people_are_drawn() {
+    use morningstar_devtools::screenshot_frame;
+    let world = world();
+    {
+        let mut world = lock(&world);
+        world
+            .people
+            .push(("zawadi".to_owned(), "Zawadi Mollel".to_owned(), false));
+        world.whisper("baraka", "Baraka Mushi", "Habari za asubuhi?");
+        world.whisper("zawadi", "Zawadi Mollel", "Nimefika.");
+        world.whisper("zawadi", "Zawadi Mollel", "Uko wapi?");
+    }
+    let mut device = online(Screen::Home, &world);
+    device.tap("tab-contacts");
+    device.ticks(3);
+    assert_eq!(device.app().people()[1].unread, 2);
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+    let keep = |device: &mut Device, name: &str| {
+        device.settle();
+        match screenshot_frame(&mut device.ui, &device.info) {
+            Ok(png) => {
+                let _ = std::fs::write(out.join(name), &png);
+            }
+            // No GPU on this machine: the other tests have said what is drawn.
+            Err(error) => eprintln!("skipping {name}: {error}"),
+        }
+    };
+    keep(&mut device, "barua-talk-people.png");
+    device.tap(("person-message", 0usize));
+    device.ticks(3);
+    device.fill("draft-field", "Nzuri sana, na wewe?");
+    device.tap("send");
+    device.ticks(3);
+    assert_eq!(messages(&device).len(), 2);
+    keep(&mut device, "barua-talk-conversation.png");
+    // Opening it read it.
+    assert_eq!(device.app().people()[0].unread, 0);
 }
 
 #[test]

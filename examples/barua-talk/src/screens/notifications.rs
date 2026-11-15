@@ -1,5 +1,5 @@
-//! What wants the user's attention: rooms with unread messages and calls
-//! that were missed. **Not from the design**, whose bar has the tab
+//! What wants the user's attention: rooms and conversations with unread
+//! messages and calls that were missed. **Not from the design**, whose bar has the tab
 //! ("Notifications") and no page for it; it is Home's list, filtered.
 
 use morningstar::ui::prelude::*;
@@ -14,7 +14,7 @@ pub fn view(app: &BaruaTalk) -> Element<Message> {
     let empty = rows.is_empty().then(|| {
         Container::new(
             inter(
-                "Nothing new. Unread rooms and missed calls show here.",
+                "Nothing new. Unread messages and missed calls show here.",
                 13.0,
             )
             .line_height_dp(19.0)
@@ -29,7 +29,7 @@ pub fn view(app: &BaruaTalk) -> Element<Message> {
     let content = Column::new()
         .push(grotesk("Notifications", 20.0).heading())
         .push(Spacer::fixed(4.0))
-        .push(inter("Unread rooms and missed calls", 12.0).color(MUTED))
+        .push(inter("Unread messages and missed calls", 12.0).color(MUTED))
         .push(Spacer::fixed(16.0))
         .extend(
             rows.into_iter()

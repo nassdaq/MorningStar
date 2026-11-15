@@ -7,6 +7,7 @@ import http from 'node:http';
 
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
+import { pairOf } from '../src/db.js';
 import { DatabaseDown } from '../src/errors.js';
 import { createLogger } from '../src/log.js';
 import { createTalk } from '../src/talk.js';
@@ -292,7 +293,10 @@ export function createMemoryDb() {
   const calls = [];
   const phoneCalls = [];
   const recordings = [];
+  const directMessages = [];
+  const directReads = [];
   let messageId = 0;
+  let directId = 0;
   let down = false;
 
   const copy = (row) => (row ? { ...row } : null);
@@ -311,6 +315,11 @@ export function createMemoryDb() {
     if (!me) return 0;
     return messages.filter((x) => x.room === room && x.id > me.last_read_id && x.from_identity !== identity).length;
   };
+  const between = (a, b) => directMessages.filter((x) => (x.low === a && x.high === b) || (x.low === b && x.high === a));
+  const directUnread = (identity, peer) => {
+    const mark = directReads.find((r) => r.identity === identity && r.peer === peer)?.last_read_id ?? 0;
+    return between(identity, peer).filter((x) => x.from_identity !== identity && x.id > mark).length;
+  };
   const newest = (list) => [...list].sort((a, b) => time(b.created_at) - time(a.created_at) || (a.id < b.id ? -1 : 1));
 
   const db = {
@@ -318,7 +327,7 @@ export function createMemoryDb() {
     setDown(value) {
       down = value;
     },
-    tables: { people, rooms, members, messages, calls, phoneCalls, recordings },
+    tables: { people, rooms, members, messages, calls, phoneCalls, recordings, directMessages, directReads },
 
     async migrate() {
       check();
@@ -459,6 +468,57 @@ export function createMemoryDb() {
       const lastId = all.length ? all.at(-1).id : 0;
       const rows = (after === null ? all.slice(-limit) : all.filter((x) => x.id > after).slice(0, limit)).map(copy);
       return { rows, lastId, more: after !== null && rows.length > 0 && rows.at(-1).id < lastId };
+    },
+
+    async addDirect({ from, to, text, clientId = null, at }) {
+      check();
+      if (clientId !== null) {
+        const first = directMessages.find((x) => x.from_identity === from && x.client_id === clientId);
+        if (first) return { row: copy(first), created: false };
+      }
+      directId += 1;
+      const [low, high] = pairOf(from, to);
+      const row = { id: directId, low, high, from_identity: from, text, client_id: clientId, created_at: at };
+      directMessages.push(row);
+      return { row: copy(row), created: true };
+    },
+    async listDirect(a, b, { after = null, limit }) {
+      check();
+      const all = between(a, b);
+      const lastId = all.length ? all.at(-1).id : 0;
+      const rows = (after === null ? all.slice(-limit) : all.filter((x) => x.id > after).slice(0, limit)).map(copy);
+      return { rows, lastId, more: after !== null && rows.length > 0 && rows.at(-1).id < lastId };
+    },
+    async markDirectRead(identity, peer, upTo) {
+      check();
+      const top = between(identity, peer).reduce((max, x) => Math.max(max, x.id), 0);
+      let mark = directReads.find((r) => r.identity === identity && r.peer === peer);
+      if (!mark) {
+        mark = { identity, peer, last_read_id: 0 };
+        directReads.push(mark);
+      }
+      mark.last_read_id = Math.max(mark.last_read_id, Math.min(upTo ?? top, top));
+      return directUnread(identity, peer);
+    },
+    async listConversations(identity, limit) {
+      check();
+      const peers = new Set(
+        directMessages.filter((x) => x.low === identity || x.high === identity).map((x) => (x.low === identity ? x.high : x.low)),
+      );
+      return [...peers]
+        .map((peer) => {
+          const last = between(identity, peer).at(-1);
+          return {
+            peer,
+            last_id: last.id,
+            last_from: last.from_identity,
+            last_text: last.text,
+            last_at: last.created_at,
+            unread: directUnread(identity, peer),
+          };
+        })
+        .sort((a, b) => b.last_id - a.last_id)
+        .slice(0, limit);
     },
 
     async insertCall({ id, from, to, video, status, room = null, at }) {

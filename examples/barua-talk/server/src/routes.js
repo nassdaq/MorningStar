@@ -274,6 +274,27 @@ export function createRoutes({ config, db, talk, log, now }) {
     };
   }
 
+  /** A message between two people. Stored is delivered: nothing is forwarded. */
+  function directOut(row, me, who) {
+    return {
+      id: row.id,
+      from: row.from_identity,
+      from_name: who(row.from_identity).name,
+      mine: row.from_identity === me.identity,
+      text: row.text,
+      created_at: iso(row.created_at),
+      delivered: true,
+    };
+  }
+
+  /** The other person of a conversation, or a 404; never oneself. */
+  async function peerOr404(identity, me) {
+    if (identity === me.identity) throw badRequest('A conversation needs another person.');
+    const [row] = await db.peopleByIdentity([identity]);
+    if (!row) throw notFound('There is no person with that identity.');
+    return row;
+  }
+
   function roomOut(row, me, who, recordings) {
     const running = recordings.find((r) => r.target_room === row.name && r.room === row.name);
     return {
@@ -795,17 +816,29 @@ export function createRoutes({ config, db, talk, log, now }) {
 
     async listPeople({ deviceId }) {
       const me = await person(deviceId);
-      const rows = await db.listPeople(me.identity, PEOPLE_LIMIT);
+      const [rows, conversations] = await Promise.all([
+        db.listPeople(me.identity, PEOPLE_LIMIT),
+        db.listConversations(me.identity, PEOPLE_LIMIT),
+      ]);
       const time = now();
+      const who = await namesOf([me.identity, ...rows.map((row) => row.identity)]);
+      const talked = new Map(conversations.map((c) => [c.peer, c]));
       return {
         status: 200,
         json: {
-          people: rows.map((row) => ({
-            identity: row.identity,
-            name: row.name || row.identity,
-            seen_at: iso(row.seen_at),
-            online: time - new Date(row.seen_at).getTime() <= ONLINE_MS,
-          })),
+          people: rows.map((row) => {
+            const c = talked.get(row.identity);
+            return {
+              identity: row.identity,
+              name: row.name || row.identity,
+              seen_at: iso(row.seen_at),
+              online: time - new Date(row.seen_at).getTime() <= ONLINE_MS,
+              unread: c ? c.unread : 0,
+              last_message: c
+                ? directOut({ id: c.last_id, from_identity: c.last_from, text: c.last_text, created_at: c.last_at }, me, who)
+                : null,
+            };
+          }),
           now: iso(time),
         },
       };
@@ -993,6 +1026,79 @@ export function createRoutes({ config, db, talk, log, now }) {
       const me = await person(deviceId);
       const room = await roomOr404(params.room);
       return { status: 200, json: { unread: await db.markRead(room.name, me.identity, upTo, at()) } };
+    },
+
+    // ---- messages between two people ------------------------------------
+    // Kept here only: nothing is asked of Barua Talk, so nothing here can
+    // cost money or fail upstream. Only the two people can read them: the
+    // conversation is always "mine with {person}".
+
+    async listDirect({ deviceId, params, query }) {
+      const me = await person(deviceId);
+      const limit = count(query, 50, 100);
+      let after = null;
+      if (query.get('after') !== null) {
+        after = Number.parseInt(query.get('after'), 10);
+        if (!Number.isSafeInteger(after) || after < 0 || String(after) !== query.get('after')) {
+          throw badRequest('"after" must be a message id.');
+        }
+      }
+      const peer = await peerOr404(params.person, me);
+      const { rows, lastId, more } = await db.listDirect(me.identity, peer.identity, { after, limit });
+      // `read=1` moves the mark to the newest message returned; otherwise
+      // the mark stays where it is.
+      const upTo = query.get('read') === '1' ? (rows.length > 0 ? rows[rows.length - 1].id : (after ?? 0)) : 0;
+      const [unread, who] = await Promise.all([
+        db.markDirectRead(me.identity, peer.identity, upTo),
+        namesOf([me.identity, peer.identity]),
+      ]);
+      const time = now();
+      return {
+        status: 200,
+        json: {
+          peer: {
+            identity: peer.identity,
+            name: peer.name || peer.identity,
+            online: time - new Date(peer.seen_at).getTime() <= ONLINE_MS,
+          },
+          messages: rows.map((row) => directOut(row, me, who)),
+          last_id: lastId,
+          more,
+          unread,
+          now: iso(time),
+        },
+      };
+    },
+
+    async postDirect({ req, deviceId, params }) {
+      const body = await readJson(req, limits.jsonBytes);
+      if (typeof body.text !== 'string') throw badRequest('"text" must be text.');
+      const words = body.text.trim();
+      const length = [...words].length;
+      if (length < 1 || length > limits.textChars) throw badRequest(`"text" must be 1 to ${limits.textChars} characters.`);
+      const id = clientId(body.client_id, 'client_id');
+      const me = await person(deviceId);
+      const peer = await peerOr404(params.person, me);
+      const pair = me.identity < peer.identity ? [me.identity, peer.identity] : [peer.identity, me.identity];
+      const { row, created } = await db.addDirect({ from: me.identity, to: peer.identity, text: words, clientId: id, at: at() });
+      if (!created && (row.low !== pair[0] || row.high !== pair[1])) {
+        throw conflict('client_id_used', 'That "client_id" was used for a message to someone else.');
+      }
+      const who = await namesOf([me.identity]);
+      if (created) await db.markDirectRead(me.identity, peer.identity, row.id);
+      return { status: created ? 201 : 200, json: { message: directOut(row, me, who) } };
+    },
+
+    async markDirectRead({ req, deviceId, params }) {
+      const body = await readJson(req, limits.jsonBytes);
+      let upTo = null;
+      if (body.up_to !== undefined && body.up_to !== null) {
+        if (!Number.isSafeInteger(body.up_to) || body.up_to < 0) throw badRequest('"up_to" must be a message id.');
+        upTo = body.up_to;
+      }
+      const me = await person(deviceId);
+      const peer = await peerOr404(params.person, me);
+      return { status: 200, json: { unread: await db.markDirectRead(me.identity, peer.identity, upTo) } };
     },
 
     // ---- in-app calls ---------------------------------------------------
@@ -1267,13 +1373,15 @@ export function createRoutes({ config, db, talk, log, now }) {
     async activity({ deviceId, query }) {
       const me = await person(deviceId);
       const limit = count(query, LIST_LIMIT, 100);
-      const [rooms, calls, phones] = await Promise.all([
+      const [rooms, conversations, calls, phones] = await Promise.all([
         db.listRooms(me.identity, { memberOnly: true, limit }),
+        db.listConversations(me.identity, limit),
         db.listCalls(me.identity, limit),
         db.listPhoneCalls(me.identity, limit),
       ]);
       const who = await namesOf([
         ...rooms.flatMap((row) => [row.created_by, row.last_from]),
+        ...conversations.map((row) => row.peer),
         ...calls.flatMap((row) => [row.from_identity, row.to_identity]),
       ]);
       const items = [];
@@ -1294,6 +1402,25 @@ export function createRoutes({ config, db, talk, log, now }) {
           video: null,
           seconds: null,
           peer: null,
+        });
+      }
+      for (const row of conversations) {
+        const peer = who(row.peer);
+        const words = row.last_text.replace(/\s+/g, ' ').slice(0, 120);
+        items.push({
+          sort: new Date(row.last_at).getTime(),
+          kind: 'person',
+          id: peer.identity,
+          title: peer.name,
+          preview: row.last_from === me.identity ? `You: ${words}` : words,
+          at: iso(row.last_at),
+          unread: row.unread,
+          live: false,
+          status: 'open',
+          direction: null,
+          video: null,
+          seconds: null,
+          peer,
         });
       }
       for (const row of calls) {
@@ -1342,13 +1469,17 @@ export function createRoutes({ config, db, talk, log, now }) {
 
   const ROOM = '[a-z0-9][a-z0-9-]{0,61}[a-z0-9]';
   const ID = '[A-Za-z0-9_.:-]{1,80}';
-  const path = (pattern) => new RegExp(`^/v1/${pattern.replaceAll('{room}', `(${ROOM})`).replaceAll('{id}', `(${ID})`)}$`);
+  const path = (pattern) =>
+    new RegExp(`^/v1/${pattern.replaceAll('{room}', `(${ROOM})`).replaceAll('{person}', `(${ROOM})`).replaceAll('{id}', `(${ID})`)}$`);
   const h = handlers;
   const table = [
     ['GET', 'health', h.health, []],
     ['GET', 'me', h.getMe, []],
     ['PUT', 'me', h.putMe, []],
     ['GET', 'people', h.listPeople, []],
+    ['GET', 'people/{person}/messages', h.listDirect, ['person']],
+    ['POST', 'people/{person}/messages', h.postDirect, ['person']],
+    ['POST', 'people/{person}/read', h.markDirectRead, ['person']],
     ['GET', 'account', h.account, []],
     ['GET', 'activity', h.activity, []],
 

@@ -1,16 +1,18 @@
-//! The people who can be called. **Not from the design**, whose bar has
-//! the tab ("Contacts") and no page for it; built from Home's rows and
-//! round buttons.
+//! The people who can be written to and called. **Not from the design**,
+//! whose bar has the tab ("Contacts") and no page for it; built from
+//! Home's rows, round buttons and unread count.
 
 use morningstar::ui::prelude::*;
 
-use crate::components::{MARGIN, TOP, face, outlined_icon_button, page, tab_bar};
+use crate::components::{MARGIN, TOP, count, face, outlined_icon_button, page, tab_bar};
 use crate::icons;
 use crate::model::Person;
 use crate::theme::{ACCENT, MUTED, QUIET, grotesk, inter};
 use crate::{BaruaTalk, Link, Message, Screen, Tab};
 
-/// A person: Home's row, with the ways to call them where the time is.
+/// A person: Home's row. Tapping the person opens their conversation; the
+/// ways to call them are where the time is; beside their state is how many
+/// of their messages are unread.
 fn person_row(app: &BaruaTalk, index: usize, person: &Person) -> Container<Message> {
     let (dot, state) = match (&person.phone, person.online) {
         (Some(_), _) => (QUIET, "Phone contact".to_owned()),
@@ -44,7 +46,9 @@ fn person_row(app: &BaruaTalk, index: usize, person: &Person) -> Container<Messa
         .gap(8.0)
         .into(),
     };
-    row![
+    // The person themselves is the way into their conversation, as a row
+    // of Home is the way into a room; a phone contact has none.
+    let who = row![
         face(app, &person.face, 52.0),
         col![
             inter(person.name.clone(), 16.0)
@@ -56,23 +60,39 @@ fn person_row(app: &BaruaTalk, index: usize, person: &Person) -> Container<Messa
                     .size(8.0, 8.0)
                     .radius(4.0)
                     .background(dot),
-                inter(state, 13.0).color(MUTED),
+                inter(state.clone(), 13.0).color(MUTED),
             ]
+            .push_maybe((person.unread > 0).then(|| count(person.unread)))
             .gap(6.0)
             .cross_align(CrossAlign::Center),
         ]
         .gap(4.0)
-        .fill_width()
-        .merge_semantics(),
-        buttons,
+        .fill_width(),
     ]
     .gap(14.0)
     .cross_align(CrossAlign::Center)
     .fill_width()
-    .height(76.0)
-    .semantics_group()
-    .label(person.name.clone())
-    .id(("person", index))
+    .height(76.0);
+    let who = if person.phone.is_none() {
+        let unread = match person.unread {
+            0 => String::new(),
+            1 => ", 1 unread message".to_owned(),
+            unread => format!(", {unread} unread messages"),
+        };
+        who.on_press(Message::MessagePerson(index))
+            .label(format!("Message {}, {state}{unread}", person.name))
+            .id(("person-message", index))
+    } else {
+        who.merge_semantics()
+    };
+    row![who, buttons]
+        .gap(14.0)
+        .cross_align(CrossAlign::Center)
+        .fill_width()
+        .height(76.0)
+        .semantics_group()
+        .label(person.name.clone())
+        .id(("person", index))
 }
 
 /// The screen.
@@ -98,7 +118,13 @@ pub fn view(app: &BaruaTalk) -> Element<Message> {
     let content = Column::new()
         .push(grotesk("People", 20.0).heading())
         .push(Spacer::fixed(4.0))
-        .push(inter("In-app calls are free, voice or video", 12.0).color(MUTED))
+        .push(
+            inter(
+                "Tap a person to write. Messages and in-app calls are free",
+                12.0,
+            )
+            .color(MUTED),
+        )
         .push(Spacer::fixed(16.0))
         .extend(
             people

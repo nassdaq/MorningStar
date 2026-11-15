@@ -46,8 +46,11 @@
   #media figure { margin:0; background:#000; border-radius:12px; overflow:hidden; position:relative; min-height:60px; }
   #media video { width:100%; display:block; }
   #media figcaption { position:absolute; left:8px; bottom:6px; font-size:12px; background:rgba(0,0,0,.55); padding:2px 6px; border-radius:6px; }
-  #chat { max-height:220px; overflow:auto; display:grid; gap:6px; margin:10px 0; }
-  #chat div { background:var(--bg); border-radius:10px; padding:6px 10px; overflow-wrap:anywhere; }
+  #chat, #dm { max-height:220px; overflow:auto; display:grid; gap:6px; margin:10px 0; }
+  #chat div, #dm div { background:var(--bg); border-radius:10px; padding:6px 10px; overflow-wrap:anywhere; }
+  #dm div.mine { background:var(--accent); justify-self:end; }
+  #dm div.theirs { justify-self:start; }
+  .badge { display:inline-block; min-width:20px; padding:0 6px; border-radius:10px; background:var(--accent); color:#fff; font-size:12px; font-weight:600; text-align:center; margin-left:6px; }
   #log { font:12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space:pre-wrap; overflow-wrap:anywhere; max-height:320px; overflow:auto; background:var(--bg); border-radius:10px; padding:10px; margin:0; }
   .err { color:var(--red); }
 </style>
@@ -95,6 +98,16 @@
       <button id="make-room">Create</button>
     </div>
     <ul id="rooms" style="margin-top:10px"><li class="muted">No rooms.</li></ul>
+  </section>
+
+  <section class="wide" id="dm-box" hidden>
+    <h2>Messages with <span id="dm-who"></span> <button class="quiet" id="dm-close" style="padding:2px 8px;margin-left:8px">Close</button></h2>
+    <p class="muted" style="margin:0">Between the two of you only. Kept by this server; nothing goes through Barua Talk or LiveKit.</p>
+    <div id="dm"></div>
+    <div class="row">
+      <input id="dm-text" class="grow" placeholder="Message" maxlength="2000" aria-label="Message to this person">
+      <button id="dm-send">Send</button>
+    </div>
   </section>
 
   <section class="wide">
@@ -209,6 +222,7 @@ $('save-name').onclick = async () => {
 };
 $('new-device').onclick = () => {
   if (live.kind) return log('Hang up first.', true);
+  closeDirect();
   deviceId = randomId();
   store('barua-talk-device', deviceId);
   $('name').value = '';
@@ -241,6 +255,18 @@ async function loadPeople() {
     id.className = 'muted';
     id.textContent = p.identity + (p.online ? '' : ' · not open');
     who.append(id);
+    // Unread messages from this person, unless their conversation is open here.
+    if (p.unread > 0 && direct.peer?.identity !== p.identity) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = p.unread;
+      badge.title = `${p.unread} unread message${p.unread === 1 ? '' : 's'}`;
+      who.append(badge);
+    }
+    const write = document.createElement('button');
+    write.className = 'quiet';
+    write.textContent = 'Message';
+    write.onclick = () => openDirect(p);
     const voice = document.createElement('button');
     voice.textContent = 'Call';
     voice.onclick = () => ring(p, false);
@@ -248,10 +274,60 @@ async function loadPeople() {
     video.className = 'quiet';
     video.textContent = 'Video call';
     video.onclick = () => ring(p, true);
-    li.append(who, voice, video);
+    li.append(who, write, voice, video);
     list.append(li);
   }
 }
+
+// ------------------------------------------ messages between two people
+// A conversation with one person: its own panel, open whether or not a
+// call or a room is. Polled, as the app polls it.
+const direct = { peer: null, lastMessage: 0, busy: false };
+function openDirect(person) {
+  direct.peer = person; direct.lastMessage = 0;
+  $('dm').replaceChildren();
+  $('dm-who').textContent = person.name;
+  $('dm-box').hidden = false;
+  $('dm-text').focus();
+  pollDirect().then(loadPeople);
+}
+function closeDirect() {
+  direct.peer = null; direct.lastMessage = 0;
+  $('dm-box').hidden = true;
+  $('dm').replaceChildren();
+}
+async function pollDirect() {
+  const peer = direct.peer;
+  if (!peer || direct.busy) return;
+  direct.busy = true;
+  try {
+    const path = `/v1/people/${encodeURIComponent(peer.identity)}/messages`;
+    const r = await api('GET', path + (direct.lastMessage ? `?after=${direct.lastMessage}&read=1` : '?read=1'), null, true);
+    if (!r.ok || direct.peer !== peer) return;
+    const box = $('dm');
+    for (const m of r.json.messages || []) {
+      if ((Number(m.id) || 0) <= direct.lastMessage) continue;
+      const row = document.createElement('div');
+      row.className = m.mine ? 'mine' : 'theirs';
+      row.textContent = m.text;
+      row.title = `${m.mine ? 'You' : m.from_name || m.from} · ${m.created_at}`;
+      box.append(row);
+      direct.lastMessage = Math.max(direct.lastMessage, Number(m.id) || 0);
+    }
+    if ((r.json.messages || []).length) box.scrollTop = box.scrollHeight;
+  } finally { direct.busy = false; }
+}
+async function sendDirect() {
+  const peer = direct.peer;
+  const text = $('dm-text').value.trim();
+  if (!peer || !text) return;
+  if (!me.identity) return log('Save a name first, so the other side sees who is writing.', true);
+  const r = await api('POST', `/v1/people/${encodeURIComponent(peer.identity)}/messages`, { text, client_id: 'w-' + randomId().slice(4) });
+  if (r.ok) { $('dm-text').value = ''; pollDirect(); } else log(`Could not send to ${peer.name}: ${sentence(r)}`, true);
+}
+$('dm-send').onclick = sendDirect;
+$('dm-text').onkeydown = (e) => { if (e.key === 'Enter') sendDirect(); };
+$('dm-close').onclick = closeDirect;
 
 // ------------------------------------------------------------------ rooms
 async function loadRooms() {
@@ -549,6 +625,7 @@ async function start() {
   setInterval(pollIncoming, 2500);
   setInterval(watchCall, 2000);
   setInterval(pollChat, 2000);
+  setInterval(pollDirect, 2000);
   setInterval(refresh, 5000);
   setInterval(health, 15000);
 }

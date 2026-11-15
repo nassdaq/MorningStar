@@ -515,6 +515,8 @@ pub enum Message {
     CallPerson(usize, bool),
     /// Dials the phone number of the person at this place.
     PhonePerson(usize),
+    /// Opens the conversation with the person at this place.
+    MessagePerson(usize),
 
     /// "Accept".
     Accept,
@@ -1401,6 +1403,10 @@ impl BaruaTalk {
             self.rooms.push(room);
         }
         self.rings = self.rooms.len();
+        // Conversations between two people are not in the server's list of
+        // rooms: they stay, after the rooms, and have no ring on Home.
+        self.rooms
+            .extend(old.into_iter().filter(|room| room.peer().is_some()));
         // The room on screen is gone: someone closed it.
         if self.room.is_some() && self.room().is_none() {
             let had_room_video = matches!(
@@ -1421,11 +1427,26 @@ impl BaruaTalk {
 
     /// The server's list becomes Home's.
     fn take_activity(&mut self, rows: Vec<api::ActivityRow>, now: &str) {
+        for row in &rows {
+            if row.kind == api::ActivityKind::Person {
+                self.ensure_direct(&row.id, &row.title);
+            }
+        }
         self.items = rows
             .into_iter()
             .map(|row| {
                 let when = model::ago(&row.at, now);
                 match row.kind {
+                    api::ActivityKind::Person => Item {
+                        face: Face::of(&row.title),
+                        target: Target::Room(model::direct_room(&row.id)),
+                        title: row.title,
+                        preview: row.preview,
+                        mark: Mark::None,
+                        when,
+                        unread: row.unread,
+                        missed: false,
+                    },
                     api::ActivityKind::Room => Item {
                         face: Face::of(&row.title),
                         target: Target::Room(row.id),
@@ -1469,6 +1490,72 @@ impl BaruaTalk {
                 }
             })
             .collect();
+    }
+
+    /// The conversation with the person `identity`, made if the app does
+    /// not hold it yet: its address among the rooms.
+    fn ensure_direct(&mut self, identity: &str, name: &str) -> String {
+        let address = model::direct_room(identity);
+        let status = match self.person(identity).map(|person| person.online) {
+            Some(true) => "Online",
+            Some(false) => "Offline",
+            None => "Direct messages",
+        }
+        .to_owned();
+        match self.room_mut(&address) {
+            Some(room) => {
+                room.title = name.to_owned();
+                room.short = short_name(name);
+                room.face = Face::of(name);
+                room.status = status;
+            }
+            None => self.rooms.push(Room {
+                name: address.clone(),
+                title: name.to_owned(),
+                short: short_name(name),
+                face: Face::of(name),
+                status,
+                live: false,
+                entries: Vec::new(),
+                loaded: Loaded::No,
+                last_id: 0,
+                recording: None,
+                replier: None,
+            }),
+        }
+        address
+    }
+
+    /// Opens the conversation with `person`: the server's when there is
+    /// one, the scripted app's room of that person otherwise.
+    fn message_person(&mut self, person: &Person) {
+        if self.link.is_online() {
+            let address = self.ensure_direct(&person.identity, &person.name);
+            self.open_room(&address);
+        } else if self.room_mut(&person.identity).is_some() {
+            let address = person.identity.clone();
+            self.open_room(&address);
+        } else {
+            self.toast(format!(
+                "There is no conversation with {} yet.",
+                person.name
+            ));
+        }
+    }
+
+    /// The other person of the conversation on screen, to ring: `None` in
+    /// a room.
+    fn direct_peer(&self) -> Option<Person> {
+        let room = self.room()?;
+        let identity = room.peer()?;
+        Some(self.person(identity).cloned().unwrap_or_else(|| Person {
+            identity: identity.to_owned(),
+            name: room.title.clone(),
+            face: room.face.clone(),
+            online: true,
+            unread: 0,
+            phone: None,
+        }))
     }
 
     /// The server answered everything a check asks: its world is the
@@ -1589,6 +1676,14 @@ impl BaruaTalk {
         self.playing = None;
         if let Some(index) = self.item_of_room(name) {
             self.items[index].unread = 0;
+        }
+        if let Some(identity) = name.strip_prefix(model::DIRECT) {
+            // Opening the conversation reads it.
+            for person in &mut self.people {
+                if person.identity == identity {
+                    person.unread = 0;
+                }
+            }
         }
         self.poll_room = Poll::default();
         if self.screen() == Screen::Room {
@@ -2580,9 +2675,20 @@ impl BaruaTalk {
                                 identity: row.peer.identity,
                                 name: row.peer.name,
                                 online: row.online,
+                                unread: row.unread,
                                 phone: None,
                             })
                             .collect();
+                        // The line under a conversation's name follows.
+                        for index in 0..self.rooms.len() {
+                            let Some(identity) = self.rooms[index].peer() else {
+                                continue;
+                            };
+                            if let Some(person) = self.person(identity) {
+                                self.rooms[index].status =
+                                    if person.online { "Online" } else { "Offline" }.to_owned();
+                            }
+                        }
                     }
                     Ok(_) => {}
                     Err(failure) => self.note_failure(&failure),
@@ -2597,7 +2703,8 @@ impl BaruaTalk {
                         let name = row.name.clone();
                         if self.room_mut(&name).is_none() {
                             let mut rows = vec![row];
-                            rows.extend(self.rooms.iter().map(|room| api::RoomRow {
+                            let rooms = || self.rooms.iter().filter(|room| room.peer().is_none());
+                            rows.extend(rooms().map(|room| api::RoomRow {
                                 name: room.name.clone(),
                                 display_name: room.title.clone(),
                                 members: 0,
@@ -2605,7 +2712,7 @@ impl BaruaTalk {
                                 recording: room.recording.clone(),
                             }));
                             let statuses: Vec<String> =
-                                self.rooms.iter().map(|room| room.status.clone()).collect();
+                                rooms().map(|room| room.status.clone()).collect();
                             self.take_rooms(rows);
                             for (room, status) in self.rooms.iter_mut().skip(1).zip(statuses) {
                                 room.status = status;
@@ -2861,6 +2968,7 @@ impl BaruaTalk {
             identity: row.peer.identity,
             name: row.peer.name,
             online: true,
+            unread: 0,
             phone: None,
         };
         self.asks
@@ -3105,6 +3213,7 @@ impl BaruaTalk {
                         name: item.title.clone(),
                         identity,
                         online: true,
+                        unread: 0,
                         phone: None,
                     })
                 });
@@ -3229,15 +3338,29 @@ impl BaruaTalk {
                 }
             }
             Message::RoomPhone => {
+                // In a conversation between two people the two buttons
+                // ring the other person, free, in the app.
+                if let Some(person) = self.direct_peer() {
+                    self.ring(person, false);
+                    return;
+                }
                 self.dial.clear();
                 self.dial_problem = None;
                 self.nav.push(Screen::Dial);
             }
-            Message::RoomVideo => self.room_video(),
+            Message::RoomVideo => match self.direct_peer() {
+                Some(person) => self.ring(person, true),
+                None => self.room_video(),
+            },
 
             Message::CallPerson(index, video) => {
                 if let Some(person) = self.people.get(index).cloned() {
                     self.ring(person, video);
+                }
+            }
+            Message::MessagePerson(index) => {
+                if let Some(person) = self.people.get(index).cloned() {
+                    self.message_person(&person);
                 }
             }
             Message::PhonePerson(index) => {
@@ -3386,10 +3509,9 @@ impl BaruaTalk {
         }
     }
 
-    /// "Reply with a message instead": the call is declined. In the
-    /// scripted app the caller's conversation opens; the server has no
-    /// conversations between two people, only rooms everyone sees, so
-    /// with a server the app says so instead of opening one.
+    /// "Reply with a message instead": the call is declined and the
+    /// caller's conversation opens: the server's with a server, the
+    /// scripted app's room of that person without.
     fn reply_instead(&mut self) {
         let Some(call) = &self.call else {
             return;
@@ -3398,20 +3520,21 @@ impl BaruaTalk {
             return;
         }
         let scripted = call.scripted;
-        let room = match &call.subject {
-            Subject::Person(person) => person.identity.clone(),
-            Subject::Room { name, .. } => name.clone(),
-        };
-        if scripted {
-            self.hang_up_call(None);
-            if self.room_mut(&room).is_some() {
-                self.open_room(&room);
+        let subject = call.subject.clone();
+        // The call is declined either way; then the conversation opens.
+        self.hang_up_call(None);
+        match subject {
+            Subject::Person(person) if !scripted => self.message_person(&person),
+            Subject::Person(person) => {
+                if self.room_mut(&person.identity).is_some() {
+                    self.open_room(&person.identity);
+                }
             }
-        } else {
-            self.hang_up_call(Some(
-                "Declined. Messages between two people need the next version: write in a room."
-                    .to_owned(),
-            ));
+            Subject::Room { name, .. } => {
+                if self.room_mut(&name).is_some() {
+                    self.open_room(&name);
+                }
+            }
         }
     }
 

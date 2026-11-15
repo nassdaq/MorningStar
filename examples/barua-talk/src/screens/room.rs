@@ -1,5 +1,8 @@
 //! Screen 02: a room's chat. `design/html/02-room.html`.
 //!
+//! Also the conversation between two people ([`Room::peer`]): the same
+//! page, whose two header buttons then ring the other person.
+//!
 //! The room's name with the two ways to call from it, the conversation,
 //! and the message field. The header and the field stay put; the
 //! conversation scrolls and follows the newest message.
@@ -25,6 +28,11 @@ use crate::{BaruaTalk, Message, Screen, TICKS_PER_SECOND};
 /// The arrow (`margin-left: -10px`) and the video button (`margin-right:
 /// -8px`) are 44 dp targets that reach into the page's 20 dp margin.
 fn header(app: &BaruaTalk, room: &Room) -> Container<Message> {
+    let (phone, video) = if room.peer().is_some() {
+        ("Voice call", "Video call")
+    } else {
+        ("Add a phone call to this room", "Start video in this room")
+    };
     col![
         row![
             back_button("Back to home"),
@@ -40,24 +48,8 @@ fn header(app: &BaruaTalk, room: &Room) -> Container<Message> {
             ]
             .gap(2.0)
             .fill_width(),
-            icon_button(
-                &icons::PHONE,
-                44.0,
-                22.0,
-                INK,
-                "Add a phone call to this room",
-                Message::RoomPhone
-            )
-            .id("room-phone"),
-            icon_button(
-                &icons::VIDEO,
-                44.0,
-                22.0,
-                INK,
-                "Start video in this room",
-                Message::RoomVideo
-            )
-            .id("room-video"),
+            icon_button(&icons::PHONE, 44.0, 22.0, INK, phone, Message::RoomPhone).id("room-phone"),
+            icon_button(&icons::VIDEO, 44.0, 22.0, INK, video, Message::RoomVideo).id("room-video"),
         ]
         .gap(10.0)
         .cross_align(CrossAlign::Center)
@@ -372,7 +364,11 @@ pub fn view(app: &BaruaTalk) -> Element<Message> {
     };
     let empty = match &room.loaded {
         Loaded::Loading | Loaded::No if room.entries.is_empty() => {
-            Some(quiet_line("Loading this room\u{2026}".to_owned()))
+            Some(quiet_line(if room.peer().is_some() {
+                "Loading this conversation\u{2026}".to_owned()
+            } else {
+                "Loading this room\u{2026}".to_owned()
+            }))
         }
         Loaded::Failed(why) if room.entries.is_empty() => Some(quiet_line(format!(
             "The messages could not be fetched. {why}"

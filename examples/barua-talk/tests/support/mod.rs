@@ -311,6 +311,24 @@ pub struct StoredRoom {
     pub messages: Vec<StoredMessage>,
 }
 
+/// The conversation between the app's user and one other person.
+#[derive(Clone, Debug, Default)]
+pub struct StoredDirect {
+    pub peer: String,
+    pub messages: Vec<StoredMessage>,
+    /// The user's read mark.
+    pub read: u64,
+}
+
+impl StoredDirect {
+    pub fn unread(&self) -> usize {
+        self.messages
+            .iter()
+            .filter(|message| message.from == self.peer && message.id > self.read)
+            .count()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct StoredCall {
     pub id: String,
@@ -345,6 +363,7 @@ pub struct World {
     pub me: Option<(String, String)>,
     pub people: Vec<(String, String, bool)>,
     pub rooms: Vec<StoredRoom>,
+    pub directs: Vec<StoredDirect>,
     pub calls: Vec<StoredCall>,
     pub phones: Vec<StoredPhone>,
     next_id: u64,
@@ -383,6 +402,7 @@ pub fn world() -> Shared {
                 client_id: String::new(),
             }],
         }],
+        directs: Vec::new(),
         calls: Vec::new(),
         phones: Vec::new(),
         next_id: 41,
@@ -444,6 +464,40 @@ impl World {
             text: text.to_owned(),
             client_id: String::new(),
         });
+    }
+
+    /// The conversation with `peer`, made if there is none.
+    pub fn direct(&mut self, peer: &str) -> &mut StoredDirect {
+        if !self.directs.iter().any(|direct| direct.peer == peer) {
+            self.directs.push(StoredDirect {
+                peer: peer.to_owned(),
+                ..StoredDirect::default()
+            });
+        }
+        self.directs
+            .iter_mut()
+            .find(|direct| direct.peer == peer)
+            .expect("the conversation")
+    }
+
+    /// Someone writes to the app's user, between the two of them.
+    pub fn whisper(&mut self, from: &str, from_name: &str, text: &str) {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.direct(from).messages.push(StoredMessage {
+            id,
+            from: from.to_owned(),
+            from_name: from_name.to_owned(),
+            text: text.to_owned(),
+            client_id: String::new(),
+        });
+    }
+
+    fn person_name(&self, identity: &str) -> String {
+        self.people
+            .iter()
+            .find(|person| person.0 == identity)
+            .map_or_else(|| identity.to_owned(), |person| person.1.clone())
     }
 
     /// Someone rings the app's user.
@@ -562,6 +616,28 @@ impl World {
                 quoted(&call.peer.1)
             ));
         }
+        for direct in &self.directs {
+            let Some(last) = direct.messages.last() else {
+                continue;
+            };
+            let name = self.person_name(&direct.peer);
+            let preview = if last.from == direct.peer {
+                last.text.clone()
+            } else {
+                format!("You: {}", last.text)
+            };
+            items.push(format!(
+                r#"{{"kind": "person", "id": {}, "title": {}, "preview": {}, "at": "2026-11-15T07:01:00Z",
+                    "unread": {}, "live": false, "status": "open", "direction": null, "video": null,
+                    "seconds": null, "peer": {{"identity": {}, "name": {}}}}}"#,
+                quoted(&direct.peer),
+                quoted(&name),
+                quoted(&preview),
+                direct.unread(),
+                quoted(&direct.peer),
+                quoted(&name)
+            ));
+        }
         for room in &self.rooms {
             let (preview, unread) = match room.messages.last() {
                 Some(last) => (format!("{}: {}", last.from_name, last.text), 1),
@@ -676,8 +752,14 @@ impl World {
                     .people
                     .iter()
                     .map(|(identity, name, online)| {
+                        let direct = self.directs.iter().find(|direct| direct.peer == *identity);
+                        let unread = direct.map_or(0, StoredDirect::unread);
+                        let last = direct
+                            .and_then(|direct| direct.messages.last())
+                            .map_or_else(|| "null".to_owned(), |last| self.message_json(last));
                         format!(
-                            r#"{{"identity": {}, "name": {}, "seen_at": "{NOW}", "online": {online}}}"#,
+                            r#"{{"identity": {}, "name": {}, "seen_at": "{NOW}", "online": {online},
+                                "unread": {unread}, "last_message": {last}}}"#,
                             quoted(identity),
                             quoted(name)
                         )
@@ -782,6 +864,88 @@ impl World {
                             client_id,
                         };
                         room.messages.push(message.clone());
+                        self.next_id += 1;
+                        (201, message)
+                    }
+                };
+                ok(
+                    status,
+                    format!(r#"{{"message": {}}}"#, self.message_json(&message)),
+                )
+            }
+            ("GET", ["people", peer, "messages"]) => {
+                if !self.people.iter().any(|person| person.0 == *peer) {
+                    return Some(error(
+                        404,
+                        "not_found",
+                        "There is no person with that identity.",
+                    ));
+                }
+                let after = query
+                    .split('&')
+                    .find_map(|pair| pair.strip_prefix("after="))
+                    .and_then(|id| id.parse::<u64>().ok());
+                let read = query.split('&').any(|pair| pair == "read=1");
+                let name = self.person_name(peer);
+                let online = self
+                    .people
+                    .iter()
+                    .any(|person| person.0 == *peer && person.2);
+                let direct = self.direct(peer);
+                let last = direct.messages.last().map_or(0, |message| message.id);
+                if read {
+                    direct.read = last;
+                }
+                let unread = direct.unread();
+                let messages: Vec<StoredMessage> = direct
+                    .messages
+                    .iter()
+                    .filter(|message| after.is_none_or(|after| message.id > after))
+                    .cloned()
+                    .collect();
+                let rows: Vec<String> = messages
+                    .iter()
+                    .map(|message| self.message_json(message))
+                    .collect();
+                ok(
+                    200,
+                    format!(
+                        r#"{{"peer": {{"identity": {}, "name": {}, "online": {online}}},
+                            "messages": [{}], "last_id": {last}, "more": false, "unread": {unread}, "now": "{NOW}"}}"#,
+                        quoted(peer),
+                        quoted(&name),
+                        rows.join(",")
+                    ),
+                )
+            }
+            ("POST", ["people", peer, "messages"]) => {
+                if !self.people.iter().any(|person| person.0 == *peer) {
+                    return Some(error(
+                        404,
+                        "not_found",
+                        "There is no person with that identity.",
+                    ));
+                }
+                let (identity, my_name) = self.me();
+                let (text, client_id) = (field("text"), field("client_id"));
+                let id = self.next_id;
+                let direct = self.direct(peer);
+                let known = direct
+                    .messages
+                    .iter()
+                    .find(|message| !client_id.is_empty() && message.client_id == client_id)
+                    .cloned();
+                let (status, message) = match known {
+                    Some(message) => (200, message),
+                    None => {
+                        let message = StoredMessage {
+                            id,
+                            from: identity,
+                            from_name: my_name,
+                            text,
+                            client_id,
+                        };
+                        direct.messages.push(message.clone());
                         self.next_id += 1;
                         (201, message)
                     }

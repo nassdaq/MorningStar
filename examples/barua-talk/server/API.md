@@ -105,9 +105,14 @@ changes the name only.
 Everyone else who has an identity, most recently seen first, at most 200:
 
 ```json
-{"people": [{"identity": "baraka", "name": "Baraka", "seen_at": "2026-11-15T07:01:10Z", "online": true}],
+{"people": [{"identity": "baraka", "name": "Baraka", "seen_at": "2026-11-15T07:01:10Z", "online": true,
+             "unread": 1, "last_message": …message…}],
  "now": "2026-11-15T07:01:12Z"}
 ```
+
+`unread` and `last_message` are this person's conversation with that
+person ("Messages between two people" below): 0 and `null` when nothing
+was ever written.
 
 `online` is true when that person's app made any request in the last 30
 seconds (an app that polls for incoming calls is therefore online while it
@@ -287,6 +292,56 @@ with `"delivered": false`. A forward is tried once, never again.
 
 Marks the room read up to that message id (left out: up to the newest).
 The mark never moves backwards. `{"unread": 0}`.
+
+## Messages between two people
+
+A conversation between this person and one other, by identity. It is kept
+by the server only: nothing is asked of upstream, so it costs nothing,
+works without a Barua key, and is not sent through any LiveKit room (an
+open screen learns of a new message by polling). Only the two people can
+read it: every path means "my conversation with `{identity}`", so there is
+no address for anyone else's. The shapes are those of room chat:
+
+```json
+{"id": 7, "from": "neema", "from_name": "Neema", "mine": true,
+ "text": "Habari", "created_at": "2026-11-15T07:01:00Z", "delivered": true}
+```
+
+`id` only grows, across all conversations (it is a different series from
+room messages' ids). `delivered` is always true: stored is delivered.
+
+### `GET /v1/people/{identity}/messages`
+
+As `GET /v1/rooms/{name}/messages`: no query for the latest 50, oldest
+first; `?after=7` to poll; `?limit=N` (1..100); `&read=1` to move this
+person's read mark to the newest message returned.
+
+```json
+{"peer": {"identity": "baraka", "name": "Baraka", "online": true},
+ "messages": [ …message… ], "last_id": 7, "more": false, "unread": 0, "now": "2026-11-15T07:01:12Z"}
+```
+
+`404 not_found` when nobody has that identity; `400` for one's own.
+
+### `POST /v1/people/{identity}/messages`
+
+```json
+{"text": "Habari", "client_id": "m-7f3a9c21"}
+```
+
+`text` and `client_id` as for a room. **201** `{"message": …message…}`;
+the author's read mark moves to it. A `client_id` this person already used
+returns that first message with 200, or `409 client_id_used` if it went to
+someone else.
+
+### `POST /v1/people/{identity}/read`
+
+```json
+{"up_to": 7}
+```
+
+Marks the conversation read up to that id (left out: the newest). Never
+backwards. `{"unread": 0}`.
 
 ## In-app calls
 
@@ -489,8 +544,9 @@ recordings of that room or call instead (for a member or a participant).
 
 ## `GET /v1/activity`
 
-The Home list: this person's rooms (those they are a member of), in-app
-calls and phone calls in one list, newest first, at most 50
+The Home list: this person's rooms (those they are a member of), their
+conversations with people, in-app calls and phone calls in one list,
+newest first, at most 50
 (`?limit=N`, 1..100).
 
 ```json
@@ -512,8 +568,11 @@ calls and phone calls in one list, newest first, at most 50
  "now": "2026-11-15T07:01:12Z"}
 ```
 
-- `kind`: `room`, `call` (in-app) or `phone`. `id` is what the endpoints
-  of that kind take.
+- `kind`: `room`, `person` (a conversation between two people: `id` is the
+  other person's identity, `peer` is them, `status` is `open`, `live` is
+  false, `at` is the last message's time, and `preview` is the last
+  message, with `You: ` in front of one's own), `call` (in-app) or
+  `phone`. `id` is what the endpoints of that kind take.
 - `title`: the room's display name, the other person's name, the phone
   number. `preview`: one line the app can show as it is (the last message
   as `Name: text`, or `You: text`; a description of the call). The fields
@@ -521,7 +580,7 @@ calls and phone calls in one list, newest first, at most 50
 - `at`: a room's `active_at`; a call's `created_at`.
 - `status`: `open` for a room, else the call's status. `live`: the room's
   `live`; for calls, `ringing` or `active`.
-- `unread` is only ever non-zero for rooms.
+- `unread` is only ever non-zero for rooms and conversations.
 
 Answered from the database.
 

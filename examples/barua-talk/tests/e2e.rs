@@ -519,6 +519,23 @@ fn the_bar_its_sheet_and_the_two_tabs_of_the_apps_own() {
         assert_eq!(device.screen(), Screen::Dial, "{phone}");
         device.back();
 
+        // A person is the way into their conversation: the design's own
+        // room of that person, where it has one.
+        device.tap("tab-contacts");
+        device.tap(("person-message", 0usize));
+        assert_eq!(device.screen(), Screen::Room, "{phone}");
+        assert_eq!(device.app().room().unwrap().name, "baraka");
+        assert_eq!(device.app().room().unwrap().peer(), None);
+        assert!(device.back());
+        device.tap(("person-message", 1usize));
+        assert_eq!(device.screen(), Screen::People, "{phone}");
+        assert_eq!(
+            device.app().notice(),
+            Some("There is no conversation with Zawadi Mollel yet.")
+        );
+        assert!(!device.has(("person-message", 4usize)), "{phone}");
+        device.tap("tab-home");
+
         // A phone contact is called on their phone.
         device.tap("tab-contacts");
         device.tap(("person-phone", 4usize));

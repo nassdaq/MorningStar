@@ -95,8 +95,9 @@ link, the app does something a person would expect and says so here.
 | | "Dial a phone number" | The dial pad (app's own) |
 | | "New room" | The form that makes a room (app's own) |
 | | A ring | Opens that room. The row scrolls sideways when there are more rings than fit |
-| | All, Rooms, Calls | Filter the list: everything, conversations, calls of both kinds. The count beside All is the unread messages in all rooms |
+| | All, Rooms, Calls | Filter the list: everything, conversations, calls of both kinds. The count beside All is the unread messages in all rooms and conversations |
 | | A row: a room | Opens the room and marks it read |
+| | A row: a person's conversation (server) | Opens the conversation between the two, on the Room screen, and marks it read. It has no ring among "Live rooms" |
 | | A row: a call in the app | Calls that person again, as the design's `href="Call.dc.html"` |
 | | A row: a phone call | Scripted: calls the number again, as the design's link to its Phone call page. With a server: puts the number on the dial pad, because a phone call costs money and should take a press of its own |
 | | The first row (Baraka, scripted) | The design links it to its Incoming page: Baraka rings. With a server there is no such row; a call rings when someone really calls |
@@ -104,7 +105,8 @@ link, the app does something a person would expect and says so here.
 | | "+" ("Start a call or room") | A sheet with "New room", "Call someone", "Dial a number" (app's own); its scrim and Back close it |
 | | Calls | Home, with its Calls tab chosen (there is no separate page) |
 | Room | Back | Home (or wherever it was opened from) |
-| | Phone ("Add a phone call to this room") | The dial pad, as the design's link. The call is its own: the contract cannot put a phone into a room (`server/APP-NEEDS.md`) |
+| Room, as a conversation between two people (server) | Phone ("Voice call"), Camera ("Video call") | Ring the other person in the app, free, as the People screen's buttons do. Everything else is the room's: the field, Send, "Not sent", the polling |
+| Room | Phone ("Add a phone call to this room") | The dial pad, as the design's link. The call is its own: the contract cannot put a phone into a room (`server/APP-NEEDS.md`) |
 | | Camera ("Start video in this room") | The call screen as the room's call. With a server a ticket for the room is taken and the room's sound is joined with it |
 | | Play | Scripted sample only. The accent runs along the bars and the length counts down; a toast says the sample has no sound; a second tap stops it |
 | | Paperclip | A toast: no file picker in this version |
@@ -112,7 +114,7 @@ link, the app does something a person would expect and says so here.
 | | "Not sent … Tap to try again" (server) | Sends the same message again under the same id, so that it is never stored twice |
 | Incoming | Accept | The call screen, its clock at 00:00 |
 | | Decline | Ends it; back to where one was. Scripted, the call joins the list as missed |
-| | "Reply with a message instead" | Declines. Scripted: opens the caller's conversation. With a server: says that messages between two people need the next version (rooms are the only place to write, and everyone sees them) |
+| | "Reply with a message instead" | Declines, and opens the caller's conversation: scripted, the design's room of that person; with a server, the conversation between the two that the server keeps |
 | | Cancel (a call one makes) | Gives it up. The app's own state of this screen: "Inaita…" and one button |
 | Video call | Back | Ends the call (or leaves the room's call, the design's "Back to chat"), leaves its sound, and goes back. There is no call in the background in this version |
 | | Add someone | A toast: needs the next version |
@@ -157,7 +159,7 @@ something needs it; online it always does):
 | --- | --- | --- |
 | `GET /v1/calls/incoming` | 2.5 s | No call is in progress. A call found opens the Incoming screen |
 | `GET /v1/rooms` + `/v1/activity` | 5 s | Home or Notifications is on top; also on reaching them and after a call |
-| `GET …/messages?after=N&read=1` | 2 s | A room is on top (the first asking has no `after`) |
+| `GET …/messages?after=N&read=1` | 2 s | A room or a conversation between two people is on top (the first asking has no `after`) |
 | `GET /v1/people` | 5 s | The People screen is on top |
 | `GET /v1/calls/{id}` | 2 s ringing, 5 s answered | A call with a person |
 | `GET /v1/phone-calls/{id}` | 4 s | A phone call |
@@ -170,6 +172,21 @@ if the post fails it stays, says why, and a tap sends it again under the
 same id. A poll that brings the user's own message before its post is
 answered does not show it twice. Messages are text: the voice message, the
 photograph and the server's notice of the design exist only in the sample.
+
+**A conversation between two people** is the Room screen over
+`/v1/people/{identity}/messages` instead of `/v1/rooms/{name}/messages`
+(`server/API.md`, "Messages between two people"): the server keeps it,
+nothing goes to Barua Talk, and only the two can read it. In the app it is
+a room whose address is `@` and the identity (`model::direct_room`), which
+no real room's address can be, so the same code reads, posts, retries and
+polls it. It opens from a person on the People screen, from its row on
+Home (the server's activity list has one for every conversation with a
+message in it, with the last message and the unread count; Notifications
+counts them), and from "Reply with a message instead". It is not sent
+through any live room: a message arrives with the next poll, 2 s at most
+while the conversation is open, 5 s on Home. The scripted app has no such
+conversations: there a person opens the design's own room of that person
+where it has one (Baraka, Juma), and says there is none otherwise.
 
 **A call to a person.** `POST /v1/calls`, then the Incoming screen's
 "Inaita…" until a poll says `active` (the call screen), `declined`,
@@ -316,10 +333,13 @@ Not from the design, built from its parts and tokens:
 - **New room** (`screens/new_room.rs`): a room's header, its message field
   as a name field, the main button.
 - **People** (`screens/people.rs`): the Contacts tab. Home's rows with a
-  dot for who is online and round buttons for a voice call, a video call,
-  or, for a contact with only a phone number, their phone.
+  dot for who is online, Home's unread count beside it for messages from
+  that person, and round buttons for a voice call, a video call, or, for
+  a contact with only a phone number, their phone. Tapping the person
+  (picture and name) opens the conversation with them.
 - **Notifications** (`screens/notifications.rs`): the Notifications tab.
-  Home's rows that have unread messages or are a missed call.
+  Home's rows that have unread messages (rooms and conversations) or are
+  a missed call.
 - **You and the server** (`screens/server.rs`): the name, the address in
   use, how the app stands with the server in plain words, two buttons, and
   how to run one.

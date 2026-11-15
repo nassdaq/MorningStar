@@ -608,6 +608,8 @@ pub struct PersonRow {
     pub peer: Peer,
     /// Their app is open.
     pub online: bool,
+    /// Unread messages from them, in the conversation with this person.
+    pub unread: u32,
 }
 
 /// Decodes `GET /v1/people`.
@@ -620,6 +622,8 @@ pub fn decode_people(result: Result<HttpResponse, HttpError>) -> Result<Vec<Pers
             Ok(PersonRow {
                 peer: peer(row)?,
                 online: boolean(row, "online")?,
+                // Absent from a server older than conversations.
+                unread: integer(row, "unread", 0, 1_000_000).unwrap_or(0),
             })
         })
         .collect()
@@ -955,6 +959,8 @@ pub fn decode_recording(
 pub enum ActivityKind {
     /// A room.
     Room,
+    /// A conversation between this person and one other.
+    Person,
     /// An in-app call.
     Call,
     /// A call to a phone.
@@ -974,13 +980,13 @@ pub struct ActivityRow {
     pub preview: String,
     /// When.
     pub at: String,
-    /// Unread messages (rooms only).
+    /// Unread messages (rooms and conversations).
     pub unread: u32,
     /// The call's status, or `open` for a room.
     pub status: String,
     /// With video.
     pub video: bool,
-    /// The other person of an in-app call.
+    /// The other person of an in-app call or a conversation.
     pub peer: Option<Peer>,
 }
 
@@ -997,6 +1003,7 @@ pub fn decode_activity(
             Ok(ActivityRow {
                 kind: match row.get("kind").and_then(Value::as_str) {
                     Some("room") => ActivityKind::Room,
+                    Some("person") => ActivityKind::Person,
                     Some("call") => ActivityKind::Call,
                     Some("phone") => ActivityKind::Phone,
                     _ => return Err(Failure::Malformed("kind")),
@@ -1122,8 +1129,14 @@ impl Client {
         )
     }
 
+    /// The path of a room's chat, or, for the address of a conversation
+    /// between two people ([`direct_room`](crate::model::direct_room)),
+    /// of that conversation: the two answer in the same shapes.
     fn room_path(room: &str, tail: &str) -> String {
-        format!("/v1/rooms/{}{tail}", encode_segment(room))
+        match room.strip_prefix(crate::model::DIRECT) {
+            Some(identity) => format!("/v1/people/{}{tail}", encode_segment(identity)),
+            None => format!("/v1/rooms/{}{tail}", encode_segment(room)),
+        }
     }
 
     /// `GET /v1/rooms/{name}/messages`, moving the read mark: the latest

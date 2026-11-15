@@ -29,6 +29,7 @@ fn person(identity: &str, name: &str, photo: Photo, online: bool) -> Person {
         name: name.to_owned(),
         face: Face::Photo(photo),
         online,
+        unread: 0,
         phone: None,
     }
 }
