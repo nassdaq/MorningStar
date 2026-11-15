@@ -360,9 +360,11 @@ final class MorningstarNative {
     // MorningstarLive. Its answers are nativeLiveEvent.
     /**
      * first: the media server's address (wss://...); second: the ticket, a
-     * secret that is never logged; data: three bytes, each zero for no:
+     * secret that is never logged; data: four bytes, each zero for no:
      * the microphone is live from the start, sound goes to the loudspeaker
-     * rather than the earpiece, speaking reports are wanted. Answered with
+     * rather than the earpiece, speaking reports are wanted, the camera is
+     * on from the start (a host that reads three takes the fourth as no).
+     * Answered with
      * a nativeLiveEvent for each event of the room, under this id, the
      * last of them LIVE_DISCONNECTED or LIVE_FAILED.
      */
@@ -373,6 +375,22 @@ final class MorningstarNative {
     static final int SERVICE_LIVE_MICROPHONE = 12;
     /** data: one byte, zero for the earpiece. Not answered. */
     static final int SERVICE_LIVE_SPEAKER = 13;
+    // What a room carries besides sound (docs/architecture/0039).
+    /**
+     * Send data to everyone in the room. first: the topic; second:
+     * "reliable", or empty for fast and perhaps lost; data: the message.
+     * Not answered.
+     */
+    static final int SERVICE_LIVE_DATA = 14;
+    /**
+     * data: one byte, zero to turn this device's camera off. Not answered:
+     * LIVE_VIDEO_STARTED, LIVE_VIDEO_STOPPED or LIVE_MEDIA_FAILED follows.
+     */
+    static final int SERVICE_LIVE_CAMERA = 15;
+    /** Change between the front and the back camera. Not answered. */
+    static final int SERVICE_LIVE_SWITCH_CAMERA = 16;
+    /** data: one byte, zero to stop sharing this device's screen. As for the camera. */
+    static final int SERVICE_LIVE_SCREEN_SHARE = 17;
 
     // Values of nativeLiveEvent's kind argument. Must match
     // LiveEvent::from_wire in morningstar-core.
@@ -389,6 +407,22 @@ final class MorningstarNative {
     static final int LIVE_DISCONNECTED = 6;
     /** code: a LIVE_ERROR_*; first: what failed. The last event of a room. */
     static final int LIVE_FAILED = 7;
+
+    /**
+     * A video started. code: its track number times 4, plus 2 if it is this
+     * device's own, plus 1 if it is a shared screen; first: whose, by
+     * identity. Its pictures follow through nativeVideoFrame under that
+     * track number.
+     */
+    static final int LIVE_VIDEO_STARTED = 8;
+    /** That video is over. code and first as for LIVE_VIDEO_STARTED. */
+    static final int LIVE_VIDEO_STOPPED = 9;
+    /**
+     * This device's camera or screen could not be turned on. code: a
+     * LIVE_ERROR_* times 2, plus 1 for the screen; first: what failed.
+     * Not the end of the room.
+     */
+    static final int LIVE_MEDIA_FAILED = 10;
 
     // nativeLiveEvent's code with LIVE_DISCONNECTED.
     static final int LIVE_END_LEFT = 0;
@@ -468,6 +502,38 @@ final class MorningstarNative {
     static native void nativeLiveEvent(long id, int kind, int code, String first, String second);
 
     /**
+     * Someone sent data to the live room joined by SERVICE_LIVE_JOIN id:
+     * from is their identity (empty for the server), topic what they
+     * called it, payload the message. Any thread.
+     */
+    static native void nativeLiveData(long id, String from, String topic, byte[] payload);
+
+    /**
+     * One decoded picture of the video with this track number, as I420:
+     * three direct ByteBuffers, each read from its start, with the bytes
+     * from one row to the next of each; rotation is the degrees clockwise
+     * that show it upright, mirrored whether it is shown as in a mirror (a
+     * front camera's own preview). The planes are copied before this
+     * returns: release the buffer afterwards, not before. Only the latest
+     * frame of a video is kept. Any thread.
+     */
+    static native void nativeVideoFrame(
+            int track,
+            int width,
+            int height,
+            int rotation,
+            boolean mirrored,
+            java.nio.ByteBuffer y,
+            int yStride,
+            java.nio.ByteBuffer u,
+            int uStride,
+            java.nio.ByteBuffer v,
+            int vStride);
+
+    /** The video with this track number is over. Any thread. */
+    static native void nativeVideoEnded(int track);
+
+    /**
      * Called by Rust, on its render thread, to make an HTTP request: method
      * is "GET", "POST", ...; headers is "Name: value" lines; body is empty
      * for none; timeoutMs bounds the whole exchange. Only hands the request
@@ -497,7 +563,7 @@ final class MorningstarNative {
             MAIN.post(() -> MorningstarAccessibility.announce(first, "assertive".equals(second)));
             return;
         }
-        if (command >= SERVICE_LIVE_JOIN && command <= SERVICE_LIVE_SPEAKER) {
+        if (command >= SERVICE_LIVE_JOIN && command <= SERVICE_LIVE_SCREEN_SHARE) {
             // The live room has its own class, which exists in two forms:
             // the real one in an app that declares the service, and one
             // that refuses in every other app (ADR 0038).

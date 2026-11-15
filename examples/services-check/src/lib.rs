@@ -301,6 +301,18 @@ impl Application for ServicesCheck {
                     LiveEvent::Reconnected => "connected again".into(),
                     LiveEvent::Disconnected(reason) => format!("over: {reason}"),
                     LiveEvent::Failed(error) => error.to_string(),
+                    // This app is built with `live` alone: voice. What a
+                    // room carries besides (ADR 0039) is only named here.
+                    LiveEvent::VideoStarted(video) => {
+                        format!("a video started ({:?})", video.source)
+                    }
+                    LiveEvent::VideoStopped(video) => {
+                        format!("a video stopped ({:?})", video.source)
+                    }
+                    LiveEvent::MediaFailed { source, error } => format!("{source:?}: {error}"),
+                    LiveEvent::Data(data) => {
+                        format!("{} bytes of data arrived", data.payload.len())
+                    }
                 };
             }
             Message::Loaded(value) => {

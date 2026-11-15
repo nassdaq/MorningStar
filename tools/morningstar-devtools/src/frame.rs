@@ -1,7 +1,7 @@
 //! Screenshots at a chosen display scale and with safe-area insets.
 
 use morningstar_gpu::{GpuError, render_offscreen_with_images};
-use morningstar_runtime::{App, Frame, FrameInfo};
+use morningstar_runtime::{App, Frame, FrameInfo, VideoFrame, VideoTrack};
 
 /// Renders one frame of `app` as a device described by `info` would show
 /// it, and returns it as PNG bytes.
@@ -22,7 +22,21 @@ use morningstar_runtime::{App, Frame, FrameInfo};
 /// that hit-tests against the frame it last drew (every app built on the UI
 /// layer does) can be drawn with this first and sent pointer events after.
 pub fn screenshot_frame(app: &mut dyn App, info: &FrameInfo) -> Result<Vec<u8>, GpuError> {
+    screenshot_frame_with_videos(app, info, &[])
+}
+
+/// As [`screenshot_frame`], with a picture for each of the given videos
+/// (ADR 0039): what a live room's frames would be on a device, where a
+/// screenshot has no room. Make one with `VideoFrame::from_rgba8`.
+pub fn screenshot_frame_with_videos(
+    app: &mut dyn App,
+    info: &FrameInfo,
+    videos: &[(VideoTrack, VideoFrame)],
+) -> Result<Vec<u8>, GpuError> {
     let mut frame = Frame::for_app(app);
+    for (track, picture) in videos {
+        frame.set_video_frame(*track, picture.clone());
+    }
     frame.begin();
     app.frame(info, &mut frame);
 

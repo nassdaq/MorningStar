@@ -42,8 +42,18 @@
 //! and loudspeaker buttons act on that room, and the room is left when
 //! the call ends, however it ends. [`Sound`] is how that stands, and the
 //! call screens say it in words ([`BaruaTalk::sound_note`]): what is
-//! connected, and what is not and why. There is still no video: no
-//! picture is sent or shown. The scripted app joins nothing.
+//! connected, and what is not and why.
+//!
+//! A call with video carries pictures too (ADR 0039): the room is joined
+//! with the camera as the call's button stands, the other side's camera
+//! fills the screen, the user's own is in the tile (touch it for the other
+//! camera), a screen someone shares takes the place of their face, and the
+//! "Share your screen" button shares this phone's. [`Pictures`] is what
+//! the room has said about them; the pictures themselves never pass
+//! through the app. A message sent to an open room still goes to the
+//! server, which keeps it; what the live room adds is the moment: data on
+//! its "chat" topic asks the server for the room's messages at once. The
+//! scripted app joins nothing and shows the design's photographs.
 
 pub mod api;
 pub mod components;
@@ -316,8 +326,15 @@ pub mod sound {
     pub const ALONE: &str = "Sound is live. Waiting for the other side.";
     /// Sound flows.
     pub const LIVE: &str = "Sound is live.";
-    /// Sound flows on a call with video, which is still not there.
-    pub const LIVE_NO_VIDEO: &str = "Sound is live. Video needs the next version.";
+    /// Sound flows on a call with video, and the other side's picture is
+    /// there.
+    pub const LIVE_VIDEO: &str = "Sound and video are live.";
+    /// Sound flows on a call with video; the other side shows no picture.
+    pub const LIVE_NO_PICTURE: &str = "Sound is live. The other side's camera is off.";
+    /// Someone else's screen is what the call shows.
+    pub const THEIR_SCREEN: &str = "Sound is live. You are seeing a shared screen.";
+    /// This phone's screen is shared.
+    pub const SHARING: &str = "You are sharing your screen. Sound is live.";
     /// The connection is being made again.
     pub const RECONNECTING: &str = "Reconnecting sound\u{2026}";
     /// The app left the screen.
@@ -333,6 +350,45 @@ pub mod sound {
     pub const LOST: &str = "The sound was lost with the connection. Hang up and call again.";
     /// The room was closed from the other side.
     pub const ENDED: &str = "The sound was ended from the other side.";
+}
+
+/// What the call screens say when the camera or the screen could not be
+/// turned on. The call goes on without it.
+pub mod pictures {
+    /// The user refused the camera.
+    pub const NO_CAMERA: &str = "The camera is not allowed. Allow it in Settings.";
+    /// This build has no camera in calls.
+    pub const CAMERA_UNAVAILABLE: &str = "This build of the app has no camera in calls.";
+    /// The camera failed.
+    pub const CAMERA_FAILED: &str = "The camera could not be started.";
+    /// The user said no to sharing the screen.
+    pub const NO_SCREEN: &str = "The screen is not shared: it was not allowed.";
+    /// This build cannot share the screen.
+    pub const SCREEN_UNAVAILABLE: &str = "This build of the app cannot share the screen.";
+    /// Sharing failed.
+    pub const SCREEN_FAILED: &str = "The screen could not be shared.";
+    /// "Share your screen" in a call with no live room behind it.
+    pub const SCREEN_NEEDS_SOUND: &str = "The screen is shared once the call's sound is live.";
+    /// "Share your screen" in the scripted app.
+    pub const SCREEN_NEEDS_SERVER: &str = "Screen sharing needs a call through the server.";
+}
+
+/// The videos of the call in progress, as its live room has announced
+/// them (ADR 0039): which track each is drawn by. The pictures themselves
+/// go from the room to the screen without passing through the app, so
+/// "there is a track" is all it knows: until a track's first frame the
+/// screen shows what is underneath.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Pictures {
+    /// The other side's camera: the one that started last, in a room with
+    /// several.
+    pub theirs: Option<VideoTrack>,
+    /// A screen someone else shares.
+    pub screen: Option<VideoTrack>,
+    /// This phone's own camera.
+    pub own: Option<VideoTrack>,
+    /// This phone's screen is shared.
+    pub sharing: bool,
 }
 
 /// What the platform answers a request with.
@@ -473,6 +529,8 @@ pub enum Message {
     ToggleMute,
     /// The camera.
     ToggleCamera,
+    /// The camera's own tile: the other camera of the phone.
+    SwitchCamera,
     /// The record button.
     ToggleRecording,
     /// "Share your screen".
@@ -521,6 +579,12 @@ enum Ask {
     Microphone(bool),
     /// Its sound to the loudspeaker or the earpiece.
     Speaker(bool),
+    /// This phone's camera on or off in it.
+    Camera(bool),
+    /// The phone's other camera.
+    SwitchCamera,
+    /// Share this phone's screen with it, or stop.
+    ShareScreen(bool),
 }
 
 /// Which [`Net`] message an HTTP answer becomes.
@@ -708,6 +772,8 @@ pub struct BaruaTalk {
     sound_for: Option<u32>,
     /// How many others are in the live room.
     sound_others: usize,
+    /// The videos the live room has announced.
+    pictures: Pictures,
 }
 
 impl Default for BaruaTalk {
@@ -779,6 +845,7 @@ impl BaruaTalk {
             sound: Sound::Off,
             sound_for: None,
             sound_others: 0,
+            pictures: Pictures::default(),
         };
         app.name_draft.clone_from(&app.name);
         match screen {
@@ -995,6 +1062,11 @@ impl BaruaTalk {
         &self.sound
     }
 
+    /// The videos of the call in progress.
+    pub fn pictures(&self) -> &Pictures {
+        &self.pictures
+    }
+
     /// What a call screen says about the sound of the call in progress,
     /// in words: `None` for the scripted app's calls (and when there is no
     /// call), which have none and show the design's picture.
@@ -1023,8 +1095,11 @@ impl BaruaTalk {
                 _ => sound::NO_TICKET,
             },
             Sound::Joining => sound::JOINING,
+            Sound::On if self.pictures.sharing => sound::SHARING,
             Sound::On if self.sound_others == 0 => sound::ALONE,
-            Sound::On if video => sound::LIVE_NO_VIDEO,
+            Sound::On if self.pictures.screen.is_some() => sound::THEIR_SCREEN,
+            Sound::On if self.pictures.theirs.is_some() => sound::LIVE_VIDEO,
+            Sound::On if video => sound::LIVE_NO_PICTURE,
             Sound::On => sound::LIVE,
             Sound::Reconnecting => sound::RECONNECTING,
             Sound::Away => sound::AWAY,
@@ -2112,7 +2187,10 @@ impl BaruaTalk {
             call.serial,
             LiveJoin::new(ticket.url.clone(), ticket.token.clone())
                 .microphone(!call.muted)
-                .speaker(true),
+                .speaker(true)
+                // A call with video starts with the camera as its button
+                // stands; a voice call starts without.
+                .camera(call.video && call.camera),
         ))
     }
 
@@ -2132,6 +2210,7 @@ impl BaruaTalk {
         self.sound = Sound::Off;
         self.sound_for = None;
         self.sound_others = 0;
+        self.pictures = Pictures::default();
         if let Some((serial, join)) = wanted {
             self.sound = Sound::Joining;
             self.sound_for = Some(serial);
@@ -2164,18 +2243,82 @@ impl BaruaTalk {
             }
             // Not asked for.
             LiveEvent::Speaking(_) => return,
+            LiveEvent::VideoStarted(video) => {
+                match (video.local, video.source) {
+                    (true, LiveVideoSource::Camera) => self.pictures.own = Some(video.track),
+                    (true, LiveVideoSource::Screen) => self.pictures.sharing = true,
+                    (false, LiveVideoSource::Camera) => self.pictures.theirs = Some(video.track),
+                    (false, LiveVideoSource::Screen) => self.pictures.screen = Some(video.track),
+                }
+                return;
+            }
+            LiveEvent::VideoStopped(video) => {
+                let over = Some(video.track);
+                if video.local && video.source == LiveVideoSource::Screen {
+                    self.pictures.sharing = false;
+                }
+                for held in [
+                    &mut self.pictures.own,
+                    &mut self.pictures.theirs,
+                    &mut self.pictures.screen,
+                ] {
+                    if *held == over {
+                        *held = None;
+                    }
+                }
+                return;
+            }
+            // The call goes on without the camera or the screen; the
+            // button goes back to what is true, and the reason is said.
+            LiveEvent::MediaFailed { source, error } => {
+                let sentence = match (source, error) {
+                    (LiveVideoSource::Camera, LiveError::PermissionDenied) => pictures::NO_CAMERA,
+                    (LiveVideoSource::Camera, LiveError::Unsupported) => {
+                        pictures::CAMERA_UNAVAILABLE
+                    }
+                    (LiveVideoSource::Camera, LiveError::Failed(_)) => pictures::CAMERA_FAILED,
+                    (LiveVideoSource::Screen, LiveError::PermissionDenied) => pictures::NO_SCREEN,
+                    (LiveVideoSource::Screen, LiveError::Unsupported) => {
+                        pictures::SCREEN_UNAVAILABLE
+                    }
+                    (LiveVideoSource::Screen, LiveError::Failed(_)) => pictures::SCREEN_FAILED,
+                };
+                match source {
+                    LiveVideoSource::Camera => {
+                        self.pictures.own = None;
+                        if let Some(call) = &mut self.call {
+                            call.camera = false;
+                        }
+                    }
+                    LiveVideoSource::Screen => self.pictures.sharing = false,
+                }
+                self.toast(sentence);
+                return;
+            }
+            // Someone wrote in the room this call belongs to: its messages
+            // are the server's to give, and are asked for now rather than
+            // at the next poll. What the data says is not read.
+            LiveEvent::Data(data) => {
+                if data.topic == "chat" {
+                    self.poll_room.due = self.clock;
+                    self.refresh_room();
+                }
+                return;
+            }
             // The platform left the room because the app left the screen.
             // The next tick of the timer, which only comes with a frame
             // and so only when the app is on screen again, joins it anew.
             LiveEvent::Disconnected(LiveDisconnect::Hidden) => {
                 self.sound = Sound::Away;
                 self.sound_others = 0;
+                self.pictures = Pictures::default();
                 return;
             }
             // The app's own doing; nothing to say.
             LiveEvent::Disconnected(LiveDisconnect::Left | LiveDisconnect::Replaced) => {
                 self.sound = Sound::Off;
                 self.sound_others = 0;
+                self.pictures = Pictures::default();
                 return;
             }
             LiveEvent::Disconnected(LiveDisconnect::Ended) => sound::ENDED,
@@ -2187,6 +2330,7 @@ impl BaruaTalk {
         };
         self.sound = Sound::Failed(sentence);
         self.sound_others = 0;
+        self.pictures = Pictures::default();
         self.asks.push(Ask::Announce(sentence.to_owned()));
     }
 
@@ -3136,12 +3280,39 @@ impl BaruaTalk {
                 }
             }
             Message::ToggleCamera => {
-                if let Some(call) = &mut self.call {
+                let camera = self.call.as_mut().map(|call| {
                     call.camera = !call.camera;
+                    (call.camera, call.scripted)
+                });
+                // The button acts on the room that is joined; a room
+                // joined later starts as the button stands.
+                if let Some((on, false)) = camera
+                    && self.sound.in_room()
+                {
+                    if !on {
+                        self.pictures.own = None;
+                    }
+                    self.asks.push(Ask::Camera(on));
+                }
+            }
+            Message::SwitchCamera => {
+                if self.pictures.own.is_some() {
+                    self.asks.push(Ask::SwitchCamera);
                 }
             }
             Message::ToggleRecording => self.toggle_recording(),
-            Message::ShareScreen => self.toast("Screen sharing needs the next version."),
+            Message::ShareScreen => {
+                let scripted = self.call.as_ref().is_none_or(|call| call.scripted);
+                if scripted {
+                    self.toast(pictures::SCREEN_NEEDS_SERVER);
+                } else if self.sound != Sound::On {
+                    self.toast(pictures::SCREEN_NEEDS_SOUND);
+                } else {
+                    // The system asks the user; what follows is the room's
+                    // to say (`heard_live`).
+                    self.asks.push(Ask::ShareScreen(!self.pictures.sharing));
+                }
+            }
             Message::AddPerson => self.toast("Adding people to a call needs the next version."),
             Message::VolumeUp => {
                 if let Some(call) = &mut self.call {
@@ -3473,6 +3644,9 @@ impl Application for BaruaTalk {
                 Ask::Leave => out.leave_live(),
                 Ask::Microphone(live) => out.set_live_microphone(live),
                 Ask::Speaker(on) => out.set_live_speaker(on),
+                Ask::Camera(on) => out.set_live_camera(on),
+                Ask::SwitchCamera => out.switch_live_camera(),
+                Ask::ShareScreen(on) => out.set_live_screen_share(on),
             }
         }
     }

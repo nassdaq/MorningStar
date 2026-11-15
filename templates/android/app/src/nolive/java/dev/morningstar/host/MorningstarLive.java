@@ -41,7 +41,8 @@ final class MorningstarLive {
                     null,
                     null);
         }
-        // Leaving, muting and the loudspeaker have no answer and no room.
+        // Everything else (leaving, muting, the loudspeaker, data, the
+        // camera, the screen) has no answer and no room to act on.
     }
 
     /** The activity came on screen. Main thread. */
@@ -49,4 +50,8 @@ final class MorningstarLive {
 
     /** The activity left the screen. Main thread. */
     static void activityStopped() {}
+
+    static void permissionResult(int requestCode, int[] grantResults) {}
+
+    static void activityResult(int requestCode, int resultCode, android.content.Intent data) {}
 }

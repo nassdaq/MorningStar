@@ -214,10 +214,16 @@ final class HostServices: NSObject, URLSessionDataDelegate, AVAudioRecorderDeleg
                         engine, id, UInt32(MORNINGSTAR_LIVE_FAILED),
                         UInt32(MORNINGSTAR_LIVE_ERROR_UNSUPPORTED), nil, nil)
                 }
-            // No room is ever joined, so there is none to leave, to mute or
-            // to route; none of the three is answered.
+            // No room is ever joined, so there is none to leave, to mute,
+            // to route, to send data to, or to show a camera or a screen
+            // in (ADR 0039); none of these is answered. An implementation
+            // would report pictures with morningstar_ios_video_frame from
+            // a LiveKit VideoRenderer (the frame's buffer as I420, on the
+            // main thread, newest only).
             case MORNINGSTAR_SERVICE_LIVE_LEAVE, MORNINGSTAR_SERVICE_LIVE_MICROPHONE,
-                MORNINGSTAR_SERVICE_LIVE_SPEAKER:
+                MORNINGSTAR_SERVICE_LIVE_SPEAKER, MORNINGSTAR_SERVICE_LIVE_DATA,
+                MORNINGSTAR_SERVICE_LIVE_CAMERA, MORNINGSTAR_SERVICE_LIVE_SWITCH_CAMERA,
+                MORNINGSTAR_SERVICE_LIVE_SCREEN_SHARE:
                 break
             default:
                 // A library newer than this host. Nothing here knows whether

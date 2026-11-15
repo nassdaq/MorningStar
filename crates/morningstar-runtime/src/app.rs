@@ -5,7 +5,7 @@ use std::time::Duration;
 use morningstar_core::{
     Action, AtlasView, Color, DisplayList, HostState, Image, ImageError, ImageStore, ImagesView,
     Insets, Point, PointerEvent, Rect, SemanticsTree, ServiceCall, ServiceId, ServiceResult, Size,
-    SurfaceSize, SystemBars, TextInputEvent, TextInputRequest,
+    SurfaceSize, SystemBars, TextInputEvent, TextInputRequest, VideoFrame, VideoTrack,
 };
 use morningstar_text::{
     MAX_PICTURE_PIXELS, RasterPicture, SvgPicture, TextContext, TextSpan, TextStyle, VectorIcon,
@@ -805,6 +805,36 @@ impl Frame {
     /// [`atlas`](Self::atlas).
     pub fn images(&self) -> ImagesView<'_> {
         self.images.view()
+    }
+
+    /// Makes `picture` the latest frame of video `track` (ADR 0039),
+    /// replacing the one before, which is returned so that its buffers can
+    /// carry the next. On a device the engine does this as frames arrive
+    /// from the live room; tests and tools call it to show a picture where
+    /// there is no room.
+    pub fn set_video_frame(
+        &mut self,
+        track: VideoTrack,
+        picture: VideoFrame,
+    ) -> Option<VideoFrame> {
+        self.images.set_video_frame(track, picture)
+    }
+
+    /// Forgets video `track`: it draws nothing from now on.
+    pub fn remove_video(&mut self, track: VideoTrack) -> bool {
+        self.images.remove_video(track)
+    }
+
+    /// Forgets every video.
+    pub fn clear_videos(&mut self) {
+        self.images.clear_videos();
+    }
+
+    /// The size of video `track`'s picture as shown, in its own pixels, or
+    /// `None` while it has no frame: what to fit it by when drawing it
+    /// with [`DisplayList::draw_video_fit`].
+    pub fn video_size(&self, track: VideoTrack) -> Option<Size> {
+        self.images.video_size(track)
     }
 }
 

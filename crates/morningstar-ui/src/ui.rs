@@ -4437,6 +4437,14 @@ impl<M: Clone> Painter<'_, M> {
                     .list
                     .draw_image_fit(*image, rect, data.fit, radius, tint);
             }
+            PictureSource::Video(track) => {
+                // Sized by the frame that is there now; none, nothing.
+                if let Some(size) = self.frame.video_size(*track) {
+                    self.frame
+                        .list
+                        .draw_video_fit(*track, size, rect, data.fit, radius, tint);
+                }
+            }
             PictureSource::Vector(picture) if visible => {
                 self.frame.draw_picture(picture, rect, radius, tint);
             }

@@ -18,10 +18,10 @@ server hands out for a call or a room (`token`, `url`) is what the app
 joins a live room with (the framework's live-room service,
 `docs/architecture/0038-live-rooms.md`: LiveKit's client, on Android), and
 the people in that room hear each other. See "Sound" below for when it
-joins, what its buttons do and what it says. There is no video yet: a real
-call shows the other person's face instead of a video picture and no
-camera picture of the user, and says "Video needs the next version." In
-the scripted app nothing is joined and nothing sounds: a call there is its
+joins, what its buttons do and what it says. A call with video carries
+pictures too (`docs/architecture/0039-live-video-screen-and-data.md`): the
+other side's camera, the user's own, and a shared screen; see "Pictures"
+below. In the scripted app nothing is joined and nothing sounds: a call there is its
 script, and the call screen is the design's frame, whose video still of
 Baraka and camera tile are the design's pictures, not a camera.
 
@@ -118,8 +118,9 @@ link, the app does something a person would expect and says so here.
 | | Add someone | A toast: needs the next version |
 | | The volume | Its upper half turns it up a step, its lower half down, six steps; a screen reader gets a slider. It changes a number only: on a phone the volume keys set a real call's volume |
 | | Microphone | A switch. With a server it mutes and opens the microphone in the call's live room; a call muted before its sound has connected connects muted |
-| | Camera | A switch. Scripted, the camera tile shows the design's picture or, off, an icon. With a server the tile never shows a picture: there is no video |
-| | Share screen | A toast: needs the next version |
+| | Camera | A switch. Scripted, the camera tile shows the design's picture or, off, an icon. With a server it turns the phone's camera on and off in the call's live room, and the tile shows the camera's own picture (the surface with an icon until its first frame) |
+| | The camera tile (a real call, camera on) | The phone's other camera: front, back |
+| | Share screen | A switch. With a server and sound live: the system asks whether to share the phone's screen, and the button stays lit while it is shared; pressed again, it stops. Before the sound is live: "The screen is shared once the call's sound is live." Scripted: "Screen sharing needs a call through the server." |
 | | Record | Starts and stops the recording; the pill "Recording · TSh 30 / min" shows while it runs, as in the design's own script. With a server it is a real, priced recording (below) |
 | | Red button | Hangs up, which leaves the call's sound; back to where the call was started |
 | Phone call | Mute, Speaker | Switches. With a server Mute closes and opens the microphone in the call's live room, and Speaker moves its sound between the earpiece (where a phone call starts) and the loudspeaker |
@@ -229,7 +230,7 @@ call screen, the line under the header on a phone call; id `sound-note`):
 | The server sent no ticket | "Connected without sound: the server sent no ticket." |
 | `Joining` (the microphone may be being asked for) | "Connecting sound…" |
 | `On`, nobody else in the room yet | "Sound is live. Waiting for the other side." |
-| `On` | "Sound is live." On a call with video: "Sound is live. Video needs the next version." |
+| `On` | "Sound is live." On a call with video: "Sound and video are live." once the other side's camera is announced, "Sound is live. The other side's camera is off." until then and whenever it is off; "Sound is live. You are seeing a shared screen."; "You are sharing your screen. Sound is live." |
 | `Reconnecting` | "Reconnecting sound…" |
 | `Away` (the app left the screen; the platform left the room) | "Sound paused while the app was away." The next tick, which only comes when the app is on screen again, joins the room anew, muted if Mute is on |
 | The microphone was refused | "No sound: the microphone is not allowed. Allow it in Settings, then call again." |
@@ -257,6 +258,48 @@ stand-in server while the test plays the room.
 first requests, polling, messages and their failures, calls in every
 ending, a late answer, recording, phone calls and their request ids, the
 offline fallback and return. **The app has not talked to the real server.**
+
+## Pictures
+
+What `BaruaTalk::pictures` holds is what the live room has announced
+(`LiveEvent::VideoStarted` and `VideoStopped`): which track is the other
+side's camera, which a shared screen, which the phone's own camera, and
+whether the phone's screen is shared. The pictures themselves go from the
+room to the screen without passing through the app: the screen has a
+`LiveVideo` for a track, which draws the video's latest frame and nothing
+while there is none. So:
+
+| What | Where | Until its first frame, and when it is off |
+| --- | --- | --- |
+| The other side's camera | Fills the screen, cut to it as the design's frame of Baraka is (`object-fit: cover`) | Their face on its blurred backdrop, as a real call has always shown |
+| A screen someone shares | Whole (`contain`) on the page's colour, between the header and the bar, over the camera | The camera, or the face |
+| The phone's camera | The designed tile, 104 by 146 dp inside its border, mirrored for the front camera | The raised surface with the camera's icon |
+| The phone's own shared screen | Not shown: it is in front of its user | |
+
+A call with video joins its room with the camera as the Camera switch
+stands; a voice call joins without. In a room with several cameras the one
+that started last is shown: the design has one picture, and a grid of
+people is not designed. When the camera or the screen cannot be turned on
+the call goes on, the switch goes back, and a toast says why in the app's
+words: "The camera is not allowed. Allow it in Settings.", "This build of
+the app has no camera in calls.", "The camera could not be started.", "The
+screen is not shared: it was not allowed.", "This build of the app cannot
+share the screen.", "The screen could not be shared."
+
+While the phone's screen is shared the call goes on behind other apps (the
+one case in which it does), with the microphone as it was and the camera
+off until the app is back.
+
+**Chat through the room.** A message is still sent to the server, which
+keeps it and forwards it to the room. When data arrives on the live room's
+`"chat"` topic while a room's call is open, the app asks the server for
+that room's messages at once instead of at its next poll. It does not read
+the data, so a message cannot appear twice. Outside a room's call the chat
+is polled as before.
+
+The scripted app has none of this: its call screen is the design's frame.
+`tests/video.rs` plays the room for all of it, and renders the call screen
+with two pictures (`target/barua-talk-video-call.png`).
 
 ## The app's own design
 
@@ -405,9 +448,11 @@ microphone permission denied`.
 **1. A room, with the console.** Open `barua.tz/talk/console` on a computer
 and join a room there with its microphone on. On the phone open the same
 room and press the camera button (top right). Expected on the screen:
-"Connecting sound…", the microphone question the first time, then "Sound
-is live." with "Video needs the next version."; speak on each side and
-listen on the other.
+"Connecting sound…", the microphone question the first time, then the
+camera question (a room's call is a call with video), then "Sound is
+live. The other side's camera is off." or, with the console's camera on,
+"Sound and video are live."; speak on each side and listen on the other.
+The pictures are step 5.
 
 ```
 service: join live room microphone=live sound=loudspeaker id=N
@@ -461,6 +506,7 @@ then `… to the earpiece`), **Mute** silencing the microphone for the other
 phone.
 
 **4. No secret in the log, and nothing in an app that did not ask.**
+(The pictures are step 5, after this.)
 
 ```sh
 adb logcat -d -s Morningstar | grep -c 'eyJ\|wss://'    # 0: no ticket, no address
@@ -473,17 +519,70 @@ done, and for anything that differs the lines around it. Then move the
 rows of `docs/architecture/README.md` that say "Not verified" for live
 rooms.
 
+**5. Pictures, the screen and chat** (free; a room with the console, or
+the server's own page at `/console`, in a browser with a camera).
+
+- **Their camera.** Turn the browser's camera on. The phone shows it
+  filling the call screen, upright, in true colours, and says "Sound and
+  video are live." `live: id=N video T started (camera)`, `live: video T
+  first frame WxH rotation R`, `service: id=N live room: someone's Camera
+  started, track T`. Turn it off: the face is back, "The other side's
+  camera is off.", `live: id=N video T stopped`.
+- **The phone's camera.** The camera question appears the first time
+  (`live: id=N camera wanted on` … `camera published`, `video T started
+  (own camera)`); the tile shows the front camera as a mirror does, and the
+  browser sees the phone's picture. Touch the tile: `camera is now the back
+  one`, and the tile is no longer mirrored. The Camera switch: `camera
+  off`, the tile shows the icon, the browser's picture of the phone goes.
+  Refuse the question (revoke it in Settings first): "The camera is not
+  allowed. Allow it in Settings.", `camera not started: permission denied`,
+  the switch goes back to off, and the call goes on.
+- **A shared screen.** Share the browser's screen: the phone shows it
+  whole, between the header and the bar, and says "You are seeing a shared
+  screen." Stop: the camera or the face is back.
+- **The phone's screen.** Press Share screen: `asking the user to share the
+  screen`, the system's dialog; agree: `live: the microphone's foreground
+  service is running`, `live: id=N screen shared, video T`, a notification
+  "Sharing your screen…", the button lit, and the browser sees the phone's
+  screen. Press Home and open another app: `goes on behind another app: the
+  screen is shared`; the browser still sees the screen and **still hears
+  the phone** (this is what the second service is for). Come back, press
+  the button again: `screen no longer shared`, the notification goes.
+  Decline the dialog instead: "The screen is not shared: it was not
+  allowed.", `screen not shared: the user declined`.
+- **Stop sharing from outside the app** (the system's own "stop"): the
+  room is left at once if the app is not on screen (`left: the app is not
+  on screen and shares nothing`, `room released`).
+- **Chat.** With the room's call open on the phone, write in the room from
+  the browser. `live: id=N data received, K bytes`, `service: id=N live
+  room: data K bytes`, and at once a `GET …/messages` in the server's log:
+  back in the chat, the message is there without waiting five seconds.
+- **A voice call** (no video): the Camera switch should answer "The camera
+  could not be started." if Barua's voice ticket is voice only, as its
+  document says.
+
 ## Not verified
 
 Everything here was seen on macOS/Metal only. **Nothing has run on a
-phone.** The APK is built (34.2 MB for arm64 with the live-room service,
-of which the service is 19.6 MB) and was never installed. That includes
+phone.** The APK is built (34.3 MB for arm64 with the live-room services,
+of which they are 19.6 MB; the build with sound alone was installed on one
+phone, and nothing was observed on it). That includes
 all of the online behaviour: **the app has never talked to the real
 server** (which was being written at the same time), only to the stand-in
 of `tests/support`, which was written from the same `API.md` by the same
 hand as the client and so cannot catch a misreading of it. A phone's own
 HTTP stack, `adb reverse`, the polling's cost in battery and in the
 server's allowance, and two phones calling each other are untried.
+
+**No picture has been seen.** No camera was opened, no frame was decoded
+and no screen was shared: the pictures in the tests are made by the tests
+(`VideoFrame::from_rgba8`), and what the host does with a camera, a remote
+track, the screen question and its two foreground services
+(`MorningstarLive.kt`, `MorningstarLiveService.kt`) compiles and has never
+run. Whether a picture is upright, in true colours and smooth on a phone,
+what thirty of them a second cost, whether the microphone is heard while
+the screen is shared from behind another app, and whether Barua's tickets
+allow the camera and the screen are all unknown. Step 5 above is the test.
 
 **No sound has been heard.** The live room was joined only by the test
 driver: no microphone was opened, no LiveKit server was connected to (the

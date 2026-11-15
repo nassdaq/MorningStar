@@ -17,3 +17,4 @@ mod jni;
 mod log;
 mod render_thread;
 mod sys;
+mod video;

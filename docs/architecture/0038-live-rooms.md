@@ -179,6 +179,8 @@ The first user (`examples/barua-talk/SCREENS.md`, "Sound"). One function, run af
 
 ## Video: the design to follow
 
+*Carried out by [0039](0039-live-video-screen-and-data.md), with the second answer below. Kept as it was written.*
+
 Not built. Voice had to be whole first, and video cannot be finished properly without a device: nothing about it (a camera, a decoder's output format, the cost of getting 30 pictures a second onto the screen) can be checked on this machine. This is the design that would be followed.
 
 **The question** is how a decoded frame gets onto the screen beside a `wgpu` surface. There are two answers.
@@ -207,11 +209,11 @@ Not built. Voice had to be whole first, and video cannot be finished properly wi
 
 ## Limitations
 
-- **Voice only.** No camera, no remote pictures, no screen sharing.
+- **Voice only** in this record. The camera, remote pictures, screen sharing and data messages are [0039](0039-live-video-screen-and-data.md), which also changes one thing said here: a room in which this device's screen is shared is not left when the app leaves the screen.
 - **One room at a time**, and no way to be in a room without the microphone permission (listening only).
 - **Not in the background.** Leaving the screen, or the screen locking, ends the room. There is no proximity sensor handling either: at the ear, the screen stays on.
 - **No Bluetooth headset.** The permissions for one are not declared or asked for. A wired headset is used when plugged in.
-- **No chat or data messages through the room**, no audio levels (only who is speaking), no choice of input device, no control of what is subscribed to. The media volume control of Barua Talk's call screen still changes a number only; the volume keys set the call's volume.
+- No audio levels (only who is speaking), no choice of input device, no control of what is subscribed to. The media volume control of Barua Talk's call screen still changes a number only; the volume keys set the call's volume.
 - **The ticket is used as given.** It is not refreshed; a room that outlives its ticket's hour ends as the server ends it.
 - **`Failed(text)` is the SDK's wording** and is for logs. Applications show a sentence of their own.
 - **iOS has no live rooms.**

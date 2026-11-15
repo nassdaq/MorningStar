@@ -1,4 +1,4 @@
-use crate::{Color, Image, ImageFit, Point, Rect, Transform};
+use crate::{Color, Image, ImageFit, Point, Rect, Size, Transform, VideoTrack};
 
 /// A stroke along the inside of a rectangle's edge.
 ///
@@ -376,6 +376,18 @@ pub enum DrawOp {
     /// See [`DisplayList::draw_image_region`].
     Image {
         image: Image,
+        rect: Rect,
+        source: Rect,
+        corner_radius: f32,
+        tint: Color,
+    },
+    /// The region `source` of the latest frame of a video (ADR 0039), in
+    /// the pixels of the picture as shown, of which there are `size`:
+    /// otherwise as [`Image`](Self::Image). See
+    /// [`DisplayList::draw_video_region`].
+    Video {
+        track: VideoTrack,
+        size: Size,
         rect: Rect,
         source: Rect,
         corner_radius: f32,
@@ -936,6 +948,67 @@ impl DisplayList {
             corner_radius: corner_radius.max(0.0),
             tint,
         });
+    }
+
+    /// Draws the latest frame of video `track`, whose picture is `size`
+    /// pixels as shown (see `ImageStore::video_size`), fitted into
+    /// `bounds` as an image is by [`draw_image_fit`](Self::draw_image_fit).
+    pub fn draw_video_fit(
+        &mut self,
+        track: VideoTrack,
+        size: Size,
+        bounds: Rect,
+        fit: ImageFit,
+        corner_radius: f32,
+        tint: Color,
+    ) {
+        let whole = Rect::new(0.0, 0.0, size.width, size.height);
+        let placed = fit.place(whole, bounds);
+        self.draw_video_region(track, size, placed.source, placed.rect, corner_radius, tint);
+    }
+
+    /// Draws the region `source` of video `track`'s latest frame scaled
+    /// into `rect`: as [`draw_image_region`](Self::draw_image_region),
+    /// with `source` in the pixels of the picture as shown, `size` of
+    /// them. A video that has no frame when the list is rendered draws
+    /// nothing. The picture is filtered but has no reduced copies: shown
+    /// much smaller than it is, it is coarser than an image would be.
+    pub fn draw_video_region(
+        &mut self,
+        track: VideoTrack,
+        size: Size,
+        source: Rect,
+        rect: Rect,
+        corner_radius: f32,
+        tint: Color,
+    ) {
+        let finite = source.x.is_finite() && source.y.is_finite();
+        let sized = size.width >= 1.0 && size.height >= 1.0;
+        if rect.is_empty()
+            || source.is_empty()
+            || !finite
+            || !sized
+            || tint.a.is_nan()
+            || tint.a <= 0.0
+        {
+            return;
+        }
+        self.ops.push(DrawOp::Video {
+            track,
+            size,
+            rect,
+            source,
+            corner_radius: corner_radius.max(0.0),
+            tint,
+        });
+    }
+
+    /// True if the list draws video `track`: a new frame of it changes
+    /// the picture on screen.
+    pub fn draws_video(&self, track: VideoTrack) -> bool {
+        self.ops
+            .iter()
+            .any(|op| matches!(op, DrawOp::Video { track: drawn, .. } if *drawn == track))
     }
 
     /// Restricts everything drawn until the matching

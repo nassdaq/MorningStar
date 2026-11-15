@@ -73,6 +73,8 @@ const SET_BYTE_ARRAY_REGION: usize = 208;
 const GET_JAVA_VM: usize = 219;
 const GET_STRING_REGION: usize = 220;
 const EXCEPTION_CHECK: usize = 228;
+const GET_DIRECT_BUFFER_ADDRESS: usize = 230;
+const GET_DIRECT_BUFFER_CAPACITY: usize = 231;
 // Position in `struct JNIInvokeInterface`, after its three reserved slots.
 const ATTACH_CURRENT_THREAD_AS_DAEMON: usize = 7;
 
@@ -139,6 +141,8 @@ type NewByteArray = unsafe extern "system" fn(JniEnv, i32) -> JObject;
 type GetByteArrayRegion = unsafe extern "system" fn(JniEnv, JObject, i32, i32, *mut i8);
 type SetByteArrayRegion = unsafe extern "system" fn(JniEnv, JObject, i32, i32, *const i8);
 type ExceptionCheck = unsafe extern "system" fn(JniEnv) -> u8;
+type GetDirectBufferAddress = unsafe extern "system" fn(JniEnv, JObject) -> *mut c_void;
+type GetDirectBufferCapacity = unsafe extern "system" fn(JniEnv, JObject) -> i64;
 type ExceptionVoid = unsafe extern "system" fn(JniEnv);
 type AttachCurrentThread = unsafe extern "system" fn(JavaVm, *mut JniEnv, *mut c_void) -> i32;
 
@@ -703,6 +707,37 @@ pub unsafe fn bytes(env: JniEnv, array: JObject) -> Vec<u8> {
             );
         }
         bytes
+    }
+}
+
+/// The memory of a direct `java.nio.ByteBuffer`, borrowed: the whole
+/// buffer from its start, whatever its position. `None` for null, for a
+/// buffer that is not direct, and for an empty one.
+///
+/// # Safety
+/// `env` must be the calling thread's `JNIEnv*` and `buffer` null or a
+/// valid reference to a `ByteBuffer`. The slice must not be used after the
+/// native call it was made in returns, nor after the Java side releases
+/// the buffer: the caller chooses `'a` no longer than that.
+pub unsafe fn direct_buffer<'a>(env: JniEnv, buffer: JObject) -> Option<&'a [u8]> {
+    if buffer.is_null() {
+        return None;
+    }
+    // SAFETY: `env` and `buffer` are valid (caller). For a direct buffer
+    // the two functions give the address and the size of memory that stays
+    // where it is for as long as the buffer lives (caller); for any other
+    // object they give null or -1, which is checked.
+    unsafe {
+        let address = entry::<GetDirectBufferAddress>(env, GET_DIRECT_BUFFER_ADDRESS)(env, buffer);
+        let capacity =
+            entry::<GetDirectBufferCapacity>(env, GET_DIRECT_BUFFER_CAPACITY)(env, buffer);
+        let length = usize::try_from(capacity)
+            .ok()
+            .filter(|length| *length > 0)?;
+        if address.is_null() {
+            return None;
+        }
+        Some(std::slice::from_raw_parts(address.cast::<u8>(), length))
     }
 }
 

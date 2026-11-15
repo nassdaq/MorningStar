@@ -91,3 +91,20 @@ was written from the document:
 - the words upstream uses for a phone call's status after `ringing` (the
   document names only that one; `routes.phoneStatus` accepts the usual
   ones).
+
+## What the app now asks of a ticket (2026-11-15)
+
+Nothing here changed on the server, and none of it has been seen live:
+
+- **Video.** The app turns the camera on and shares the screen with the
+  ticket it is given. The server already passes `video` upstream for a
+  room's ticket and for an in-app call, and the document says a
+  `video: false` ticket is voice only and that a video ticket includes
+  screen share. So a voice call's camera should be refused by the room,
+  which the app shows as "The camera could not be started."
+- **Chat.** The app does not publish to the `"chat"` topic itself. It
+  relies on the document's statement that `POST /rooms/{name}/chat` "lands
+  on the same chat topic every client already listens to": when data
+  arrives on that topic, the app asks this server for the room's messages
+  at once. If upstream does not in fact forward, nothing breaks: the
+  five-second poll still brings the message.

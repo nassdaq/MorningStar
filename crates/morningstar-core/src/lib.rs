@@ -13,6 +13,7 @@ mod insets;
 mod lifecycle;
 mod semantics;
 mod services;
+mod video;
 
 pub use color::Color;
 pub use display_list::{
@@ -23,7 +24,7 @@ pub use frame_stats::{FrameStats, FrameSummary};
 pub use geometry::{Point, Rect, Size, Transform};
 pub use image::{
     Image, ImageError, ImageFit, ImageId, ImagePixels, ImagePlacement, ImageStore, ImagesView,
-    MAX_IMAGE_BYTES, MAX_IMAGE_DIMENSION, srgb_encode,
+    MAX_IMAGE_BYTES, MAX_IMAGE_DIMENSION, VideoPicture, srgb_encode,
 };
 pub use input::{
     BarContent, Capitalization, CaretMove, ImeAction, KeyboardType, PointerEvent, PointerPhase,
@@ -39,7 +40,9 @@ pub use semantics::{
 };
 pub use services::{
     AudioClip, AudioError, DEFAULT_HTTP_TIMEOUT, HostState, HttpError, HttpMethod, HttpRequest,
-    HttpResponse, LiveDisconnect, LiveError, LiveEvent, LiveJoin, LiveParticipant,
-    MAX_HTTP_RESPONSE_BYTES, MAX_RECORDING_DURATION, NO_INSTALL_ID, Recording, ServiceCall,
-    ServiceId, ServiceRequest, ServiceResult,
+    HttpResponse, LiveData, LiveDisconnect, LiveError, LiveEvent, LiveJoin, LiveParticipant,
+    LiveVideoSource, LiveVideoStream, MAX_HTTP_RESPONSE_BYTES, MAX_LIVE_DATA_BYTES,
+    MAX_RECORDING_DURATION, NO_INSTALL_ID, Recording, ServiceCall, ServiceId, ServiceRequest,
+    ServiceResult,
 };
+pub use video::{MAX_VIDEO_DIMENSION, VideoFrame, VideoRotation, VideoTrack, yuv_to_rgba};

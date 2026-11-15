@@ -197,7 +197,10 @@ fn a_live_room_that_cannot_be_reached_is_a_readable_line_and_can_be_tried_again(
     phone
         .ui
         .live_event(LiveEvent::Failed(LiveError::PermissionDenied));
-    assert_eq!(phone.ui.app().live, "the microphone is not allowed");
+    assert_eq!(
+        phone.ui.app().live,
+        "not allowed: the user refused the permission"
+    );
     phone.ui.send(Message::Live);
     phone
         .ui

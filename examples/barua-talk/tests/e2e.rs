@@ -310,7 +310,7 @@ fn a_call_is_made_answered_switched_and_ended() {
         device.tap("share");
         assert_eq!(
             device.app().notice(),
-            Some("Screen sharing needs the next version.")
+            Some(barua_talk::pictures::SCREEN_NEEDS_SERVER)
         );
         device.tap("add-person");
         assert!(device.app().notice().unwrap().starts_with("Adding people"));

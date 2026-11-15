@@ -15,6 +15,7 @@ mod images;
 mod offscreen;
 mod quads;
 mod renderer;
+mod videos;
 
 pub use error::GpuError;
 pub use offscreen::{OffscreenRenderer, render_offscreen, render_offscreen_with_images};

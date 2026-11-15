@@ -242,6 +242,16 @@ public final class MorningstarActivity extends Activity implements SurfaceHolder
             int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         MorningstarServices.onPermissionResult(requestCode, grantResults);
+        // The camera question is the live room's own (ADR 0039).
+        MorningstarLive.permissionResult(requestCode, grantResults);
+    }
+
+    // The user's answer to "share your screen?", which the live room asked
+    // through this activity (ADR 0039).
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        MorningstarLive.activityResult(requestCode, resultCode, data);
     }
 
     // The hook on API 24 to 32. From API 33 the callback registered in

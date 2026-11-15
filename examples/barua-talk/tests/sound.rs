@@ -101,8 +101,9 @@ fn an_accepted_call_joins_its_room_with_the_callees_ticket() {
     assert_eq!(device.app().sound(), &Sound::On);
     assert_eq!(note(&device), Some(sound::ALONE));
     happens(&mut device, baraka());
-    // Sound is there; video honestly is not.
-    assert_eq!(note(&device), Some(sound::LIVE_NO_VIDEO));
+    // Sound is there; of video the note says what is true (no picture of
+    // the other side has been announced; `tests/video.rs` has the rest).
+    assert_eq!(note(&device), Some(sound::LIVE_NO_PICTURE));
     assert!(
         !note(&device).unwrap().contains("audio"),
         "no 'next version' for sound"
@@ -439,7 +440,7 @@ fn a_rooms_call_joins_when_its_ticket_arrives_and_back_to_chat_leaves() {
     happens(&mut device, LiveEvent::Connected);
     assert_eq!(note(&device), Some(sound::ALONE));
     happens(&mut device, baraka());
-    assert_eq!(note(&device), Some(sound::LIVE_NO_VIDEO));
+    assert_eq!(note(&device), Some(sound::LIVE_NO_PICTURE));
 
     device.tap("back");
     assert_eq!(device.screen(), Screen::Room, "back to chat");

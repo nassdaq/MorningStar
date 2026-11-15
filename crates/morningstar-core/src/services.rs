@@ -12,6 +12,7 @@
 //! and ADR 0038 for the live room, the one request here that is answered
 //! more than once.
 
+use crate::VideoTrack;
 use std::collections::HashMap;
 use std::fmt;
 use std::time::Duration;
@@ -374,6 +375,11 @@ pub struct LiveJoin {
     /// Whether [`LiveEvent::Speaking`] is wanted. Off unless asked for:
     /// every such event is a message and a frame.
     pub report_speaking: bool,
+    /// Whether this device's camera is on from the start (ADR 0039). Off
+    /// unless asked for; the user is asked for the camera when it is first
+    /// turned on, and a refusal is
+    /// [`LiveEvent::MediaFailed`], not the end of the room.
+    pub camera: bool,
 }
 
 impl LiveJoin {
@@ -386,7 +392,14 @@ impl LiveJoin {
             microphone: true,
             speaker: false,
             report_speaking: false,
+            camera: false,
         }
+    }
+
+    /// Whether the camera is on from the start.
+    pub fn camera(mut self, on: bool) -> Self {
+        self.camera = on;
+        self
     }
 
     /// Whether the microphone is live from the start.
@@ -419,6 +432,7 @@ impl fmt::Debug for LiveJoin {
             .field("microphone", &self.microphone)
             .field("speaker", &self.speaker)
             .field("report_speaking", &self.report_speaking)
+            .field("camera", &self.camera)
             .finish()
     }
 }
@@ -430,6 +444,59 @@ pub struct LiveParticipant {
     pub identity: String,
     /// The name to show; may be empty.
     pub name: String,
+}
+
+/// What a video in a live room shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LiveVideoSource {
+    /// Someone's camera.
+    Camera,
+    /// Someone's screen, shared.
+    Screen,
+}
+
+/// A video in a live room: whose it is, what it shows, and the id its
+/// pictures are drawn by (ADR 0039).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveVideoStream {
+    /// Whose video: their identity in the room. This device's own person
+    /// has the identity of its ticket.
+    pub identity: String,
+    /// A camera, or a shared screen.
+    pub source: LiveVideoSource,
+    /// True for this device's own camera or screen.
+    pub local: bool,
+    /// What its pictures are drawn by. This device's own shared screen has
+    /// a track like any other, but no pictures are delivered for it: the
+    /// screen is already in front of its user.
+    pub track: VideoTrack,
+}
+
+/// The most that [`ServiceRequest::LiveData`] sends in one message: what
+/// the media server carries reliably in one piece. Longer is not sent.
+pub const MAX_LIVE_DATA_BYTES: usize = 15_000;
+
+/// A message someone sent to the people in a live room: bytes, under a
+/// topic that says what they are (ADR 0039).
+#[derive(Clone, PartialEq, Eq)]
+pub struct LiveData {
+    /// Who sent it, by identity; empty when the server did.
+    pub from: String,
+    /// What kind of message it is, as the sender named it; may be empty.
+    pub topic: String,
+    /// The message.
+    pub payload: Vec<u8>,
+}
+
+impl fmt::Debug for LiveData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // What people say to each other is not for a log.
+        f.debug_struct("LiveData")
+            .field("from", &format_args!("<{} bytes>", self.from.len()))
+            .field("topic", &self.topic)
+            .field("payload", &format_args!("<{} bytes>", self.payload.len()))
+            .finish()
+    }
 }
 
 /// Something that happened to the live room an application joined. A join
@@ -457,6 +524,24 @@ pub enum LiveEvent {
     Reconnecting,
     /// The connection is back.
     Reconnected,
+    /// A video has started: someone's camera or shared screen, this
+    /// device's own included. Its pictures are drawn by its `track` until
+    /// [`VideoStopped`](Self::VideoStopped).
+    VideoStarted(LiveVideoStream),
+    /// That video is over: its owner turned it off, or left.
+    VideoStopped(LiveVideoStream),
+    /// This device's camera or screen could not be turned on: the user
+    /// refused it ([`LiveError::PermissionDenied`]), the app was built
+    /// without it ([`LiveError::Unsupported`]), or it failed. The room
+    /// goes on without it.
+    MediaFailed {
+        /// Which of the two.
+        source: LiveVideoSource,
+        /// Why.
+        error: LiveError,
+    },
+    /// Someone sent a message to the room.
+    Data(LiveData),
     /// The room is over for this device, for the reason given. Final.
     Disconnected(LiveDisconnect),
     /// The room could not be joined, or broke. Final.
@@ -486,6 +571,12 @@ impl LiveEvent {
     /// | 5 | `Reconnected` | | | |
     /// | 6 | `Disconnected` | 0 left, 1 replaced, 2 hidden, 3 ended, 4 lost | | |
     /// | 7 | `Failed` | 1 permission denied, 2 unsupported, 3 failed | the reason, for `failed` | |
+    /// | 8 | `VideoStarted` | track * 4 + (2 if local) + (1 if a screen) | identity | |
+    /// | 9 | `VideoStopped` | as for 8 | identity | |
+    /// | 10 | `MediaFailed` | error * 2 + (1 if the screen), errors as for 7 | the reason, for `failed` | |
+    ///
+    /// [`Data`](Self::Data) does not come this way: it carries bytes, and
+    /// has a call of its own on both platforms.
     ///
     /// An unknown reason for a disconnection is read as `Ended` and an
     /// unknown failure as `Failed`, so that the end of a room is never
@@ -514,13 +605,42 @@ impl LiveEvent {
                 4 => LiveDisconnect::Lost,
                 _ => LiveDisconnect::Ended,
             }),
-            7 => Self::Failed(match code {
-                1 => LiveError::PermissionDenied,
-                2 => LiveError::Unsupported,
-                _ => LiveError::Failed(first.to_owned()),
-            }),
+            7 => Self::Failed(live_error(code, first)),
+            8 | 9 => {
+                let stream = LiveVideoStream {
+                    identity: first.to_owned(),
+                    source: live_source(code & 1),
+                    local: code & 2 != 0,
+                    track: VideoTrack(code >> 2),
+                };
+                if kind == 8 {
+                    Self::VideoStarted(stream)
+                } else {
+                    Self::VideoStopped(stream)
+                }
+            }
+            10 => Self::MediaFailed {
+                source: live_source(code & 1),
+                error: live_error(code >> 1, first),
+            },
             _ => return None,
         })
+    }
+}
+
+fn live_error(code: u32, reason: &str) -> LiveError {
+    match code {
+        1 => LiveError::PermissionDenied,
+        2 => LiveError::Unsupported,
+        _ => LiveError::Failed(reason.to_owned()),
+    }
+}
+
+fn live_source(bit: u32) -> LiveVideoSource {
+    if bit == 0 {
+        LiveVideoSource::Camera
+    } else {
+        LiveVideoSource::Screen
     }
 }
 
@@ -558,8 +678,9 @@ impl fmt::Display for LiveDisconnect {
 /// Why a live room could not be joined, or broke.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LiveError {
-    /// The user has not allowed the microphone. Joining again asks them
-    /// again, unless they refused for good, in which case only the
+    /// The user has not allowed it: the microphone for a join, the camera
+    /// or the screen in [`LiveEvent::MediaFailed`]. Asking again asks
+    /// them again, unless they refused for good, in which case only the
     /// system's settings can change it.
     PermissionDenied,
     /// Nothing can join a live room here: there is no host (a test without
@@ -576,7 +697,7 @@ pub enum LiveError {
 impl fmt::Display for LiveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PermissionDenied => f.write_str("the microphone is not allowed"),
+            Self::PermissionDenied => f.write_str("not allowed: the user refused the permission"),
             Self::Unsupported => f.write_str("live rooms are not available here"),
             Self::Failed(reason) => write!(f, "the live room failed: {reason}"),
         }
@@ -656,6 +777,28 @@ pub enum ServiceRequest {
     /// Send the live room's sound to the loudspeaker (`true`) or the
     /// earpiece. Not answered.
     LiveSpeaker(bool),
+    /// Send a message to everyone in the live room (ADR 0039). Not
+    /// answered, and not sent when no room is joined or the payload is
+    /// over [`MAX_LIVE_DATA_BYTES`].
+    LiveData {
+        /// What kind of message it is; the others receive it with this.
+        topic: String,
+        /// The message.
+        payload: Vec<u8>,
+        /// Delivered for certain and in order (`true`), or as fast as
+        /// possible and perhaps not at all.
+        reliable: bool,
+    },
+    /// Turn this device's camera on or off in the live room. Not answered:
+    /// [`LiveEvent::VideoStarted`], `VideoStopped` or `MediaFailed`
+    /// follows among the room's events.
+    LiveCamera(bool),
+    /// Change between the front and the back camera. Not answered; nothing
+    /// happens while the camera is off.
+    LiveSwitchCamera,
+    /// Start or stop sharing this device's screen with the live room. Not
+    /// answered: as for the camera. The user is asked each time.
+    LiveScreenShare(bool),
 }
 
 impl ServiceRequest {
@@ -670,6 +813,10 @@ impl ServiceRequest {
                 | Self::LiveLeave
                 | Self::LiveMicrophone(_)
                 | Self::LiveSpeaker(_)
+                | Self::LiveData { .. }
+                | Self::LiveCamera(_)
+                | Self::LiveSwitchCamera
+                | Self::LiveScreenShare(_)
         )
     }
 
@@ -691,7 +838,11 @@ impl ServiceRequest {
             | Self::Announce { .. }
             | Self::LiveLeave
             | Self::LiveMicrophone(_)
-            | Self::LiveSpeaker(_) => return None,
+            | Self::LiveSpeaker(_)
+            | Self::LiveData { .. }
+            | Self::LiveCamera(_)
+            | Self::LiveSwitchCamera
+            | Self::LiveScreenShare(_) => return None,
         })
     }
 
@@ -714,6 +865,12 @@ impl ServiceRequest {
             Self::LiveMicrophone(false) => "live microphone muted",
             Self::LiveSpeaker(true) => "live sound to the loudspeaker",
             Self::LiveSpeaker(false) => "live sound to the earpiece",
+            Self::LiveData { .. } => "live data",
+            Self::LiveCamera(true) => "live camera on",
+            Self::LiveCamera(false) => "live camera off",
+            Self::LiveSwitchCamera => "live camera switched",
+            Self::LiveScreenShare(true) => "share the screen",
+            Self::LiveScreenShare(false) => "stop sharing the screen",
         }
     }
 }
@@ -1057,6 +1214,89 @@ mod tests {
         let failed = LiveEvent::from_wire(7, 99, "why", "").expect("still a failure");
         assert_eq!(failed, LiveEvent::Failed(LiveError::Failed("why".into())));
         assert!(ended.is_final() && failed.is_final());
-        assert_eq!(LiveEvent::from_wire(8, 0, "", ""), None);
+        assert_eq!(LiveEvent::from_wire(11, 0, "", ""), None);
+    }
+
+    #[test]
+    fn videos_and_their_failures_cross_the_boundary() {
+        let read = LiveEvent::from_wire;
+        let stream = |source, local, track| LiveVideoStream {
+            identity: "baraka".into(),
+            source,
+            local,
+            track: VideoTrack(track),
+        };
+        assert_eq!(
+            read(8, 7 * 4, "baraka", ""),
+            Some(LiveEvent::VideoStarted(stream(
+                LiveVideoSource::Camera,
+                false,
+                7
+            )))
+        );
+        assert_eq!(
+            read(8, 7 * 4 + 3, "baraka", ""),
+            Some(LiveEvent::VideoStarted(stream(
+                LiveVideoSource::Screen,
+                true,
+                7
+            )))
+        );
+        assert_eq!(
+            read(9, 2 * 4 + 1, "baraka", ""),
+            Some(LiveEvent::VideoStopped(stream(
+                LiveVideoSource::Screen,
+                false,
+                2
+            )))
+        );
+        assert_eq!(
+            read(10, 2, "", ""),
+            Some(LiveEvent::MediaFailed {
+                source: LiveVideoSource::Camera,
+                error: LiveError::PermissionDenied,
+            })
+        );
+        assert_eq!(
+            read(10, 3 * 2 + 1, "no projection", ""),
+            Some(LiveEvent::MediaFailed {
+                source: LiveVideoSource::Screen,
+                error: LiveError::Failed("no projection".into()),
+            })
+        );
+        for event in [read(8, 0, "", ""), read(9, 0, "", ""), read(10, 2, "", "")] {
+            assert!(!event.expect("known").is_final(), "the room goes on");
+        }
+    }
+
+    #[test]
+    fn the_new_commands_are_not_answered_and_say_nothing_of_their_contents() {
+        let data = ServiceRequest::LiveData {
+            topic: "chat".into(),
+            payload: b"habari".to_vec(),
+            reliable: true,
+        };
+        for request in [
+            data.clone(),
+            ServiceRequest::LiveCamera(true),
+            ServiceRequest::LiveSwitchCamera,
+            ServiceRequest::LiveScreenShare(true),
+        ] {
+            assert!(!request.expects_result());
+            assert_eq!(request.unsupported(), None);
+        }
+        assert_eq!(data.name(), "live data");
+        let received = LiveEvent::Data(LiveData {
+            from: "baraka".into(),
+            topic: "chat".into(),
+            payload: b"habari".to_vec(),
+        });
+        let text = format!("{received:?}");
+        assert!(text.contains("chat") && !text.contains("baraka") && !text.contains("104"));
+        assert!(
+            LiveJoin::new("wss://live.example.com", "t")
+                .camera(true)
+                .camera
+        );
     }
 }

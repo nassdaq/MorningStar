@@ -7,13 +7,14 @@ use std::time::{Duration, Instant};
 use morningstar_runtime::{
     App, BarContent, Capitalization, Engine, FrameOutcome, HostState, ImeAction, Insets,
     KeyboardType, LiveEvent, NativeSurface, PointerEvent, ServiceCall, ServiceId, ServiceRequest,
-    ServiceResult, SurfaceSize, TextInputCommand, TextInputEvent, TextInputRequest,
+    ServiceResult, SurfaceSize, TextInputCommand, TextInputEvent, TextInputRequest, VideoTrack,
     byte_to_utf16_offset,
 };
 
 use crate::java::{Env, HttpCall, KeyboardCall, ServiceCommand};
 use crate::log;
 use crate::sys::NativeWindow;
+use crate::video;
 
 unsafe extern "Rust" {
     /// Defined in the application crate by `morningstar::app!`.
@@ -71,6 +72,11 @@ pub enum Message {
         id: ServiceId,
         result: ServiceResult,
     },
+    /// New video frames are waiting in `video`'s slots (ADR 0039). Sent
+    /// once per video however many frames arrive before they are taken.
+    VideoFrames,
+    /// A video is over.
+    VideoEnded(VideoTrack),
     /// Assistive technology came on or went off (ADR 0032).
     Accessibility(bool),
     /// Assistive technology asks for an action on a node: the arguments of
@@ -468,6 +474,10 @@ const SERVICE_LIVE_JOIN: i32 = 10;
 const SERVICE_LIVE_LEAVE: i32 = 11;
 const SERVICE_LIVE_MICROPHONE: i32 = 12;
 const SERVICE_LIVE_SPEAKER: i32 = 13;
+const SERVICE_LIVE_DATA: i32 = 14;
+const SERVICE_LIVE_CAMERA: i32 = 15;
+const SERVICE_LIVE_SWITCH_CAMERA: i32 = 16;
+const SERVICE_LIVE_SCREEN_SHARE: i32 = 17;
 
 /// How many times in a row the application may answer a request that
 /// could not be made with another request before the render thread moves
@@ -572,6 +582,7 @@ fn send_to_host(java: &Env, call: &ServiceCall) -> bool {
                 u8::from(join.microphone),
                 u8::from(join.speaker),
                 u8::from(join.report_speaking),
+                u8::from(join.camera),
             ],
         ),
         ServiceRequest::LiveLeave => command(SERVICE_LIVE_LEAVE, "", "", &[]),
@@ -579,6 +590,22 @@ fn send_to_host(java: &Env, call: &ServiceCall) -> bool {
             command(SERVICE_LIVE_MICROPHONE, "", "", &[u8::from(*live)])
         }
         ServiceRequest::LiveSpeaker(on) => command(SERVICE_LIVE_SPEAKER, "", "", &[u8::from(*on)]),
+        // first: the topic; second: "reliable" or empty; data: the message.
+        ServiceRequest::LiveData {
+            topic,
+            payload,
+            reliable,
+        } => command(
+            SERVICE_LIVE_DATA,
+            topic,
+            if *reliable { "reliable" } else { "" },
+            payload,
+        ),
+        ServiceRequest::LiveCamera(on) => command(SERVICE_LIVE_CAMERA, "", "", &[u8::from(*on)]),
+        ServiceRequest::LiveSwitchCamera => command(SERVICE_LIVE_SWITCH_CAMERA, "", "", &[]),
+        ServiceRequest::LiveScreenShare(on) => {
+            command(SERVICE_LIVE_SCREEN_SHARE, "", "", &[u8::from(*on)])
+        }
     }
 }
 
@@ -598,19 +625,29 @@ fn describe_request(request: &ServiceRequest) -> String {
             if *assertive { " assertive" } else { "" },
         ),
         // Never the address or the ticket.
-        ServiceRequest::LiveJoin(join) => format!(
-            "join live room microphone={} sound={}{}",
-            if join.microphone { "live" } else { "muted" },
-            if join.speaker {
-                "loudspeaker"
-            } else {
-                "earpiece"
-            },
-            if join.report_speaking {
-                " speaking reports"
-            } else {
-                ""
-            },
+        ServiceRequest::LiveJoin(join) => {
+            format!(
+                "join live room microphone={} sound={}{}",
+                if join.microphone { "live" } else { "muted" },
+                if join.speaker {
+                    "loudspeaker"
+                } else {
+                    "earpiece"
+                },
+                if join.report_speaking {
+                    " speaking reports"
+                } else {
+                    ""
+                },
+            ) + if join.camera { " camera on" } else { "" }
+        }
+        // Never what is said, nor under which topic.
+        ServiceRequest::LiveData {
+            payload, reliable, ..
+        } => format!(
+            "live data {} bytes{}",
+            payload.len(),
+            if *reliable { " reliable" } else { "" }
         ),
         other => other.name().to_owned(),
     }
@@ -657,6 +694,22 @@ fn describe_result(result: &ServiceResult) -> String {
             LiveEvent::Reconnected => "live room reconnected".to_owned(),
             LiveEvent::Disconnected(reason) => format!("live room over: {reason}"),
             LiveEvent::Failed(error) => format!("live room: {error}"),
+            LiveEvent::VideoStarted(video) => format!(
+                "live room: {} {:?} started, track {}",
+                if video.local { "own" } else { "someone's" },
+                video.source,
+                video.track.0
+            ),
+            LiveEvent::VideoStopped(video) => {
+                format!(
+                    "live room: {:?} stopped, track {}",
+                    video.source, video.track.0
+                )
+            }
+            LiveEvent::MediaFailed { source, error } => {
+                format!("live room: {source:?} not started: {error}")
+            }
+            LiveEvent::Data(data) => format!("live room: data {} bytes", data.payload.len()),
         },
     }
 }
@@ -695,8 +748,19 @@ fn handle(
     java: Option<&Env>,
 ) {
     match message {
+        // Not logged: there are thirty a second.
+        Message::VideoFrames => video::deliver(engine),
+        Message::VideoEnded(track) => {
+            engine.video_ended(track);
+            log::info(&format!("video {} ended", track.0));
+        }
         Message::Service { id, result } => {
             let described = describe_result(&result);
+            // The end of a room is the end of its pictures.
+            if matches!(&result, ServiceResult::Live(event) if event.is_final()) {
+                video::forget_all();
+                engine.videos_ended();
+            }
             // Delivered here, between frames, whether or not the app is
             // visible: its state moves on, and the frame comes when it can
             // be drawn.

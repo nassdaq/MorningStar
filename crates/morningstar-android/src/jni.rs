@@ -18,15 +18,16 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use morningstar_runtime::{
-    AudioError, CaretMove, HostState, HttpError, HttpResponse, ImeAction, Insets, LiveEvent, Point,
-    PointerEvent, PointerPhase, Recording, ServiceId, ServiceResult, SurfaceSize, TextEditState,
-    TextInputEvent, utf16_to_byte_offset,
+    AudioError, CaretMove, HostState, HttpError, HttpResponse, ImeAction, Insets, LiveData,
+    LiveEvent, Point, PointerEvent, PointerPhase, Recording, ServiceId, ServiceResult, SurfaceSize,
+    TextEditState, TextInputEvent, VideoFrame, VideoRotation, VideoTrack, utf16_to_byte_offset,
 };
 
 use crate::java;
 use crate::log;
 use crate::render_thread::{self, Message};
 use crate::sys::{JObject, JniEnv, NativeWindow};
+use crate::video;
 
 /// Starts the runtime on the first call of the process; later calls change
 /// nothing. `install_id` is the host's identifier for this installation
@@ -601,4 +602,124 @@ pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_native
         id: ServiceId(id.cast_unsigned()),
         result: ServiceResult::Live(event),
     });
+}
+
+/// Someone sent a message to the live room joined by the request `id`
+/// (ADR 0039): `LiveEvent::Data`, which carries bytes and so has a call
+/// of its own rather than a kind of `nativeLiveEvent`.
+///
+/// # Safety
+/// Called by the JVM with a valid `JNIEnv*`, two `String`s (or null) and
+/// a `byte[]` (or null). May be called on any thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeLiveData(
+    env: JniEnv,
+    _class: JObject,
+    id: i64,
+    from: JObject,
+    topic: JObject,
+    payload: JObject,
+) {
+    // SAFETY: the JVM passes this thread's env and live references (or
+    // null, read as empty).
+    let data = unsafe {
+        LiveData {
+            from: java::string(env, from),
+            topic: java::string(env, topic),
+            payload: java::bytes(env, payload),
+        }
+    };
+    render_thread::send(Message::Service {
+        id: ServiceId(id.cast_unsigned()),
+        result: ServiceResult::Live(LiveEvent::Data(data)),
+    });
+}
+
+/// A decoded picture of video `track` (ADR 0039), as I420: three direct
+/// `ByteBuffer`s with the bytes from one row to the next of each. Called
+/// on a WebRTC thread for every frame; the planes are copied here, into
+/// the buffers of an earlier frame, and the call returns before the Java
+/// side releases them. Only the latest frame of a video is kept.
+///
+/// # Safety
+/// Called by the JVM with a valid `JNIEnv*` and three direct
+/// `ByteBuffer`s (or null) that stay valid until this returns. May be
+/// called on any thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeVideoFrame(
+    env: JniEnv,
+    _class: JObject,
+    track: i32,
+    width: i32,
+    height: i32,
+    rotation: i32,
+    mirrored: u8,
+    y: JObject,
+    y_stride: i32,
+    u: JObject,
+    u_stride: i32,
+    v: JObject,
+    v_stride: i32,
+) {
+    let (Ok(track), Ok(width), Ok(height)) = (
+        u32::try_from(track),
+        u32::try_from(width),
+        u32::try_from(height),
+    ) else {
+        return;
+    };
+    let strides = (
+        usize::try_from(y_stride),
+        usize::try_from(u_stride),
+        usize::try_from(v_stride),
+    );
+    let (Ok(y_stride), Ok(u_stride), Ok(v_stride)) = strides else {
+        return;
+    };
+    // SAFETY: the JVM passes this thread's env and live references; the
+    // slices are used only inside this call, before which the Java side
+    // does not release the buffers (see MorningstarLive's sink).
+    let planes = unsafe {
+        (
+            java::direct_buffer(env, y),
+            java::direct_buffer(env, u),
+            java::direct_buffer(env, v),
+        )
+    };
+    let (Some(y), Some(u), Some(v)) = planes else {
+        return;
+    };
+    let wake = video::offer(VideoTrack(track), |reuse| {
+        // A frame whose planes are shorter than its size says is refused
+        // there, not read past its end.
+        VideoFrame::from_i420(
+            width,
+            height,
+            VideoRotation::from_degrees(rotation),
+            (y, y_stride),
+            (u, u_stride),
+            (v, v_stride),
+            reuse,
+        )
+        .map(|frame| frame.with_mirrored(mirrored != 0))
+    });
+    if wake {
+        render_thread::send(Message::VideoFrames);
+    }
+}
+
+/// Video `track` is over: its picture is forgotten.
+///
+/// # Safety
+/// Called by the JVM with a valid `JNIEnv*`. May be called on any thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_morningstar_host_MorningstarNative_nativeVideoEnded(
+    _env: JniEnv,
+    _class: JObject,
+    track: i32,
+) {
+    if let Ok(track) = u32::try_from(track) {
+        video::forget(VideoTrack(track));
+        render_thread::send(Message::VideoEnded(VideoTrack(track)));
+    }
 }

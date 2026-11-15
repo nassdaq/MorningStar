@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use morningstar_core::{
     Capitalization, Color, Image, ImageFit, ImeAction, KeyboardType, Shadow, TextInputTraits,
-    Transform,
+    Transform, VideoTrack,
 };
 use morningstar_layout::{Alignment, CrossAlign, Edges, MainAlign, Sizing, Style};
 use morningstar_runtime::{
@@ -803,6 +803,8 @@ pub(crate) enum PictureSource {
     Svg(SvgPicture),
     /// A loaded SVG file drawn as an icon, in the node's tint.
     SvgIcon(SvgPicture),
+    /// The latest frame of a video in the live room (ADR 0039).
+    Video(VideoTrack),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2693,6 +2695,9 @@ impl<M> From<Picture> for Element<M> {
             PictureSource::Image(image) => (image.width() as f32, image.height() as f32),
             PictureSource::Vector(vector) => (vector.width(), vector.height()),
             PictureSource::Svg(svg) | PictureSource::SvgIcon(svg) => (svg.width(), svg.height()),
+            // A video's size is its frames', which come and change: its
+            // box is what the layout gives it.
+            PictureSource::Video(_) => (0.0, 0.0),
         };
         match (layout.width, layout.height) {
             // Natural size: one dp per image pixel or view-box unit.
@@ -2715,6 +2720,93 @@ impl<M> From<Picture> for Element<M> {
             sem: picture.sem,
             motion: Motion::PLAIN,
             kind: Kind::Image(picture.node),
+        }
+    }
+}
+
+/// A video in the live room (ADR 0039): someone's camera, a shared screen,
+/// or this device's own camera, by the [`VideoTrack`] that
+/// [`LiveEvent::VideoStarted`](morningstar_core::LiveEvent::VideoStarted)
+/// gave. It shows the video's latest picture, and draws nothing while
+/// there is none (before the first frame, after the video has stopped):
+/// put what should be seen meanwhile underneath it, in a [`Stack`].
+///
+/// It has no size of its own: give it one, or let it fill. The picture
+/// fills the box as [`fit`](Self::fit) says, [`ImageFit::Cover`] unless
+/// told otherwise (use `Contain` for a shared screen, of which nothing
+/// should be cut off). [`radius`](Self::radius) and [`tint`](Self::tint)
+/// work as for a [`Picture`], and it is clipped, faded and turned with
+/// whatever it is in.
+///
+/// Frames are drawn as they arrive, and only while the element is on
+/// screen: a call that is covered by another screen costs no rendering.
+///
+/// ```
+/// use morningstar_ui::prelude::*;
+///
+/// # fn tile(track: VideoTrack) -> LiveVideo {
+/// LiveVideo::new(track).fill().radius(16.0)
+/// # }
+/// ```
+pub struct LiveVideo {
+    layout: Style,
+    key: Option<u64>,
+    transform: Option<Transform>,
+    sem: Semantics,
+    node: ImageNode,
+}
+
+impl LiveVideo {
+    /// The video drawn by `track`.
+    pub fn new(track: VideoTrack) -> Self {
+        Self {
+            layout: Style::new(),
+            key: None,
+            transform: None,
+            sem: Semantics::NONE,
+            node: ImageNode {
+                source: PictureSource::Video(track),
+                fit: ImageFit::Cover,
+                radius: 0.0,
+                tint: ColorRef::Value(Color::WHITE),
+            },
+        }
+    }
+
+    layout_methods!();
+    semantics_methods!();
+    semantics_short_methods!();
+    box_size_method!();
+
+    /// How the picture fills a box of a different shape.
+    pub fn fit(mut self, fit: ImageFit) -> Self {
+        self.node.fit = fit;
+        self
+    }
+
+    /// Corner radius in dp.
+    pub fn radius(mut self, dp: f32) -> Self {
+        self.node.radius = dp;
+        self
+    }
+
+    /// Multiplies every pixel by a colour: white with an alpha of 0.5
+    /// shows the picture half transparent.
+    pub fn tint(mut self, color: impl Into<ColorRef>) -> Self {
+        self.node.tint = color.into();
+        self
+    }
+}
+
+impl<M> From<LiveVideo> for Element<M> {
+    fn from(video: LiveVideo) -> Self {
+        Self {
+            layout: video.layout,
+            key: video.key,
+            transform: video.transform,
+            sem: video.sem,
+            motion: Motion::PLAIN,
+            kind: Kind::Image(video.node),
         }
     }
 }

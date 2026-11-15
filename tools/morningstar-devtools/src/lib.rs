@@ -46,7 +46,7 @@ use morningstar_runtime::{App, Frame, FrameInfo, SurfaceSize};
 pub use diff::{
     AspectMismatch, CompareOptions, Comparison, Fit, Region, Report, Tolerance, compare,
 };
-pub use frame::{screenshot_frame, screenshot_transparent};
+pub use frame::{screenshot_frame, screenshot_frame_with_videos, screenshot_transparent};
 pub use icon::{Generated, IconSet, Mask, Written, write_generated};
 pub use identity::{IconError, Identity, cargo_metadata};
 pub use image::{Image, ImageError, Rect};

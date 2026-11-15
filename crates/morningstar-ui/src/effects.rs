@@ -51,6 +51,14 @@ pub struct LiveRoom {
     pub speaker: bool,
     /// Whether a [`LiveEvent::Connected`] has been delivered.
     pub connected: bool,
+    /// Whether the application has the camera on now (ADR 0039).
+    pub camera: bool,
+    /// How often it has asked for the other camera.
+    pub camera_switches: u32,
+    /// Whether it is sharing the screen now.
+    pub screen_share: bool,
+    /// What it has sent to the room, oldest first: topic and payload.
+    pub sent: Vec<(String, Vec<u8>)>,
 }
 
 /// The work an application wants started: requests to the platform, each
@@ -335,6 +343,64 @@ impl<M> Effects<M> {
         self.push(ServiceRequest::LiveSpeaker(on), None);
     }
 
+    /// Sends `payload` to everyone else in the live room, under `topic`
+    /// (ADR 0039): they receive it as [`LiveEvent::Data`]. `reliable`
+    /// messages arrive, and in order; the others are faster and may be
+    /// lost, which suits positions and cursors, not words. There is no
+    /// message for its having been sent. Nothing is sent when no room is
+    /// joined, or when the payload is longer than
+    /// [`MAX_LIVE_DATA_BYTES`](morningstar_core::MAX_LIVE_DATA_BYTES).
+    ///
+    /// ```ignore
+    /// out.send_live_data("chat", text.as_bytes(), true);
+    /// // update: Message::Live(LiveEvent::Data(data)) if data.topic == "chat" => ...
+    /// ```
+    pub fn send_live_data(
+        &mut self,
+        topic: impl Into<String>,
+        payload: impl Into<Vec<u8>>,
+        reliable: bool,
+    ) {
+        let request = ServiceRequest::LiveData {
+            topic: topic.into(),
+            payload: payload.into(),
+            reliable,
+        };
+        self.push(request, None);
+    }
+
+    /// Turns this device's camera on or off in the live room (ADR 0039).
+    /// The first time, the user is asked for the camera. What follows
+    /// among the room's events: [`LiveEvent::VideoStarted`] with the
+    /// track to draw the camera's own picture by
+    /// ([`LiveVideo`](crate::LiveVideo)), [`LiveEvent::VideoStopped`], or
+    /// [`LiveEvent::MediaFailed`] if the user refused or the app was
+    /// built without `live-video`. The room goes on either way.
+    pub fn set_live_camera(&mut self, on: bool) {
+        self.push(ServiceRequest::LiveCamera(on), None);
+    }
+
+    /// Changes between the front and the back camera. Nothing happens
+    /// while the camera is off.
+    pub fn switch_live_camera(&mut self) {
+        self.push(ServiceRequest::LiveSwitchCamera, None);
+    }
+
+    /// Starts or stops sharing this device's screen with the live room
+    /// (ADR 0039). The system asks the user each time it is started, and
+    /// shows that the screen is being shared for as long as it is. While
+    /// it is shared the room is not left when the app leaves the screen
+    /// (that is the point of sharing it), and the microphone stays as it
+    /// was; the camera is turned off for as long as the app is hidden.
+    /// What follows among the room's events is as for
+    /// [`set_live_camera`](Self::set_live_camera), with
+    /// [`LiveVideoSource::Screen`](morningstar_core::LiveVideoSource::Screen);
+    /// an app built without `live-screen` is told
+    /// [`LiveError::Unsupported`].
+    pub fn set_live_screen_share(&mut self, on: bool) {
+        self.push(ServiceRequest::LiveScreenShare(on), None);
+    }
+
     /// Gives up on every request made before this call that has not been
     /// answered yet: their messages will never arrive. The platform may
     /// still finish the work (a request already sent reaches the server),
@@ -571,6 +637,28 @@ impl<M> EffectState<M> {
                     room.speaker = *on;
                 }
             }
+            ServiceRequest::LiveCamera(on) => {
+                if let Some((_, room)) = &mut driver.live {
+                    room.camera = *on;
+                }
+            }
+            ServiceRequest::LiveSwitchCamera => {
+                if let Some((_, room)) = &mut driver.live {
+                    room.camera_switches += 1;
+                }
+            }
+            ServiceRequest::LiveScreenShare(on) => {
+                if let Some((_, room)) = &mut driver.live {
+                    room.screen_share = *on;
+                }
+            }
+            ServiceRequest::LiveData { topic, payload, .. } => {
+                if let Some((_, room)) = &mut driver.live
+                    && payload.len() <= morningstar_core::MAX_LIVE_DATA_BYTES
+                {
+                    room.sent.push((topic.clone(), payload.clone()));
+                }
+            }
             ServiceRequest::LiveJoin(join) => {
                 end_live(driver, &mut self.ready, LiveDisconnect::Replaced);
                 driver.live = Some((
@@ -579,6 +667,10 @@ impl<M> EffectState<M> {
                         microphone: join.microphone,
                         speaker: join.speaker,
                         connected: false,
+                        camera: join.camera,
+                        camera_switches: 0,
+                        screen_share: false,
+                        sent: Vec::new(),
                         join: join.clone(),
                     },
                 ));

@@ -22,8 +22,13 @@ val iconResDir: File = providers.gradleProperty("morningstar.resDir")
 //
 //   live: live rooms, through LiveKit's Android client (which brings WebRTC).
 //         src/live/java is compiled; otherwise src/nolive/java, whose class
-//         of the same name refuses every join.
-val knownServices = setOf("live")
+//         of the same name refuses every join. Voice and data only.
+//   live-video: with `live`, pictures in a live room: the others' cameras
+//         and shared screens are shown, and this device's camera can be
+//         turned on. Adds the CAMERA permission (ADR 0039).
+//   live-screen: with `live`, sharing this device's screen. Adds the
+//         foreground-service permissions and two services (ADR 0039).
+val knownServices = setOf("live", "live-video", "live-screen")
 val services: Set<String> = providers.gradleProperty("morningstar.services")
     .getOrElse("")
     .split(',')
@@ -39,6 +44,67 @@ val services: Set<String> = providers.gradleProperty("morningstar.services")
     }
 }
 val liveRooms = "live" in services
+val liveVideo = "live-video" in services
+val liveScreen = "live-screen" in services
+if ((liveVideo || liveScreen) && !liveRooms) {
+    throw GradleException(
+        "morningstar.services names live-video or live-screen without live: " +
+            "they are parts of the live room, and need it."
+    )
+}
+
+// What of LiveKit's manifest this app keeps (see src/main/AndroidManifest.xml):
+// a small manifest written here for every build and merged over the main one,
+// because which lines it holds depends on the app's services. It is written
+// when the build is configured, into the build directory: a `clean` in the
+// same Gradle run as a build would delete it, so run them separately.
+val serviceManifest: File =
+    layout.buildDirectory.file("generated/morningstar/manifest/AndroidManifest.xml").get().asFile
+serviceManifest.parentFile.mkdirs()
+serviceManifest.writeText(buildString {
+    appendLine("""<?xml version="1.0" encoding="utf-8"?>""")
+    appendLine("""<manifest xmlns:android="http://schemas.android.com/apk/res/android"""")
+    appendLine("""    xmlns:tools="http://schemas.android.com/tools">""")
+    val permission = { name: String, remove: Boolean ->
+        appendLine(
+            """    <uses-permission android:name="android.permission.$name"""" +
+                (if (remove) """ tools:node="remove"""" else "") + " />"
+        )
+    }
+    // The camera: asked of the user when it is first turned on. Not a
+    // reason to hide the app from a device without one.
+    permission("CAMERA", !liveVideo)
+    if (liveVideo) {
+        for (feature in listOf("camera", "camera.autofocus")) {
+            appendLine(
+                """    <uses-feature android:name="android.hardware.$feature" android:required="false" />"""
+            )
+        }
+    }
+    // Sharing the screen needs a foreground service of type mediaProjection
+    // (LiveKit's own), and the room that goes on behind another app needs
+    // one of type microphone (MorningstarLiveService).
+    permission("FOREGROUND_SERVICE", !liveScreen)
+    permission("FOREGROUND_SERVICE_MEDIA_PROJECTION", !liveScreen)
+    if (liveScreen) {
+        permission("FOREGROUND_SERVICE_MICROPHONE", false)
+    }
+    appendLine("    <application>")
+    if (liveScreen) {
+        appendLine(
+            """        <service android:name="dev.morningstar.host.MorningstarLiveService" """ +
+                """android:exported="false" android:foregroundServiceType="microphone" """ +
+                """android:stopWithTask="true" />"""
+        )
+    } else {
+        appendLine(
+            """        <service android:name="io.livekit.android.room.track.screencapture.ScreenCaptureService" """ +
+                """tools:node="remove" />"""
+        )
+    }
+    appendLine("    </application>")
+    appendLine("</manifest>")
+})
 
 // The ABIs the app's Rust library was built for: the directories
 // tools/build-android.sh has just filled under src/main/jniLibs. Native
@@ -92,6 +158,11 @@ android {
     }
 
     sourceSets["main"].res.directories.add(iconResDir.path)
+    // The per-app part of the manifest, merged over the main one in every
+    // build type.
+    for (buildType in listOf("debug", "release")) {
+        sourceSets[buildType].manifest.srcFile(serviceManifest)
+    }
     // Exactly one MorningstarLive: the LiveKit one, or the one that refuses.
     if (liveRooms) {
         // MorningstarLive.kt, the host's one Kotlin file (LiveKit's client

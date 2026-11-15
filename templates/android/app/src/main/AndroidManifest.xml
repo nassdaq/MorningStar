@@ -15,24 +15,27 @@
         android:name="android.hardware.microphone"
         android:required="false" />
 
-    <!-- The live room (ADR 0038) is voice only. LiveKit's client, which is
-         in the APK only of an app that declares the service, brings a
-         manifest that also asks for the camera, for screen sharing in a
-         foreground service and (up to Android 11) for Bluetooth, and with
-         them tells a store that the device must have a camera and
-         Bluetooth. None of that is used, so none of it is declared: these
-         four lines take them out of the merged manifest, and take out
-         nothing in an app without the service, where they are not there.
-         What LiveKit's manifest leaves in such an app is
-         ACCESS_NETWORK_STATE (to notice a network change and reconnect)
-         and MODIFY_AUDIO_SETTINGS (the call's audio mode and the
-         loudspeaker); neither is asked of the user. A Bluetooth headset is
-         therefore not used by a live room in this version. -->
-    <uses-permission android:name="android.permission.CAMERA" tools:node="remove" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
-    <uses-permission
-        android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
-        tools:node="remove" />
+    <!-- LiveKit's client, which is in the APK only of an app that declares
+         the live service (ADR 0038), brings a manifest that asks for the
+         camera, for screen sharing in a foreground service and (up to
+         Android 11) for Bluetooth, and with them tells a store that the
+         device must have a camera and Bluetooth. What an app has not asked
+         for is taken out of the merged manifest again:
+
+         - Bluetooth, here, always: a Bluetooth headset is not used by a
+           live room in this version.
+         - The camera, unless the app declares `live-video`; the
+           foreground-service permissions and LiveKit's screen capture
+           service, unless it declares `live-screen` (ADR 0039). Those
+           lines depend on the app, so they are not here but in a manifest
+           that app/build.gradle.kts writes for each build and merges over
+           this one (build/generated/morningstar/manifest).
+
+         A removal takes out nothing in an app without the service, where
+         there is nothing to take out. What LiveKit's manifest leaves in a
+         voice-only app is ACCESS_NETWORK_STATE (to notice a network change
+         and reconnect) and MODIFY_AUDIO_SETTINGS (the call's audio mode
+         and the loudspeaker); neither is asked of the user. -->
     <uses-permission android:name="android.permission.BLUETOOTH" tools:node="remove" />
 
     <!-- enableOnBackInvokedCallback: from API 33 the system's Back goes to

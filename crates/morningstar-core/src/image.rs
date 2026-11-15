@@ -7,7 +7,7 @@ use std::fmt;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::{Rect, Size};
+use crate::{Rect, Size, VideoFrame, VideoTrack};
 
 /// The longest side, in pixels, an image is stored with. A larger image is
 /// scaled down to this when it is registered (see [`ImageStore::add_rgba8`]).
@@ -142,13 +142,32 @@ impl ImagePixels<'_> {
 #[derive(Clone, Copy)]
 pub struct ImagesView<'a> {
     images: &'a [Stored],
+    videos: &'a [StoredVideo],
     generation: u64,
+}
+
+/// The latest frame of one video (ADR 0039), as a renderer converts it.
+#[derive(Clone, Copy, Debug)]
+pub struct VideoPicture<'a> {
+    /// The frame's three planes, its turn and whether it is mirrored.
+    pub frame: &'a VideoFrame,
+    /// Changes with every new frame of every video, and is never zero: a
+    /// renderer that converted the picture with this number has nothing to
+    /// do.
+    pub serial: u64,
+}
+
+struct StoredVideo {
+    track: VideoTrack,
+    frame: VideoFrame,
+    serial: u64,
 }
 
 impl ImagesView<'static> {
     /// No images, for frames that draw none.
     pub const EMPTY: Self = Self {
         images: &[],
+        videos: &[],
         generation: 0,
     };
 }
@@ -183,6 +202,23 @@ impl<'a> ImagesView<'a> {
         })
     }
 
+    /// The latest frame of video `track`, or `None` if it has none: it
+    /// has not started, or has stopped.
+    pub fn video(&self, track: VideoTrack) -> Option<VideoPicture<'a>> {
+        self.videos
+            .iter()
+            .find(|stored| stored.track == track)
+            .map(|stored| VideoPicture {
+                frame: &stored.frame,
+                serial: stored.serial,
+            })
+    }
+
+    /// How many videos have a frame.
+    pub fn video_count(&self) -> usize {
+        self.videos.len()
+    }
+
     fn position(&self, id: ImageId) -> Option<usize> {
         // Ids only grow, so the images are in id order.
         self.images
@@ -208,6 +244,9 @@ impl fmt::Debug for ImagesView<'_> {
 /// registered.
 pub struct ImageStore {
     images: Vec<Stored>,
+    /// The latest frame of each video that has one (ADR 0039): few, so a
+    /// list. Not part of `generation`, which is about images.
+    videos: Vec<StoredVideo>,
     generation: u64,
 }
 
@@ -227,8 +266,51 @@ impl ImageStore {
     pub fn new() -> Self {
         Self {
             images: Vec::new(),
+            videos: Vec::new(),
             generation: next(),
         }
+    }
+
+    /// Makes `frame` the picture of video `track`, replacing the frame
+    /// before, which is returned so that its buffers can carry the next
+    /// one ([`VideoFrame::from_i420`]). There is no queue: a video is its
+    /// latest frame.
+    pub fn set_video_frame(&mut self, track: VideoTrack, frame: VideoFrame) -> Option<VideoFrame> {
+        let serial = next();
+        match self.videos.iter_mut().find(|stored| stored.track == track) {
+            Some(stored) => {
+                stored.serial = serial;
+                Some(std::mem::replace(&mut stored.frame, frame))
+            }
+            None => {
+                self.videos.push(StoredVideo {
+                    track,
+                    frame,
+                    serial,
+                });
+                None
+            }
+        }
+    }
+
+    /// Forgets video `track`: it has stopped. Drawing it draws nothing
+    /// from then on, and a renderer frees its textures the next time it
+    /// renders with this store. Returns false if it had no frame.
+    pub fn remove_video(&mut self, track: VideoTrack) -> bool {
+        let before = self.videos.len();
+        self.videos.retain(|stored| stored.track != track);
+        self.videos.len() != before
+    }
+
+    /// Forgets every video: the room is over.
+    pub fn clear_videos(&mut self) {
+        self.videos.clear();
+    }
+
+    /// The size of video `track`'s picture as it is shown (turned
+    /// upright), or `None` while it has no frame.
+    pub fn video_size(&self, track: VideoTrack) -> Option<Size> {
+        self.view().video(track).map(|picture| picture.frame.size())
     }
 
     /// Registers an image from `width * height * 4` bytes of RGBA, row by
@@ -356,6 +438,7 @@ impl ImageStore {
     pub fn view(&self) -> ImagesView<'_> {
         ImagesView {
             images: &self.images,
+            videos: &self.videos,
             generation: self.generation,
         }
     }

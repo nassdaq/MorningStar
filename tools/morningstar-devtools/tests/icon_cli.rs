@@ -68,7 +68,9 @@ fn prints_what_the_build_scripts_read_one_value_per_line() {
     assert_eq!(stdout(&output), "hello_gpu\n\n");
     let output = run(&["barua-talk", "--print", "lib", "--print", "services"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "barua_talk\nlive\n");
+    // Several are one line, separated by commas (ADR 0039's two beside
+    // `live`), in the order the app wrote them.
+    assert_eq!(stdout(&output), "barua_talk\nlive,live-video,live-screen\n");
     let output = run(&["atlas", "--print", "services"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "\n");

@@ -34,9 +34,10 @@ use std::time::Duration;
 
 use morningstar_runtime::{
     App, AudioError, BarContent, Capitalization, CaretMove, Engine, FrameOutcome, HostState,
-    HttpError, HttpResponse, ImeAction, Insets, KeyboardType, LiveEvent, NativeSurface, Point,
-    PointerEvent, PointerPhase, Recording, ServiceCall, ServiceId, ServiceRequest, ServiceResult,
-    SurfaceSize, TextInputCommand, TextInputEvent,
+    HttpError, HttpResponse, ImeAction, Insets, KeyboardType, LiveData, LiveEvent, NativeSurface,
+    Point, PointerEvent, PointerPhase, Recording, ServiceCall, ServiceId, ServiceRequest,
+    ServiceResult, SurfaceSize, TextInputCommand, TextInputEvent, VideoFrame, VideoRotation,
+    VideoTrack,
 };
 
 unsafe extern "Rust" {
@@ -65,7 +66,10 @@ pub struct MorningstarHost {
     /// The few bytes of a live-room request (ADR 0038) that are not part
     /// of the request itself: its yes-or-no settings, one byte each. Lent
     /// like `lent`, and overwritten by the next such request handed out.
-    flags: [u8; 3],
+    flags: [u8; 4],
+    /// A video frame that was replaced by a newer one (ADR 0039): its
+    /// buffers carry the next frame.
+    spare_frame: Option<VideoFrame>,
     /// The update of the semantics tree most recently handed out (ADR
     /// 0032): the memory `morningstar_ios_take_semantics` points into,
     /// kept until the next call. Empty, and never grown, while VoiceOver
@@ -91,7 +95,8 @@ impl MorningstarHost {
             calls: VecDeque::new(),
             scratch: Vec::new(),
             lent: None,
-            flags: [0; 3],
+            flags: [0; 4],
+            spare_frame: None,
             semantics: Vec::new(),
         });
         // What the application asked for while it was being set up.
@@ -955,12 +960,13 @@ pub unsafe extern "C" fn morningstar_ios_take_service_request(
             ],
             no_data,
         ),
-        // The live room (ADR 0038). The flags are lent as three bytes.
+        // The live room (ADR 0038). The flags are lent as four bytes.
         ServiceRequest::LiveJoin(join) => {
             host.flags = [
                 u8::from(join.microphone),
                 u8::from(join.speaker),
                 u8::from(join.report_speaking),
+                u8::from(join.camera),
             ];
             (
                 11,
@@ -970,12 +976,35 @@ pub unsafe extern "C" fn morningstar_ios_take_service_request(
         }
         ServiceRequest::LiveLeave => (12, Default::default(), no_data),
         ServiceRequest::LiveMicrophone(live) => {
-            host.flags = [u8::from(*live), 0, 0];
+            host.flags = [u8::from(*live), 0, 0, 0];
             (13, Default::default(), &host.flags[..1])
         }
         ServiceRequest::LiveSpeaker(on) => {
-            host.flags = [u8::from(*on), 0, 0];
+            host.flags = [u8::from(*on), 0, 0, 0];
             (14, Default::default(), &host.flags[..1])
+        }
+        // What a room carries besides sound (ADR 0039).
+        ServiceRequest::LiveData {
+            topic,
+            payload,
+            reliable,
+        } => (
+            15,
+            [
+                topic.clone(),
+                if *reliable { "reliable" } else { "" }.to_owned(),
+                String::new(),
+            ],
+            &payload[..],
+        ),
+        ServiceRequest::LiveCamera(on) => {
+            host.flags = [u8::from(*on), 0, 0, 0];
+            (16, Default::default(), &host.flags[..1])
+        }
+        ServiceRequest::LiveSwitchCamera => (17, Default::default(), no_data),
+        ServiceRequest::LiveScreenShare(on) => {
+            host.flags = [u8::from(*on), 0, 0, 0];
+            (18, Default::default(), &host.flags[..1])
         }
     };
     let strings = texts.map(|text| c_string(&text));
@@ -1201,8 +1230,131 @@ pub unsafe extern "C" fn morningstar_ios_live_event(
     // A kind this library does not know comes from a newer host; ignoring
     // is safer than guessing.
     if let Some(event) = LiveEvent::from_wire(kind, code, &first, &second) {
+        // The end of a room is the end of its pictures.
+        if event.is_final() {
+            host.spare_frame = None;
+            host.engine.videos_ended();
+        }
         host.engine
             .service_result(ServiceId(id), ServiceResult::Live(event));
+    }
+}
+
+/// Someone sent data to the live room joined by the request `id` (ADR
+/// 0039): `from` is their identity (empty for the server), `topic` what
+/// they called it, and `data` the message, which is copied.
+///
+/// Main thread, and not after [`morningstar_ios_destroy`].
+///
+/// # Safety
+/// `host` must be null or a live pointer from [`morningstar_ios_create`];
+/// `from` and `topic` must each be null or a NUL-terminated string; `data`
+/// must be null or valid for reading `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn morningstar_ios_live_data(
+    host: *mut MorningstarHost,
+    id: u64,
+    from: *const c_char,
+    topic: *const c_char,
+    data: *const u8,
+    len: usize,
+) {
+    // SAFETY: guaranteed by the caller.
+    let Some(host) = (unsafe { host.as_mut() }) else {
+        return;
+    };
+    // SAFETY: each null or NUL-terminated, and `data` valid for `len`
+    // bytes (caller); all three are copied.
+    let data = unsafe {
+        LiveData {
+            from: text(from),
+            topic: text(topic),
+            payload: bytes(data, len),
+        }
+    };
+    host.engine
+        .service_result(ServiceId(id), ServiceResult::Live(LiveEvent::Data(data)));
+}
+
+/// A decoded picture of the video with this track number (ADR 0039), as
+/// I420: three planes, each with the bytes from one row to the next,
+/// `rotation` the degrees clockwise that show it upright, `mirrored`
+/// whether it is shown as in a mirror. The planes are copied before this
+/// returns. Only the latest frame of a video is kept: call it with the
+/// newest and drop the rest.
+///
+/// Main thread, and not after [`morningstar_ios_destroy`].
+///
+/// # Safety
+/// `host` must be null or a live pointer from [`morningstar_ios_create`];
+/// each plane must be null or valid for reading its stride times its rows
+/// (`height` for `y`, half of it rounded up for `u` and `v`).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn morningstar_ios_video_frame(
+    host: *mut MorningstarHost,
+    track: u32,
+    width: u32,
+    height: u32,
+    rotation: i32,
+    mirrored: bool,
+    y: *const u8,
+    y_stride: usize,
+    u: *const u8,
+    u_stride: usize,
+    v: *const u8,
+    v_stride: usize,
+) {
+    // SAFETY: guaranteed by the caller.
+    let Some(host) = (unsafe { host.as_mut() }) else {
+        return;
+    };
+    if y.is_null() || u.is_null() || v.is_null() || width == 0 || height == 0 {
+        return;
+    }
+    let chroma_rows = (height as usize).div_ceil(2);
+    let (Some(y_len), Some(u_len), Some(v_len)) = (
+        y_stride.checked_mul(height as usize),
+        u_stride.checked_mul(chroma_rows),
+        v_stride.checked_mul(chroma_rows),
+    ) else {
+        return;
+    };
+    // SAFETY: non-null and valid for stride times rows (caller); read only
+    // inside this call, where they are copied.
+    let planes = unsafe {
+        (
+            std::slice::from_raw_parts(y, y_len),
+            std::slice::from_raw_parts(u, u_len),
+            std::slice::from_raw_parts(v, v_len),
+        )
+    };
+    let frame = VideoFrame::from_i420(
+        width,
+        height,
+        VideoRotation::from_degrees(rotation),
+        (planes.0, y_stride),
+        (planes.1, u_stride),
+        (planes.2, v_stride),
+        host.spare_frame.take(),
+    );
+    if let Some(frame) = frame {
+        host.spare_frame = host
+            .engine
+            .video_frame(VideoTrack(track), frame.with_mirrored(mirrored));
+    }
+}
+
+/// The video with this track number is over (ADR 0039).
+///
+/// Main thread, and not after [`morningstar_ios_destroy`].
+///
+/// # Safety
+/// `host` must be null or a live pointer from [`morningstar_ios_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn morningstar_ios_video_ended(host: *mut MorningstarHost, track: u32) {
+    // SAFETY: guaranteed by the caller.
+    if let Some(host) = unsafe { host.as_mut() } {
+        host.engine.video_ended(VideoTrack(track));
     }
 }
 

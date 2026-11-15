@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 use morningstar_core::{
     Action, AtlasView, Color, DisplayList, FrameStats, FrameSummary, HostState, ImagesView, Insets,
     Lifecycle, LifecycleEvent, PointerEvent, SemanticsTree, ServiceCall, ServiceId, ServiceResult,
-    SurfaceSize, SystemBars, TextInputCommand, TextInputEvent, TextInputRequest, chars_of_utf16,
+    SurfaceSize, SystemBars, TextInputCommand, TextInputEvent, TextInputRequest, VideoFrame,
+    VideoTrack, chars_of_utf16,
 };
 use morningstar_gpu::{AdapterInfo, FrameOutcome, GpuError, NativeSurface, Renderer};
 
@@ -695,6 +696,31 @@ impl Engine {
         delivered
     }
 
+    /// A new picture of video `track` has arrived from the live room (ADR
+    /// 0039). It replaces the one before, which is returned for its
+    /// buffers. A frame is scheduled only if the last one built draws this
+    /// video: a picture nobody is looking at costs nothing but the copy.
+    /// Returns nothing to the app: a video is drawn, not delivered.
+    pub fn video_frame(&mut self, track: VideoTrack, picture: VideoFrame) -> Option<VideoFrame> {
+        let before = self.frame.set_video_frame(track, picture);
+        self.redraw |= self.frame.list.draws_video(track);
+        before
+    }
+
+    /// Video `track` has stopped: its picture is forgotten, and a frame is
+    /// scheduled if it was on screen.
+    pub fn video_ended(&mut self, track: VideoTrack) {
+        if self.frame.remove_video(track) {
+            self.redraw |= self.frame.list.draws_video(track);
+        }
+    }
+
+    /// Every video has stopped: the live room is over.
+    pub fn videos_ended(&mut self) {
+        self.frame.clear_videos();
+        self.redraw = true;
+    }
+
     /// What the host must do to its keyboard so that it matches the last
     /// frame built: show it for a field, replace the text it holds, or hide
     /// it. `None` when the host is already up to date, which is the usual
@@ -786,6 +812,8 @@ mod tests {
         /// The app calls `request_redraw` on this many more frames, as an
         /// app running an animation of that length would.
         animate_frames: u32,
+        /// A video the app draws in every frame it builds.
+        draws_video: Option<VideoTrack>,
         /// The app calls `request_redraw_after` with this on every frame.
         redraw_after: Option<Duration>,
         /// The app declares this text input on every frame.
@@ -854,6 +882,15 @@ mod tests {
         fn frame(&mut self, info: &FrameInfo, frame: &mut Frame) {
             let mut probe = self.0.lock().unwrap();
             probe.frames.push(*info);
+            if let Some(track) = probe.draws_video
+                && let Some(size) = frame.video_size(track)
+            {
+                let bounds = morningstar_core::Rect::new(0.0, 0.0, 10.0, 10.0);
+                let fit = morningstar_core::ImageFit::Cover;
+                frame
+                    .list
+                    .draw_video_fit(track, size, bounds, fit, 0.0, Color::WHITE);
+            }
             if probe.animate_frames > 0 {
                 probe.animate_frames -= 1;
                 frame.request_redraw();
@@ -2048,6 +2085,41 @@ mod tests {
         let hidden = ServiceResult::Live(LiveEvent::Disconnected(LiveDisconnect::Hidden));
         assert!(h.engine.service_result(ServiceId(1), hidden.clone()));
         assert_eq!(h.probe.lock().unwrap().results, [(ServiceId(1), hidden)]);
+    }
+
+    #[test]
+    fn a_video_frame_is_drawn_only_while_its_video_is_on_screen() {
+        let picture = || VideoFrame::from_rgba8(2, 2, &[200; 16]).expect("a frame");
+        let (shown, other) = (VideoTrack(1), VideoTrack(2));
+        let mut h = Harness::idle();
+
+        // Nothing draws it yet: the picture is kept and no frame is built.
+        assert!(h.engine.video_frame(shown, picture()).is_none());
+        assert_eq!(h.run(), 0, "a video nobody shows costs no frame");
+
+        // The app starts to draw it (something else caused that frame).
+        h.probe.lock().unwrap().draws_video = Some(shown);
+        h.engine.request_redraw();
+        assert_eq!(h.run(), 1);
+
+        // From now on each new picture is one frame, and only one.
+        let before = h.engine.video_frame(shown, picture());
+        assert!(
+            before.is_some(),
+            "the frame before comes back for its buffers"
+        );
+        assert_eq!(h.run(), 1);
+        assert_eq!(h.run(), 0, "idle until the next picture");
+
+        // Another video's pictures change nothing on screen.
+        h.engine.video_frame(other, picture());
+        assert_eq!(h.run(), 0);
+
+        // Its end is a frame, so that it leaves the screen.
+        h.engine.video_ended(shown);
+        assert_eq!(h.run(), 1);
+        h.engine.video_ended(shown);
+        assert_eq!(h.run(), 0, "ending twice is nothing");
     }
 
     #[test]

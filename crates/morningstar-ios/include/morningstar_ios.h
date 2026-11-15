@@ -384,9 +384,10 @@ enum {
   // Answered with morningstar_ios_live_event, once for EACH event of the
   // room, the last of them MORNINGSTAR_LIVE_DISCONNECTED or
   // MORNINGSTAR_LIVE_FAILED. text1: the server's address (wss://...);
-  // text2: the ticket, a secret: never log it; data: three bytes, each zero
+  // text2: the ticket, a secret: never log it; data: four bytes, each zero
   // for no: microphone live from the start, sound to the loudspeaker
-  // rather than the earpiece, speaking reports wanted. One room at a time:
+  // rather than the earpiece, speaking reports wanted, the camera on from
+  // the start. One room at a time:
   // a join ends the room that is joined (MORNINGSTAR_LIVE_END_REPLACED). A
   // host that has no live rooms answers MORNINGSTAR_LIVE_FAILED with
   // MORNINGSTAR_LIVE_ERROR_UNSUPPORTED.
@@ -400,6 +401,20 @@ enum {
   // Not answered. data: one byte, zero for the earpiece, otherwise the
   // loudspeaker.
   MORNINGSTAR_SERVICE_LIVE_SPEAKER = 14,
+  // What a room carries besides sound (ADR 0039). None is answered; a
+  // host with no room, or without the capability, ignores them (or, for
+  // the camera and the screen, reports MORNINGSTAR_LIVE_MEDIA_FAILED).
+  // text1: the topic; text2: "reliable", or empty for fast and perhaps
+  // lost; data: the message, to everyone else in the room.
+  MORNINGSTAR_SERVICE_LIVE_DATA = 15,
+  // data: one byte, zero to turn this device's camera off. Followed by
+  // MORNINGSTAR_LIVE_VIDEO_STARTED, _STOPPED or MEDIA_FAILED.
+  MORNINGSTAR_SERVICE_LIVE_CAMERA = 16,
+  // Change between the front and the back camera.
+  MORNINGSTAR_SERVICE_LIVE_SWITCH_CAMERA = 17,
+  // data: one byte, zero to stop sharing this device's screen. As for the
+  // camera.
+  MORNINGSTAR_SERVICE_LIVE_SCREEN_SHARE = 18,
 };
 
 // One request. Strings are NUL-terminated UTF-8 and never NULL (unused ones
@@ -498,6 +513,17 @@ enum {
   // Final. code: a MORNINGSTAR_LIVE_ERROR_*; first: what failed, for
   // MORNINGSTAR_LIVE_ERROR_FAILED. Never put the ticket in it.
   MORNINGSTAR_LIVE_FAILED = 7,
+  // A video started (ADR 0039). code: its track number times 4, plus 2 if
+  // it is this device's own, plus 1 if it is a shared screen; first: whose,
+  // by identity. Its pictures follow through morningstar_ios_video_frame
+  // under that track number (none for this device's own shared screen).
+  MORNINGSTAR_LIVE_VIDEO_STARTED = 8,
+  // That video is over. code and first as for VIDEO_STARTED.
+  MORNINGSTAR_LIVE_VIDEO_STOPPED = 9,
+  // This device's camera or screen could not be turned on; the room goes
+  // on. code: a MORNINGSTAR_LIVE_ERROR_* times 2, plus 1 for the screen;
+  // first: what failed, for MORNINGSTAR_LIVE_ERROR_FAILED.
+  MORNINGSTAR_LIVE_MEDIA_FAILED = 10,
 };
 
 // morningstar_ios_live_event's code with MORNINGSTAR_LIVE_DISCONNECTED.
@@ -523,6 +549,32 @@ enum {
 void morningstar_ios_live_event(MorningstarHost *host, uint64_t id,
                                 uint32_t kind, uint32_t code,
                                 const char *first, const char *second);
+
+// Someone sent data to the room joined by the MORNINGSTAR_SERVICE_LIVE_JOIN
+// request id (ADR 0039): from is their identity (NULL or empty for the
+// server), topic what they called it, data the message, copied. Main
+// thread.
+void morningstar_ios_live_data(MorningstarHost *host, uint64_t id,
+                               const char *from, const char *topic,
+                               const uint8_t *data, size_t len);
+
+// One decoded picture of the video with this track number, as I420: three
+// planes with the bytes from one row to the next of each (y has height
+// rows, u and v half of that rounded up), rotation the degrees clockwise
+// that show it upright, mirrored whether it is shown as in a mirror (a
+// front camera's own preview). The planes are copied before this returns.
+// Only the latest frame of a video is kept: decoders deliver on their own
+// threads, so hop to the main thread with the newest frame and drop the
+// ones it overtook. Main thread.
+void morningstar_ios_video_frame(MorningstarHost *host, uint32_t track,
+                                 uint32_t width, uint32_t height,
+                                 int32_t rotation, bool mirrored,
+                                 const uint8_t *y, size_t y_stride,
+                                 const uint8_t *u, size_t u_stride,
+                                 const uint8_t *v, size_t v_stride);
+
+// The video with this track number is over. Main thread.
+void morningstar_ios_video_ended(MorningstarHost *host, uint32_t track);
 
 void morningstar_ios_destroy(MorningstarHost *host);
 

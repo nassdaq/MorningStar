@@ -11,10 +11,12 @@
 //! being sampled changes (ADR 0014).
 
 use morningstar_core::{
-    AtlasView, Color, DisplayList, DrawOp, Image, ImageId, ImagesView, Rect, SurfaceSize, Transform,
+    AtlasView, Color, DisplayList, DrawOp, ImageId, ImagesView, Rect, SurfaceSize, Transform,
+    VideoTrack,
 };
 
 use crate::images::ImageTextures;
+use crate::videos::VideoTextures;
 
 /// `f32`s per instance. Nine `vec4`s, in the order of `Instance` in
 /// `quad.wgsl`: rect, colour, second colour (or an image's sampling bounds),
@@ -78,6 +80,11 @@ pub struct RenderStats {
     pub image_textures: u32,
     /// Bytes of texel data in those textures, mipmaps included.
     pub image_texture_bytes: u64,
+    /// Video frames converted during the frame (ADR 0039): one for each
+    /// video that is drawn and has a new picture.
+    pub video_conversions: u32,
+    /// Videos that hold textures after the frame.
+    pub video_textures: u32,
     /// Render passes encoded. One, unless the frame has layers
     /// (`DisplayList::push_layer`, ADR 0028): each layer that is drawn adds
     /// one for its own content and one to carry on in its parent.
@@ -368,16 +375,21 @@ impl Quad {
 
 /// An image operation as a quad, given the size in texels of the texture
 /// that holds the image (which may be smaller than the image's own size).
+///
+/// `(width, height)` is the size `source` is measured in. Without `mips`
+/// the texture has one level only (a video's picture), and that is sampled
+/// however much the picture is reduced.
+#[allow(clippy::too_many_arguments)]
 fn image_quad(
-    image: Image,
+    (width, height): (f32, f32),
     rect: Rect,
     source: Rect,
     corner_radius: f32,
     tint: Color,
     (texture_width, texture_height): (u32, u32),
     edge_scale: f32,
+    mips: bool,
 ) -> Quad {
-    let (width, height) = (image.width() as f32, image.height() as f32);
     // The source region in texture coordinates.
     let (u, v) = (source.x / width, source.y / height);
     let (du, dv) = (source.width / width, source.height / height);
@@ -391,7 +403,7 @@ fn image_quad(
     // A transform that enlarges or shrinks changes the ratio with it.
     let reduction = (texels_x / rect.width).max(texels_y / rect.height) / edge_scale;
     // Written so that NaN counts as no reduction.
-    let level = if reduction > 1.0 {
+    let level = if mips && reduction > 1.0 {
         reduction.log2()
     } else {
         0.0
@@ -611,6 +623,8 @@ struct Run {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RunTexture {
     Image(ImageId),
+    /// A video's converted picture.
+    Video(VideoTrack),
     /// A layer's target, by nesting depth, being blended into its parent.
     Layer(usize),
 }
@@ -675,6 +689,8 @@ pub(crate) struct QuadRenderer {
     transforms: Vec<(Xform, Clip)>,
     /// Image textures, by image id.
     images: ImageTextures,
+    /// Video textures, by track (ADR 0039).
+    videos: VideoTextures,
     /// The draw calls of the current frame. Kept to reuse its allocation.
     runs: Vec<Run>,
     /// The render passes of the current frame: one, unless it has layers.
@@ -781,6 +797,7 @@ impl QuadRenderer {
             clips: Vec::new(),
             transforms: Vec::new(),
             images,
+            videos: VideoTextures::new(device),
             runs: Vec::new(),
             passes: Vec::new(),
             layers: Vec::new(),
@@ -810,6 +827,8 @@ impl QuadRenderer {
             image_uploads: self.images.uploads(),
             image_textures: self.images.count(),
             image_texture_bytes: self.images.bytes(),
+            video_conversions: self.videos.conversions(),
+            video_textures: self.videos.count(),
             passes: self.passes.len() as u32,
             layer_textures: self.layers.len() as u32,
             layer_texture_bytes: self.layers.len() as u64
@@ -843,6 +862,7 @@ impl QuadRenderer {
         self.fresh_layers = 0;
         self.last_atlas_upload = AtlasUpload::None;
         self.images.begin_frame(&images);
+        self.videos.begin_frame(&images);
         if self.layer_size != size {
             // Targets of another size are of no use.
             self.layers.clear();
@@ -1007,18 +1027,62 @@ impl QuadRenderer {
                         continue;
                     };
                     let quad = image_quad(
-                        image,
+                        (image.width() as f32, image.height() as f32),
                         rect,
                         source,
                         corner_radius,
                         tint,
                         (texture.width, texture.height),
                         xform.edge_scale,
+                        true,
                     );
                     let wanted = RunTexture::Image(image.id());
                     if run_image.is_some_and(|current| current != wanted) {
                         // A different texture: what came before is drawn
                         // first, by its own draw call, so paint order holds.
+                        self.end_run(device, queue, &images, run_image);
+                    }
+                    run_image = Some(wanted);
+                    self.push_instance(&quad, &clip, &xform);
+                    if depth > 0 {
+                        self.note_painted(intersect(
+                            xform.screen_bounds(bounds),
+                            clip.flattened(&xform),
+                        ));
+                    }
+                }
+                DrawOp::Video {
+                    track,
+                    size,
+                    rect,
+                    source,
+                    corner_radius,
+                    tint,
+                } => {
+                    // Checked first, so a video that is out of view is
+                    // neither uploaded nor converted.
+                    let bounds = Quad::solid(rect, 0.0, tint).painted_bounds(&xform);
+                    if !clip.may_show(bounds, &xform) {
+                        continue;
+                    }
+                    // A video without a frame draws nothing.
+                    let Some(texture) =
+                        self.videos.get(device, queue, &self.images, &images, track)
+                    else {
+                        continue;
+                    };
+                    let quad = image_quad(
+                        (size.width, size.height),
+                        rect,
+                        source,
+                        corner_radius,
+                        tint,
+                        (texture.width, texture.height),
+                        xform.edge_scale,
+                        false,
+                    );
+                    let wanted = RunTexture::Video(track);
+                    if run_image.is_some_and(|current| current != wanted) {
                         self.end_run(device, queue, &images, run_image);
                     }
                     run_image = Some(wanted);
@@ -1122,6 +1186,7 @@ impl QuadRenderer {
                 .images
                 .get(device, queue, images, id)
                 .map(|texture| texture.bind_group.clone()),
+            Some(RunTexture::Video(track)) => self.videos.bind_group(track),
             Some(RunTexture::Layer(depth)) => {
                 self.layers.get(depth).map(|layer| layer.bind_group.clone())
             }

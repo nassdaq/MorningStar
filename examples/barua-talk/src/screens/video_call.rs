@@ -4,11 +4,12 @@
 //! call's clock, the recording pill, the user's own camera, the volume,
 //! and the five controls on a bar with an arched top.
 //!
-//! **No sound and no pictures flow yet**: the framework has no media
-//! client. In the scripted app the screen is the design's frame (its
-//! video still of Baraka, its camera tile). In a real call the big
-//! picture is the other person's face, the tile says the camera has no
-//! picture, and a line says what is missing.
+//! In the scripted app the screen is the design's frame (its video still
+//! of Baraka, its camera tile). In a real call the pictures are the live
+//! room's (ADR 0039): the other side's camera over their face, which
+//! shows until the first frame and whenever their camera is off; a shared
+//! screen, whole, in place of it; the user's own camera in the tile; and a
+//! line that says how sound and video stand.
 
 use morningstar::ui::prelude::*;
 
@@ -34,7 +35,10 @@ const ARCH: VectorPicture = VectorPicture::new(
 /// What fills the screen: the design's video frame in the scripted app
 /// (`object-fit: cover; object-position: 30% 0`, cut to that window by
 /// `design/prepare-images.py`), otherwise the person's backdrop with
-/// their face in the middle.
+/// their face in the middle, and over it whatever the live room shows:
+/// their camera, filling the screen as the design's frame does, or the
+/// screen someone shares, whole on the page's colour. A video draws
+/// nothing until its first frame, so the face is what is seen until then.
 fn remote(app: &BaruaTalk, call: &Call) -> Element<Message> {
     let subject_face = call.subject.face();
     let frame = subject_face
@@ -46,17 +50,42 @@ fn remote(app: &BaruaTalk, call: &Call) -> Element<Message> {
             .fill()
             .semantic_label(format!("{} on video", call.subject.title()))
             .into(),
-        None => stack![
-            backdrop(app, subject_face),
-            Container::new(face(app, subject_face, 124.0))
-                .center()
+        None => {
+            let pictures = app.pictures();
+            let theirs = pictures.theirs.map(|track| {
+                LiveVideo::new(track)
+                    .fill()
+                    .semantic_label(format!("{} on video", call.subject.title()))
+                    .id("their-video")
+            });
+            let screen = pictures.screen.map(|track| {
+                stack![
+                    Container::empty().fill().background(PAGE),
+                    LiveVideo::new(track)
+                        .fit(ImageFit::Contain)
+                        .fill()
+                        .semantic_label("A shared screen"),
+                ]
                 .fill()
-                // Between the camera's tile and the bar, where the
-                // screen is free.
-                .padding_ltrb(0.0, 220.0, 0.0, 148.0),
-        ]
-        .fill()
-        .into(),
+                // Clear of the header above and the bar below.
+                .padding_ltrb(0.0, 110.0, 0.0, 148.0)
+                .id("shared-screen")
+            });
+            Stack::new()
+                .push(backdrop(app, subject_face))
+                .push(
+                    Container::new(face(app, subject_face, 124.0))
+                        .center()
+                        .fill()
+                        // Between the camera's tile and the bar, where the
+                        // screen is free.
+                        .padding_ltrb(0.0, 220.0, 0.0, 148.0),
+                )
+                .push_maybe(theirs)
+                .push_maybe(screen)
+                .fill()
+                .into()
+        }
     }
 }
 
@@ -131,20 +160,35 @@ fn recording_pill(rate: String) -> Container<Message> {
 /// `right: 20px; top: 180px; width: 108px; height: 150px; border-radius:
 /// 18px; overflow: hidden; border: 2px solid rgba(255,255,255,0.85);
 /// box-sizing: border-box` around the user's camera (`object-position:
-/// 50% 20%`). With the camera off, or in a real call (there is no
-/// picture to show), the raised surface with the camera's icon: the app's
-/// own.
+/// 50% 20%`). With the camera off, the raised surface with the camera's
+/// icon: the app's own. In a real call the picture is the phone's camera,
+/// over that surface until its first frame, and touching the tile changes
+/// to the phone's other camera.
 fn camera_tile(app: &BaruaTalk, call: &Call) -> Container<Message> {
     let picture = app
         .image(crate::model::Photo::SelfCamera)
         .filter(|_| call.scripted && call.camera);
-    let inside: Element<Message> = match picture {
-        Some(image) => Picture::new(image)
+    let own = app.pictures().own.filter(|_| call.camera);
+    let inside: Element<Message> = match (picture, own) {
+        (Some(image), _) => Picture::new(image)
             .size(104.0, 146.0)
             .radius(16.0)
             .semantic_label("Your camera")
             .into(),
-        None => Container::new(icon(
+        (None, Some(track)) => stack![
+            Container::new(icon(&icons::VIDEO, 24.0, INK))
+                .center()
+                .size(104.0, 146.0)
+                .radius(16.0)
+                .background(SURFACE),
+            LiveVideo::new(track).size(104.0, 146.0).radius(16.0),
+        ]
+        .size(104.0, 146.0)
+        .on_press(Message::SwitchCamera)
+        .label("Your camera. Switches between the front and the back camera")
+        .id("own-video")
+        .into(),
+        (None, None) => Container::new(icon(
             if call.camera {
                 &icons::VIDEO
             } else {
@@ -158,7 +202,7 @@ fn camera_tile(app: &BaruaTalk, call: &Call) -> Container<Message> {
         .radius(16.0)
         .background(SURFACE)
         .label(if call.camera {
-            "Your camera: no picture in this version"
+            "Your camera: no picture yet"
         } else {
             "Your camera is off"
         })
@@ -250,7 +294,7 @@ fn volume(call: &Call) -> Container<Message> {
 /// record button's dot is `#FF5A72` while recording and `#F4F5F8` when
 /// not (`{{recDot}}`): a circle of radius 4 in the icon's 24, so 7.33 dp
 /// across in its 22.
-fn bar(call: &Call, width: f32) -> Container<Message> {
+fn bar(call: &Call, sharing: bool, width: f32) -> Container<Message> {
     let recording = call.recording.is_on();
     let busy = matches!(call.recording, Recording::Starting | Recording::Stopping(_));
     let record = stack![
@@ -287,9 +331,11 @@ fn bar(call: &Call, width: f32) -> Container<Message> {
         .role(Role::Switch)
         .checked(call.camera)
         .id("camera"),
-        control(&icons::SHARE_SCREEN, 52.0, false)
+        control(&icons::SHARE_SCREEN, 52.0, sharing)
             .on_press(Message::ShareScreen)
             .label("Share your screen")
+            .role(Role::Switch)
+            .checked(sharing)
             .id("share"),
         disc(&icons::HANG_UP, 68.0, 28.0, DANGER)
             .on_press(Message::HangUp)
@@ -393,7 +439,7 @@ pub fn view(app: &BaruaTalk, viewport: &Viewport<'_>) -> Element<Message> {
             .gradient(Gradient::vertical(PAGE, with_alpha(PAGE, 0.0)))
             .place(Alignment::TOP_LEFT),
         Container::new(overlays).fill().safe_area(SafeEdges::TOP),
-        bar(call, width).place(Alignment::BOTTOM_LEFT),
+        bar(call, app.pictures().sharing, width).place(Alignment::BOTTOM_LEFT),
     ]
     .fill()
     .background(PAGE)

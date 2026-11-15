@@ -14,7 +14,9 @@
 //! `services` (ADR 0038) lists the platform services the app opts into:
 //! the ones that cost every app that carries them something (a large
 //! native library, in the case of `live`), and are therefore built into
-//! the host only for an app that says it uses them.
+//! the host only for an app that says it uses them. With `live` an app
+//! may also name `live-video` (pictures, and a camera permission) and
+//! `live-screen` (sharing the screen, and a foreground service): ADR 0039.
 //!
 //! Every key is optional, and so is the table. The manifest is read by
 //! Cargo, not here: [`cargo_metadata`] runs `cargo metadata` and
@@ -38,7 +40,10 @@ const KEYS: [&str; 5] = ["name", "id", "icon", "icon_foreground", "icon_backgrou
 const SERVICES_KEY: &str = "services";
 
 /// The opt-in platform services there are. `live`: live rooms (ADR 0038).
-pub const SERVICES: [&str; 1] = ["live"];
+/// `live-video` and `live-screen` (ADR 0039) are parts of it, pictures
+/// with the camera and sharing the screen, and mean nothing without it;
+/// the host's build says so.
+pub const SERVICES: [&str; 3] = ["live", "live-video", "live-screen"];
 
 /// Where an icon is looked for when the manifest does not say.
 const DEFAULT_ICON: &str = "assets/icon.png";
@@ -587,7 +592,10 @@ pub(crate) mod tests {
             let error = identity(metadata).expect_err(metadata).to_string();
             assert!(error.contains(expected), "{metadata}: {error}");
             assert!(error.contains("`services`"), "{error}");
-            assert!(error.contains("the services are: live"), "{error}");
+            assert!(
+                error.contains("the services are: live, live-video, live-screen"),
+                "{error}"
+            );
         }
     }
 
