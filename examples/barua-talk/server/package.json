@@ -1,0 +1,15 @@
+{
+  "name": "barua-talk-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend for the Barua Talk app: rooms, chat, in-app calls, phone calls and recordings through the Barua Talk API; PostgreSQL keeps the people and the chat.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}
