@@ -461,8 +461,8 @@ pub struct Call {
     pub status: CallStatus,
     /// The server's id of it.
     pub id: Option<String>,
-    /// The ticket into the call's room, kept for the day the app can join
-    /// its sound and pictures.
+    /// The ticket into the call's room: what its sound is joined with
+    /// once the call is answered.
     pub ticket: Option<Ticket>,
     /// Seconds of talk.
     pub seconds: u32,
@@ -507,7 +507,7 @@ pub struct PhoneCall {
     pub status: PhoneStatus,
     /// The server's id of it.
     pub id: Option<String>,
-    /// The ticket into the call's room, kept for later.
+    /// The ticket into the call's room: what its sound is joined with.
     pub ticket: Option<Ticket>,
     /// Seconds of talk.
     pub seconds: u32,

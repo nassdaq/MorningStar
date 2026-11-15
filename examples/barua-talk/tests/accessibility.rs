@@ -14,9 +14,9 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use barua_talk::model::{CallStatus, Filter};
-use barua_talk::{ANSWER_TICKS, BaruaTalk, Message, POLL_INCOMING, Screen};
+use barua_talk::{ANSWER_TICKS, BaruaTalk, Message, POLL_INCOMING, Screen, sound};
 use morningstar::ui::{AccessibilityIssue, Action, IssueKind, Role, SemanticsNode, States, Ui};
-use morningstar::{App, Frame, FrameInfo, TextInputEvent};
+use morningstar::{App, Frame, FrameInfo, LiveError, LiveEvent, TextInputEvent};
 
 use support::{design, galaxy_a27, lock, serve, world};
 
@@ -218,14 +218,37 @@ fn the_online_states_pass_with_nothing_allowed_that_is_the_apps_own() {
     reader.activate(Role::Button, "Accept call");
     reader.ticks(2);
     assert_eq!(reader.screen(), Screen::VideoCall);
-    // The line that says what is missing is there to be read.
+    // The line that says how the call's sound stands is there to be read,
+    // in each of its states: being joined, live, and refused.
+    let said = |reader: &Reader, sentence: &str| {
+        assert!(
+            reader.spoken().iter().any(|line| line.contains(sentence)),
+            "{sentence}: {:#?}",
+            reader.spoken()
+        );
+    };
+    said(&reader, sound::JOINING);
+    findings.extend(unexplained(&reader));
+    assert!(reader.ui.live_event(LiveEvent::Connected));
+    reader.draw();
+    said(&reader, sound::ALONE);
+    findings.extend(unexplained(&reader));
     assert!(
         reader
-            .spoken()
+            .ui
+            .live_event(LiveEvent::Failed(LiveError::PermissionDenied))
+    );
+    reader.draw();
+    said(&reader, sound::NO_MICROPHONE);
+    // And a failure is said without being looked for.
+    assert!(
+        reader
+            .ui
+            .announcements()
             .iter()
-            .any(|line| line.contains("Live audio and video need the next version")),
-        "{:#?}",
-        reader.spoken()
+            .any(|line| line == sound::NO_MICROPHONE),
+        "{:?}",
+        reader.ui.announcements()
     );
     findings.extend(unexplained(&reader));
     reader.activate(Role::Button, "Hang up");

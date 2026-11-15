@@ -4,6 +4,13 @@
 //! recording, playback and storage can each be seen to work, or to fail
 //! with a readable reason, on a real device.
 //!
+//! The last button is the live room's (ADR 0038). There is no media server
+//! to join and no ticket to join it with, so what it shows is the way to
+//! the door: the app is built with the service (`services = ["live"]` in
+//! its `Cargo.toml`), the microphone question comes up, LiveKit's client
+//! loads and tries [`LIVE_URL`], and the failure comes back as a readable
+//! line. A second tap while it is trying leaves.
+//!
 //! Build and install it like any example:
 //! `MORNINGSTAR_APP=services-check tools/build-android.sh --install`.
 //!
@@ -20,6 +27,12 @@ pub const URL: &str = "https://example.com";
 pub const RECORD_SECONDS: u32 = 3;
 /// The key the launch counter is stored under.
 pub const LAUNCHES_KEY: &str = "launches";
+/// Where "Join a live room" connects: this device itself, where nothing
+/// listens (or, through `adb reverse tcp:7880 tcp:7880`, a LiveKit server
+/// on the development machine, which refuses the ticket).
+pub const LIVE_URL: &str = "ws://127.0.0.1:7880";
+/// Not a ticket: no server lets it in.
+pub const LIVE_TICKET: &str = "services-check-is-not-a-ticket";
 
 /// What a tap or a result asks of the application.
 #[derive(Clone, Debug, PartialEq)]
@@ -46,6 +59,10 @@ pub enum Message {
     StoreLoad,
     /// What was loaded.
     Loaded(Option<String>),
+    /// "Join a live room": joins, or leaves the one being joined.
+    Live,
+    /// Something happened in the live room.
+    LiveEvent(LiveEvent),
 }
 
 /// Work `update` has decided on and `effects` has not started yet.
@@ -57,6 +74,8 @@ enum Start {
     Play(AudioClip),
     StopPlayback,
     StoreLoad(String),
+    Join,
+    Leave,
 }
 
 /// The smoke test's state: one line of result per service.
@@ -85,6 +104,10 @@ pub struct ServicesCheck {
     pub getting: bool,
     /// See [`getting`](Self::getting).
     pub playing: bool,
+    /// See [`http`](Self::http).
+    pub live: String,
+    /// A live room is joined or being joined: the button leaves it.
+    pub in_room: bool,
 }
 
 impl ServicesCheck {
@@ -95,6 +118,7 @@ impl ServicesCheck {
             recording: "not tried".into(),
             playback: "nothing recorded yet".into(),
             storage: "not tried".into(),
+            live: "not tried".into(),
             ..Self::default()
         }
     }
@@ -157,6 +181,15 @@ impl Application for ServicesCheck {
                         .on_press(Message::StopPlaying)
                         .fill_width(),
                     section("Store / Load", Message::StoreLoad, &self.storage),
+                    section(
+                        if self.in_room {
+                            "Leave the live room"
+                        } else {
+                            "Join a live room"
+                        },
+                        Message::Live,
+                        &self.live,
+                    ),
                 ]
                 .gap(18.0)
                 .padding(20.0)
@@ -245,6 +278,31 @@ impl Application for ServicesCheck {
                 self.storage = format!("stored {}, loading...", self.launches);
                 self.start.push(Start::StoreLoad(self.launches.to_string()));
             }
+            Message::Live => {
+                if self.in_room {
+                    self.start.push(Start::Leave);
+                    self.live = "leaving...".into();
+                } else {
+                    self.in_room = true;
+                    self.start.push(Start::Join);
+                    self.live = "joining (the microphone may be asked for)...".into();
+                }
+            }
+            Message::LiveEvent(event) => {
+                // The event that ends a room is the last: the button joins
+                // again after it.
+                self.in_room = !event.is_final();
+                self.live = match event {
+                    LiveEvent::Connected => "connected: sound is live".into(),
+                    LiveEvent::ParticipantJoined(who) => format!("{} is in the room", who.identity),
+                    LiveEvent::ParticipantLeft(identity) => format!("{identity} left"),
+                    LiveEvent::Speaking(who) => format!("{} speaking", who.len()),
+                    LiveEvent::Reconnecting => "reconnecting...".into(),
+                    LiveEvent::Reconnected => "connected again".into(),
+                    LiveEvent::Disconnected(reason) => format!("over: {reason}"),
+                    LiveEvent::Failed(error) => error.to_string(),
+                };
+            }
             Message::Loaded(value) => {
                 self.storage = match value {
                     Some(value) => format!("loaded {value}"),
@@ -273,6 +331,11 @@ impl Application for ServicesCheck {
                     out.store(LAUNCHES_KEY, value);
                     out.load(LAUNCHES_KEY, Message::Loaded);
                 }
+                Start::Join => out.join_live(
+                    LiveJoin::new(LIVE_URL, LIVE_TICKET).speaker(true),
+                    Message::LiveEvent,
+                ),
+                Start::Leave => out.leave_live(),
             }
         }
     }

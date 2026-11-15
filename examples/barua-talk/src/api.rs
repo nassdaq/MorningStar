@@ -527,8 +527,8 @@ fn running_recording(value: &Value) -> Option<String> {
 
 // ---------------------------------------------------------------- answers
 
-/// A LiveKit ticket: what a media client would join a room with. The app
-/// cannot use one yet; it keeps it for the day it can.
+/// A LiveKit ticket: what the call's live room is joined with
+/// (`Effects::join_live`), for its sound.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Ticket {
     /// The token.

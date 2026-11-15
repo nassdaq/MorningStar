@@ -11,8 +11,8 @@ mod support;
 
 use barua_talk::model::{CallStatus, Delivery, Entry, PhoneStatus, Recording};
 use barua_talk::{
-    BaruaTalk, Link, NO_MEDIA, POLL_ACTIVE, POLL_HOME, POLL_INCOMING, POLL_PHONE, POLL_RINGING,
-    POLL_ROOM, Screen,
+    BaruaTalk, Link, POLL_ACTIVE, POLL_HOME, POLL_INCOMING, POLL_PHONE, POLL_RINGING, POLL_ROOM,
+    Screen, sound,
 };
 
 use support::{Device, Shared, design, galaxy_a27, lock, phones, world};
@@ -275,10 +275,12 @@ fn someone_rings_and_the_call_is_accepted_recorded_and_ended_by_them() {
         assert_eq!(lock(&world).call("c9").status, "active");
         let call = device.app().call().unwrap();
         assert_eq!(call.status, CallStatus::Active);
-        // The ticket is kept for a media service that is not there yet,
-        // and the screen says what is missing rather than pretending.
+        // The call's sound is being joined with its ticket, and the
+        // screen says so rather than pretending it flows already
+        // (`tests/sound.rs` plays the room).
         assert_eq!(call.ticket.as_ref().unwrap().token, "callee-ticket");
-        assert!(device.has("no-media"), "{phone}: {NO_MEDIA}");
+        assert!(device.has("sound-note"), "{phone}");
+        assert_eq!(device.app().sound_note(), Some(sound::JOINING), "{phone}");
 
         device.tap("record");
         device.ticks(2);
@@ -431,7 +433,7 @@ fn a_rooms_video_takes_a_ticket_and_records_the_room() {
     assert_eq!(device.screen(), Screen::VideoCall);
     let call = device.app().call().unwrap();
     assert_eq!(call.ticket.as_ref().unwrap().token, "room-ticket");
-    assert!(device.has("no-media"));
+    assert!(device.has("sound-note"));
     device.tap("record");
     device.ticks(2);
     assert_eq!(
@@ -502,7 +504,7 @@ fn a_phone_is_dialled_once_watched_and_left() {
     assert_eq!(call.caller_id, "+255 800 110 011");
     assert!(!call.can_hang_up && !call.scripted);
     assert_eq!(call.ticket.as_ref().unwrap().token, "phone-ticket");
-    assert!(device.has("no-media"));
+    assert!(device.has("sound-note"));
     {
         let mut world = lock(&world);
         assert_eq!(world.phones.len(), 1, "dialled once");

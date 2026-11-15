@@ -595,7 +595,7 @@ impl World {
     }
 
     /// Answers one request as the contract says, or leaves it pending.
-    fn answer(&mut self, request: &HttpRequest) -> Option<Result<HttpResponse, HttpError>> {
+    pub fn answer(&mut self, request: &HttpRequest) -> Option<Result<HttpResponse, HttpError>> {
         let method = match request.method {
             HttpMethod::Get => "GET",
             HttpMethod::Post => "POST",

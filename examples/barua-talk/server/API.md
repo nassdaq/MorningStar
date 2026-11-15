@@ -5,10 +5,11 @@ server (`examples/barua-talk/server`). The app holds no secrets: the Barua
 Talk API (`docs/barua-talk-api.md`, called "upstream" below) and the
 database are reached only by the server.
 
-The app framework has no LiveKit client yet, so everything here is plain
-request and response, and the app learns of changes by polling. Wherever
-upstream hands out a LiveKit ticket the server passes it on (`token`,
-`url`), ready for the day the app can join the room's audio and video.
+Everything here is plain request and response, and the app learns of
+changes by polling. Wherever upstream hands out a LiveKit ticket the server
+passes it on (`token`, `url`). The app joins the room's audio with it, on
+Android (`../SCREENS.md`, "Sound"; video is not in the app yet); the
+contract did not change for that.
 
 - Base URL: configurable in the app; `http://127.0.0.1:8789` in development
   (the phone reaches it with `adb reverse tcp:8789 tcp:8789`).
@@ -223,9 +224,8 @@ messages here. Only the person who made it may (`403 not_yours`).
 ```
 
 A LiveKit ticket for this person, good for joining for one hour. The app
-cannot use it yet; it is here so that nothing changes on the server when it
-can. One upstream request per call: ask when entering the room, not on a
-timer.
+joins the room's audio with it when its call screen opens. One upstream
+request per call: ask when entering the room, not on a timer.
 
 ## Room chat
 

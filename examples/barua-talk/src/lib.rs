@@ -32,13 +32,18 @@
 //! answer for a call or a check that is no longer the current one changes
 //! nothing.
 //!
-//! # No sound, no pictures
+//! # Sound, and no pictures
 //!
-//! The framework has no media client, so a call here is its signalling
-//! only: it rings, is answered, is timed, recorded and ended, and the
-//! ticket the server hands out is kept ([`model::Call::ticket`]) for the
-//! day a media service can use it. The call screen says so while a real
-//! call is connected.
+//! A real call carries sound. The ticket the server hands out for a call
+//! or a room ([`model::Call::ticket`], [`model::PhoneCall::ticket`]) is
+//! what the framework's live room is joined with (`Effects::join_live`,
+//! ADR 0038): an in-app call when it becomes active, a room's call when
+//! its ticket arrives, a phone call as soon as it is dialled. The mute
+//! and loudspeaker buttons act on that room, and the room is left when
+//! the call ends, however it ends. [`Sound`] is how that stands, and the
+//! call screens say it in words ([`BaruaTalk::sound_note`]): what is
+//! connected, and what is not and why. There is still no video: no
+//! picture is sent or shown. The scripted app joins nothing.
 
 pub mod api;
 pub mod components;
@@ -271,11 +276,64 @@ pub const POLL_ACTIVE: u32 = 20;
 /// A call to a phone: every 4 seconds.
 pub const POLL_PHONE: u32 = 16;
 
-/// What the call screen says while a real call is connected: the app has
-/// no media client, and must not look as if sound were flowing.
-pub const NO_MEDIA: &str = "Connected. Live audio and video need the next version.";
-/// The same for a call to a phone.
-pub const NO_PHONE_MEDIA: &str = "The call is real; its sound needs the next version.";
+/// How the sound of the call in progress stands: whether the live room its
+/// ticket leads to is joined. Only a real call has any; the scripted app's
+/// calls stay [`Off`](Self::Off) and say nothing about it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Sound {
+    /// No room is joined: there is no call, it is not answered yet, or its
+    /// ticket has not come.
+    Off,
+    /// The room is being joined: the microphone may be being asked for.
+    Joining,
+    /// Sound flows both ways (one way while the microphone is muted).
+    On,
+    /// The connection dropped and is being made again.
+    Reconnecting,
+    /// The app left the screen and the platform left the room with it; it
+    /// is joined again when the app is back.
+    Away,
+    /// There is no sound, and this sentence says why.
+    Failed(&'static str),
+}
+
+impl Sound {
+    /// A room is joined or being joined: there is something to leave.
+    fn in_room(&self) -> bool {
+        matches!(self, Self::Joining | Self::On | Self::Reconnecting)
+    }
+}
+
+/// What the call screens say about the sound of a real call.
+pub mod sound {
+    /// The call is connected and its ticket has not come yet.
+    pub const WAITING: &str = "Connected. Waiting for the sound's ticket\u{2026}";
+    /// The server sent no ticket with the call.
+    pub const NO_TICKET: &str = "Connected without sound: the server sent no ticket.";
+    /// The room is being joined.
+    pub const JOINING: &str = "Connecting sound\u{2026}";
+    /// Sound flows and nobody else has joined yet.
+    pub const ALONE: &str = "Sound is live. Waiting for the other side.";
+    /// Sound flows.
+    pub const LIVE: &str = "Sound is live.";
+    /// Sound flows on a call with video, which is still not there.
+    pub const LIVE_NO_VIDEO: &str = "Sound is live. Video needs the next version.";
+    /// The connection is being made again.
+    pub const RECONNECTING: &str = "Reconnecting sound\u{2026}";
+    /// The app left the screen.
+    pub const AWAY: &str = "Sound paused while the app was away.";
+    /// The user refused the microphone.
+    pub const NO_MICROPHONE: &str =
+        "No sound: the microphone is not allowed. Allow it in Settings, then call again.";
+    /// This build has no live rooms (iOS, or an app built without them).
+    pub const UNAVAILABLE: &str = "No sound: live audio is not part of this build of the app.";
+    /// The room could not be joined.
+    pub const FAILED: &str = "No sound: the live connection failed. Hang up and call again.";
+    /// The connection was lost for good.
+    pub const LOST: &str = "The sound was lost with the connection. Hang up and call again.";
+    /// The room was closed from the other side.
+    pub const ENDED: &str = "The sound was ended from the other side.";
+}
 
 /// What the platform answers a request with.
 pub type Wire = Result<HttpResponse, HttpError>;
@@ -338,6 +396,9 @@ pub enum Message {
     Tick,
     /// An answer from the server.
     Net(Net),
+    /// Something happened in the live room joined for the call with this
+    /// serial: its sound.
+    Live(u32, LiveEvent),
 
     /// Typing in a name field (Welcome, Server).
     Name(String),
@@ -452,6 +513,14 @@ enum Ask {
     /// A request, and the message its answer becomes.
     Http(HttpRequest, Route),
     Store(&'static str, String),
+    /// Join the live room of the call with this serial.
+    Join(u32, LiveJoin),
+    /// Leave the live room.
+    Leave,
+    /// Open or mute the microphone in it.
+    Microphone(bool),
+    /// Its sound to the loudspeaker or the earpiece.
+    Speaker(bool),
 }
 
 /// Which [`Net`] message an HTTP answer becomes.
@@ -629,6 +698,16 @@ pub struct BaruaTalk {
     poll_room: Poll,
     poll_people: Poll,
     poll_call: Poll,
+
+    // -------------------------------------------------------- the sound
+    /// How the sound of the call in progress stands.
+    sound: Sound,
+    /// The serial of the call whose live room the app has asked for:
+    /// joined once per call, and left when another call or none is the
+    /// one in progress.
+    sound_for: Option<u32>,
+    /// How many others are in the live room.
+    sound_others: usize,
 }
 
 impl Default for BaruaTalk {
@@ -697,6 +776,9 @@ impl BaruaTalk {
             poll_room: Poll::default(),
             poll_people: Poll::default(),
             poll_call: Poll::default(),
+            sound: Sound::Off,
+            sound_for: None,
+            sound_others: 0,
         };
         app.name_draft.clone_from(&app.name);
         match screen {
@@ -906,6 +988,48 @@ impl BaruaTalk {
     /// The call in the app that is ringing or answered.
     pub fn call(&self) -> Option<&Call> {
         self.call.as_ref()
+    }
+
+    /// How the sound of the call in progress stands.
+    pub fn sound(&self) -> &Sound {
+        &self.sound
+    }
+
+    /// What a call screen says about the sound of the call in progress,
+    /// in words: `None` for the scripted app's calls (and when there is no
+    /// call), which have none and show the design's picture.
+    pub fn sound_note(&self) -> Option<&'static str> {
+        let (scripted, video, answered, ticket) = match (&self.phone, &self.call) {
+            (Some(phone), _) => (phone.scripted, false, true, phone.ticket.is_some()),
+            (None, Some(call)) => (
+                call.scripted,
+                call.video,
+                call.status == CallStatus::Active,
+                call.ticket.is_some(),
+            ),
+            (None, None) => return None,
+        };
+        if scripted {
+            return None;
+        }
+        Some(match &self.sound {
+            Sound::Off if !answered => return None,
+            // A room's ticket is asked for when its call opens; a call
+            // between two people brings its ticket with it or has none.
+            Sound::Off if ticket => sound::JOINING,
+            Sound::Off => match self.call.as_ref().map(|call| &call.subject) {
+                Some(Subject::Room { .. }) => sound::WAITING,
+                _ if self.phone.as_ref().is_some_and(|phone| phone.id.is_none()) => sound::WAITING,
+                _ => sound::NO_TICKET,
+            },
+            Sound::Joining => sound::JOINING,
+            Sound::On if self.sound_others == 0 => sound::ALONE,
+            Sound::On if video => sound::LIVE_NO_VIDEO,
+            Sound::On => sound::LIVE,
+            Sound::Reconnecting => sound::RECONNECTING,
+            Sound::Away => sound::AWAY,
+            Sound::Failed(sentence) => sentence,
+        })
     }
 
     /// The call to a phone.
@@ -1960,10 +2084,123 @@ impl BaruaTalk {
         }
     }
 
+    // ----------------------------------------------------------- the sound
+
+    /// The live room the call in progress should be in: its serial, its
+    /// ticket, and how the microphone and the loudspeaker stand. A phone
+    /// call's room is joined as soon as its ticket is there, so that the
+    /// first words of whoever picks up are heard; a call in the app when
+    /// it is answered; a room's call when its ticket arrives. The call
+    /// screen is held in front of the face, so its sound is the
+    /// loudspeaker's; a phone call starts at the ear.
+    fn sound_wanted(&self) -> Option<(u32, LiveJoin)> {
+        if let Some(phone) = &self.phone {
+            let ticket = phone.ticket.as_ref().filter(|_| !phone.scripted)?;
+            return Some((
+                phone.serial,
+                LiveJoin::new(ticket.url.clone(), ticket.token.clone())
+                    .microphone(!phone.muted)
+                    .speaker(phone.speaker),
+            ));
+        }
+        let call = self.call.as_ref()?;
+        let ticket = call
+            .ticket
+            .as_ref()
+            .filter(|_| !call.scripted && call.status == CallStatus::Active)?;
+        Some((
+            call.serial,
+            LiveJoin::new(ticket.url.clone(), ticket.token.clone())
+                .microphone(!call.muted)
+                .speaker(true),
+        ))
+    }
+
+    /// Makes the live room follow the call: run after every message.
+    /// Whatever ended the call in progress (a button, Back, the other
+    /// side, the server going away), its room is left here, in one place,
+    /// and a call's room is joined once: a room that failed is not tried
+    /// again behind the user's back.
+    fn follow_call(&mut self) {
+        let wanted = self.sound_wanted();
+        if self.sound_for == wanted.as_ref().map(|(serial, _)| *serial) {
+            return;
+        }
+        if self.sound.in_room() {
+            self.asks.push(Ask::Leave);
+        }
+        self.sound = Sound::Off;
+        self.sound_for = None;
+        self.sound_others = 0;
+        if let Some((serial, join)) = wanted {
+            self.sound = Sound::Joining;
+            self.sound_for = Some(serial);
+            self.asks.push(Ask::Join(serial, join));
+        }
+    }
+
+    /// Something happened in the live room joined for the call `serial`.
+    fn heard_live(&mut self, serial: u32, event: LiveEvent) {
+        // The end of a room that was left for another call, or for none.
+        if self.sound_for != Some(serial) {
+            return;
+        }
+        let sentence = match event {
+            LiveEvent::Connected | LiveEvent::Reconnected => {
+                self.sound = Sound::On;
+                return;
+            }
+            LiveEvent::Reconnecting => {
+                self.sound = Sound::Reconnecting;
+                return;
+            }
+            LiveEvent::ParticipantJoined(_) => {
+                self.sound_others += 1;
+                return;
+            }
+            LiveEvent::ParticipantLeft(_) => {
+                self.sound_others = self.sound_others.saturating_sub(1);
+                return;
+            }
+            // Not asked for.
+            LiveEvent::Speaking(_) => return,
+            // The platform left the room because the app left the screen.
+            // The next tick of the timer, which only comes with a frame
+            // and so only when the app is on screen again, joins it anew.
+            LiveEvent::Disconnected(LiveDisconnect::Hidden) => {
+                self.sound = Sound::Away;
+                self.sound_others = 0;
+                return;
+            }
+            // The app's own doing; nothing to say.
+            LiveEvent::Disconnected(LiveDisconnect::Left | LiveDisconnect::Replaced) => {
+                self.sound = Sound::Off;
+                self.sound_others = 0;
+                return;
+            }
+            LiveEvent::Disconnected(LiveDisconnect::Ended) => sound::ENDED,
+            LiveEvent::Disconnected(LiveDisconnect::Lost) => sound::LOST,
+            LiveEvent::Failed(LiveError::PermissionDenied) => sound::NO_MICROPHONE,
+            LiveEvent::Failed(LiveError::Unsupported) => sound::UNAVAILABLE,
+            // The platform's own text is for its log, not for the screen.
+            LiveEvent::Failed(LiveError::Failed(_)) => sound::FAILED,
+        };
+        self.sound = Sound::Failed(sentence);
+        self.sound_others = 0;
+        self.asks.push(Ask::Announce(sentence.to_owned()));
+    }
+
     // ----------------------------------------------------------- the timer
 
     fn tick(&mut self) {
         self.clock += 1;
+        // A tick comes with a frame, and a frame only while the app is on
+        // screen: it is back, and the room it lost by leaving is joined
+        // again (`follow_call`, after this message).
+        if self.sound == Sound::Away {
+            self.sound = Sound::Off;
+            self.sound_for = None;
+        }
         if let Some((_, since)) = &self.notice
             && self.clock - since >= TOAST_TICKS
         {
@@ -2760,6 +2997,7 @@ impl BaruaTalk {
             }
             Message::Tick => self.tick(),
             Message::Net(net) => self.net(net),
+            Message::Live(serial, event) => self.heard_live(serial, event),
 
             Message::Name(name) => {
                 self.name_draft = name.chars().take(api::NAME_LIMIT).collect();
@@ -2880,10 +3118,21 @@ impl BaruaTalk {
                 }
             }
             Message::ToggleMute => {
-                if let Some(phone) = &mut self.phone {
+                let muted = if let Some(phone) = &mut self.phone {
                     phone.muted = !phone.muted;
+                    Some(phone.muted)
                 } else if let Some(call) = &mut self.call {
                     call.muted = !call.muted;
+                    Some(call.muted)
+                } else {
+                    None
+                };
+                // The button acts on the room that is joined; a room
+                // joined later starts as the button stands.
+                if let Some(muted) = muted
+                    && self.sound.in_room()
+                {
+                    self.asks.push(Ask::Microphone(!muted));
                 }
             }
             Message::ToggleCamera => {
@@ -2907,6 +3156,9 @@ impl BaruaTalk {
             Message::ToggleSpeaker => {
                 if let Some(phone) = &mut self.phone {
                     phone.speaker = !phone.speaker;
+                    if self.sound.in_room() {
+                        self.asks.push(Ask::Speaker(phone.speaker));
+                    }
                 }
             }
             Message::ToggleKeypad => {
@@ -3127,6 +3379,8 @@ impl Application for BaruaTalk {
         let from = self.screen();
         let handled = self.go_back();
         self.arrived(from);
+        // Back from a call's screen ended the call: its room is left.
+        self.follow_call();
         handled
     }
 
@@ -3195,13 +3449,15 @@ impl Application for BaruaTalk {
         // The timer and the server's answers are not touches: a still
         // frame stays still (and a design page stays the design's picture
         // when its first question to a server that is not there fails).
-        let touch = !matches!(message, Message::Tick | Message::Net(_));
+        let touch = !matches!(message, Message::Tick | Message::Net(_) | Message::Live(..));
         if touch {
             self.still = false;
         }
         let from = self.screen();
         self.handle(message);
         self.arrived(from);
+        // Whatever that did to the call in progress, its sound follows.
+        self.follow_call();
     }
 
     fn effects(&mut self, out: &mut Effects<Message>) {
@@ -3211,6 +3467,12 @@ impl Application for BaruaTalk {
                 Ask::Announce(text) => out.announce(text),
                 Ask::Http(request, route) => out.http(request, move |wire| route.message(wire)),
                 Ask::Store(key, value) => out.store(key, value),
+                Ask::Join(serial, join) => {
+                    out.join_live(join, move |event| Message::Live(serial, event));
+                }
+                Ask::Leave => out.leave_live(),
+                Ask::Microphone(live) => out.set_live_microphone(live),
+                Ask::Speaker(on) => out.set_live_speaker(on),
             }
         }
     }

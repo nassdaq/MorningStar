@@ -10,9 +10,9 @@ It is built like the Atlas example's server (`examples/atlas/server`) and
 runs beside it: this one listens on **8789**, Atlas on 8788, CallReady on
 8787.
 
-The app has no LiveKit client yet, so it reaches everything by request and
-poll. Where upstream hands out a LiveKit ticket the server passes it on
-(`token`, `url`) for the day it can join.
+The app reaches everything by request and poll. Where upstream hands out a
+LiveKit ticket the server passes it on (`token`, `url`), and the app joins
+the room's audio with it (`../SCREENS.md`, "Sound").
 
 ## Run
 

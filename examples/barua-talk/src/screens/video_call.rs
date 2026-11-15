@@ -19,7 +19,7 @@ use crate::screens::incoming::backdrop;
 use crate::theme::{
     DANGER, INK, PAGE, RECORDING, SURFACE, VEIL_55, VEIL_70, WHITE, grotesk, inter,
 };
-use crate::{BaruaTalk, Message, NO_MEDIA, Screen};
+use crate::{BaruaTalk, Message, Screen};
 
 /// The arched top of the bar: `border-radius: 50% 50% 0 0 / 28px 28px 0
 /// 0` on a box 390 wide is the upper half of an ellipse 390 by 56. A box
@@ -348,9 +348,10 @@ pub fn view(app: &BaruaTalk, viewport: &Viewport<'_>) -> Element<Message> {
     // On a phone shorter than the design's the volume moves up to stay
     // clear of the bar; at the design's size it is at 380.
     let volume_top = (height - 148.0 - 180.0 - 16.0).clamp(132.0, 380.0);
-    let note = (!call.scripted).then(|| {
+    // A real call: how its sound stands, in words. The app's own.
+    let note = app.sound_note().map(|sentence| {
         Container::new(
-            inter(NO_MEDIA, 12.0)
+            inter(sentence, 12.0)
                 .line_height_dp(17.0)
                 .color(WHITE)
                 .fill_width(),
@@ -359,7 +360,7 @@ pub fn view(app: &BaruaTalk, viewport: &Viewport<'_>) -> Element<Message> {
         .padding_xy(12.0, 8.0)
         .radius(16.0)
         .background(VEIL_70)
-        .id("no-media")
+        .id("sound-note")
     });
     let pills = Column::new()
         .push_maybe(

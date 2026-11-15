@@ -6,9 +6,12 @@ use std::time::Duration;
 use morningstar::ui::Ui;
 use morningstar::{App, Frame, FrameInfo, HostState, SurfaceSize};
 use morningstar::{
-    AudioClip, AudioError, HttpError, HttpResponse, Recording, ServiceRequest, ServiceResult,
+    AudioClip, AudioError, HttpError, HttpResponse, LiveError, LiveEvent, Recording,
+    ServiceRequest, ServiceResult,
 };
-use services_check::{LAUNCHES_KEY, Message, RECORD_SECONDS, ServicesCheck, URL};
+use services_check::{
+    LAUNCHES_KEY, LIVE_TICKET, LIVE_URL, Message, RECORD_SECONDS, ServicesCheck, URL,
+};
 
 const SIZE: SurfaceSize = SurfaceSize::new(1080, 2400);
 
@@ -167,6 +170,52 @@ fn on_a_later_launch_setup_already_knows_the_count_and_the_id() {
     assert_eq!(phone.ui.app().launches_at_start.as_deref(), Some("41"));
     phone.ui.send(Message::StoreLoad);
     assert_eq!(phone.ui.stored(LAUNCHES_KEY), Some("42"));
+}
+
+#[test]
+fn a_live_room_that_cannot_be_reached_is_a_readable_line_and_can_be_tried_again() {
+    let mut phone = Phone::fresh();
+    phone.ui.send(Message::Live);
+    assert!(phone.ui.app().in_room);
+    let room = phone.ui.live_room().expect("a join was asked for");
+    assert_eq!(room.join.url, LIVE_URL);
+    assert_eq!(room.join.token, LIVE_TICKET);
+    assert!(room.speaker && room.microphone);
+    // What a phone answers when nothing listens at that address.
+    assert!(phone.ui.live_event(LiveEvent::Failed(LiveError::Failed(
+        "ConnectException: connection refused".into()
+    ))));
+    assert_eq!(
+        phone.ui.app().live,
+        "the live room failed: ConnectException: connection refused"
+    );
+    assert!(!phone.ui.app().in_room, "the button joins again");
+    assert!(phone.ui.live_room().is_none());
+
+    // The microphone refused, and an app built without the service.
+    phone.ui.send(Message::Live);
+    phone
+        .ui
+        .live_event(LiveEvent::Failed(LiveError::PermissionDenied));
+    assert_eq!(phone.ui.app().live, "the microphone is not allowed");
+    phone.ui.send(Message::Live);
+    phone
+        .ui
+        .live_event(LiveEvent::Failed(LiveError::Unsupported));
+    assert_eq!(phone.ui.app().live, "live rooms are not available here");
+}
+
+#[test]
+fn a_second_tap_leaves_the_room_that_is_joined() {
+    let mut phone = Phone::fresh();
+    phone.ui.send(Message::Live);
+    phone.ui.live_event(LiveEvent::Connected);
+    assert_eq!(phone.ui.app().live, "connected: sound is live");
+    phone.ui.send(Message::Live);
+    assert!(phone.ui.live_room().is_none(), "left");
+    phone.ui.deliver_effects();
+    assert_eq!(phone.ui.app().live, "over: the room was left");
+    assert!(!phone.ui.app().in_room);
 }
 
 #[test]

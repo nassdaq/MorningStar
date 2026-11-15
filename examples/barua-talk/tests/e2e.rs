@@ -18,7 +18,7 @@ mod support;
 use barua_talk::model::{
     Body, CallStatus, Delivery, Entry, Face, Filter, PhoneStatus, Recording, Subject,
 };
-use barua_talk::{ANSWER_TICKS, BaruaTalk, Link, NAME_KEY, Screen, TOAST_TICKS};
+use barua_talk::{ANSWER_TICKS, BaruaTalk, Link, NAME_KEY, Screen, Sound, TOAST_TICKS};
 use morningstar::ui::Ui;
 use morningstar::{App, Frame};
 
@@ -314,8 +314,11 @@ fn a_call_is_made_answered_switched_and_ended() {
         );
         device.tap("add-person");
         assert!(device.app().notice().unwrap().starts_with("Adding people"));
-        // A scripted call is the design's frame: no "no media" line.
-        assert!(!device.has("no-media"));
+        // A scripted call is the design's frame: no line about sound,
+        // and no live room behind it.
+        assert!(!device.has("sound-note"));
+        assert_eq!(device.app().sound_note(), None);
+        assert_eq!(device.app().sound(), &Sound::Off);
 
         let before = device.app().call().unwrap().seconds;
         device.ticks(5);

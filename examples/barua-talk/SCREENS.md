@@ -13,24 +13,29 @@ A rooms, chat and calls app reproduced from a design of five pages
   seen and answered, a person who is "online" answers a call two seconds
   later, a phone "picks up". Nothing leaves the phone.
 
-**In both, no sound and no picture flows.** The framework has no media
-client (no WebRTC, no LiveKit), so a call here is its signalling: it rings,
-is answered, declined, timed, recorded and ended. The ticket the server
-hands out for a call or a room (`token`, `url`) is kept in the call
-(`model::Call::ticket`, `model::PhoneCall::ticket`) for the day a media
-service can use it. While a real call is connected the screen says so in
-words ("Connected. Live audio and video need the next version."; on a phone
-call, "The call is real; its sound needs the next version."), shows the
-other person's face instead of a video picture, and shows no camera
-picture of the user. In the scripted app the call screen is the design's
-frame: its video still of Baraka and its camera tile are the design's
-pictures, not a camera.
+**A real call carries sound; no call carries pictures.** The ticket the
+server hands out for a call or a room (`token`, `url`) is what the app
+joins a live room with (the framework's live-room service,
+`docs/architecture/0038-live-rooms.md`: LiveKit's client, on Android), and
+the people in that room hear each other. See "Sound" below for when it
+joins, what its buttons do and what it says. There is no video yet: a real
+call shows the other person's face instead of a video picture and no
+camera picture of the user, and says "Video needs the next version." In
+the scripted app nothing is joined and nothing sounds: a call there is its
+script, and the call screen is the design's frame, whose video still of
+Baraka and camera tile are the design's pictures, not a camera.
+
+**None of the sound has been heard.** It is written, tested against a
+stand-in on the development machine and built into an APK; it has not run
+on a phone, and the real server could not hand out a ticket while it was
+written. "The test on a phone" below is what remains to be done.
 
 There is no account: the app asks for a name once and the server knows the
 installation by an id. The app holds no secret.
 
 ```sh
-cargo test -p barua-talk -j2                                              # fidelity, journeys, accessibility, the app against a stand-in server
+cargo test -p barua-talk -j2                                              # fidelity, journeys, accessibility, the app against a stand-in server, the sound of its calls
+MORNINGSTAR_APP=barua-talk MORNINGSTAR_ABIS=arm64-v8a tools/build-android.sh   # the APK, with the live-room service its Cargo.toml declares
 cargo run -q -p barua-talk --example screenshot -- out/ 03 --diff         # one page against the design
 cargo run -q -p barua-talk --example screenshot -- out/ --phone --states --sheet   # everything on a Galaxy A27
 cargo run -q -p barua-talk --example screenshot -- out/ --phone --online --sheet   # the states with a server
@@ -100,7 +105,7 @@ link, the app does something a person would expect and says so here.
 | | Calls | Home, with its Calls tab chosen (there is no separate page) |
 | Room | Back | Home (or wherever it was opened from) |
 | | Phone ("Add a phone call to this room") | The dial pad, as the design's link. The call is its own: the contract cannot put a phone into a room (`server/APP-NEEDS.md`) |
-| | Camera ("Start video in this room") | The call screen as the room's video. With a server a ticket for the room is taken and kept |
+| | Camera ("Start video in this room") | The call screen as the room's call. With a server a ticket for the room is taken and the room's sound is joined with it |
 | | Play | Scripted sample only. The accent runs along the bars and the length counts down; a toast says the sample has no sound; a second tap stops it |
 | | Paperclip | A toast: no file picker in this version |
 | | The field, Send, the keyboard's Send | Adds the message and follows it down. Scripted: it is "Seen" a second later and answered a second after that. With a server it is posted (below) |
@@ -109,17 +114,18 @@ link, the app does something a person would expect and says so here.
 | | Decline | Ends it; back to where one was. Scripted, the call joins the list as missed |
 | | "Reply with a message instead" | Declines. Scripted: opens the caller's conversation. With a server: says that messages between two people need the next version (rooms are the only place to write, and everyone sees them) |
 | | Cancel (a call one makes) | Gives it up. The app's own state of this screen: "Inaita…" and one button |
-| Video call | Back | Ends the call (or leaves the room's video, the design's "Back to chat") and goes back. There is no call in the background in this version |
+| Video call | Back | Ends the call (or leaves the room's call, the design's "Back to chat"), leaves its sound, and goes back. There is no call in the background in this version |
 | | Add someone | A toast: needs the next version |
-| | The volume | Its upper half turns it up a step, its lower half down, six steps; a screen reader gets a slider. It changes a number only: there is no sound |
-| | Camera, microphone | Switches. Scripted, the camera tile shows the design's picture or, off, an icon. With a server the tile never shows a picture |
+| | The volume | Its upper half turns it up a step, its lower half down, six steps; a screen reader gets a slider. It changes a number only: on a phone the volume keys set a real call's volume |
+| | Microphone | A switch. With a server it mutes and opens the microphone in the call's live room; a call muted before its sound has connected connects muted |
+| | Camera | A switch. Scripted, the camera tile shows the design's picture or, off, an icon. With a server the tile never shows a picture: there is no video |
 | | Share screen | A toast: needs the next version |
 | | Record | Starts and stops the recording; the pill "Recording · TSh 30 / min" shows while it runs, as in the design's own script. With a server it is a real, priced recording (below) |
-| | Red button | Hangs up; back to where the call was started |
-| Phone call | Mute, Speaker | Switches |
+| | Red button | Hangs up, which leaves the call's sound; back to where the call was started |
+| Phone call | Mute, Speaker | Switches. With a server Mute closes and opens the microphone in the call's live room, and Speaker moves its sound between the earpiece (where a phone call starts) and the loudspeaker |
 | | Keypad | A sheet with twelve keys and the keys pressed (app's own). They change the line only: tones need the media that is not there |
 | | Red button, Back | Scripted: ends the call. With a server that cannot end a phone call (`can_hang_up` false): leaves it, is read as "Leave call", and says "The call ends when the other side hangs up." |
-| Anywhere | System Back | Closes the keyboard, then a sheet or the search, then pops; ends a call from its screen; on a tab's root it is left to the system |
+| Anywhere | System Back | Closes the keyboard, then a sheet or the search, then pops; ends a call from its screen, and with it the call's sound; on a tab's root it is left to the system |
 
 ## With a server
 
@@ -172,9 +178,9 @@ is posted and not waited for. A call given up before the server has
 answered that it exists is hung up when that answer comes. The clock is the
 app's ticks, corrected by the server's `seconds` at each poll.
 
-**A room's video.** `POST …/ticket` with `video: true`; the ticket is kept;
-the call screen shows the room. There is nothing to ring and nothing to
-poll.
+**A room's call.** `POST …/ticket` with `video: true`; the call screen
+shows the room, and when the ticket comes the room's sound is joined with
+it. There is nothing to ring and nothing to poll.
 
 **Recording** (TSh 30 a minute) is `POST /v1/recordings` for the call or
 the room and `POST …/stop`; what the server refuses (`402`, `409`, `503`)
@@ -192,6 +198,59 @@ length and its price.
 long ago by the server's `now` ("Sasa", "5 min", "3 h", "Jana", "Ijumaa",
 "2/10") and never a time of day; the greeting is "Karibu" rather than the
 design's "Habari za asubuhi".
+
+## Sound
+
+`src/lib.rs`, "the sound". The app joins one live room at a time
+(`Effects::join_live`) with the ticket it holds, and one function,
+`follow_call`, run after every message, keeps "the call in progress" and
+"the room the app asked for" the same: whatever ended a call, its room is
+left there, in one place.
+
+| The call | Its room is joined | Microphone | Sound comes out of |
+| --- | --- | --- | --- |
+| Between two people (ringing in or out) | When the call becomes `active`: on accepting, or when a poll says the other side answered. Not while it rings | As the microphone button stands | The loudspeaker (the call screen is looked at) |
+| A room's | When the room's ticket arrives | The same | The loudspeaker |
+| To a phone | As soon as the server answers the dial with its ticket, while the other phone still rings, so that the first words of whoever picks up are heard | As Mute stands | The earpiece, until Speaker is pressed |
+
+**Left** when the red button, the back arrow or Back ends the call; when
+the other side ends it, declines or does not answer; when the server stops
+answering and the app falls back to its script; when a second call takes
+its place. A call that is declined, missed or refused by the server never
+joins anything. **The scripted app** (offline, standalone, the design's
+pages) **never joins anything.**
+
+What the call screen says (`sound_note`, the pill under the header on the
+call screen, the line under the header on a phone call; id `sound-note`):
+
+| State (`Sound`) | The sentence |
+| --- | --- |
+| A room's call waiting for its ticket | "Connected. Waiting for the sound's ticket…" |
+| The server sent no ticket | "Connected without sound: the server sent no ticket." |
+| `Joining` (the microphone may be being asked for) | "Connecting sound…" |
+| `On`, nobody else in the room yet | "Sound is live. Waiting for the other side." |
+| `On` | "Sound is live." On a call with video: "Sound is live. Video needs the next version." |
+| `Reconnecting` | "Reconnecting sound…" |
+| `Away` (the app left the screen; the platform left the room) | "Sound paused while the app was away." The next tick, which only comes when the app is on screen again, joins the room anew, muted if Mute is on |
+| The microphone was refused | "No sound: the microphone is not allowed. Allow it in Settings, then call again." |
+| The connection failed | "No sound: the live connection failed. Hang up and call again." |
+| The connection was lost for good | "The sound was lost with the connection. Hang up and call again." |
+| The room was closed from the other side | "The sound was ended from the other side." |
+| The app was built without live rooms, or runs on iOS | "No sound: live audio is not part of this build of the app." |
+
+A failure is also announced to a screen reader. After a failure the call
+itself goes on (it is the server's, and can still be recorded and hung
+up) and its room is **not** joined again by itself: hanging up and calling
+again is the way, as on a phone. Events of a room that was left for
+another call are told apart by the call's serial and change nothing.
+
+Not there: video; a call that continues behind another app or a locked
+screen (the screen is kept on during a call instead); a Bluetooth headset;
+the proximity sensor; tones from the keypad; a ringing sound; any sound on
+iOS.
+
+`tests/sound.rs` (27 tests) drives all of this with fingers against the
+stand-in server while the test plays the room.
 
 `tests/online.rs` drives all of it with fingers against a stand-in server
 (`tests/support`) that answers as the contract describes: the order of the
@@ -234,7 +293,7 @@ Not from the design, built from its parts and tokens:
   padding, the caption's type); "Sending…", "Sent", "Not sent"; an empty
   list, room or people; a room or person without a photograph (initials on
   a disc in the "+1" disc's colours); the server's dot on the user's
-  picture; the two lines that say there is no sound.
+  picture; the line that says how a real call's sound stands.
 - **Motion**: the design declares none. The screens' slides, the sheets'
   rise, the toast and the bars of a playing voice message are the app's,
   and stop with the system's "reduce motion" where the framework animates
@@ -273,7 +332,8 @@ picture:
   example.
 
 No size is pinned and no text is nudged otherwise. **No framework crate
-was changed**: everything the design needs was already there.
+was changed for the design**: everything it needs was already there. (The
+sound of a call is a framework service added later, ADR 0038.)
 
 ## Accessibility
 
@@ -308,16 +368,135 @@ are the app's own are 48 dp or more, and a second test puts the app online
 against the stand-in server and checks those states with nothing more
 allowed.
 
+## The test on a phone
+
+**Not done.** Nothing below has been tried: the app's sound has never run
+on a phone, and while it was written the Talk API answered 500 to making
+rooms and calls, so there was no ticket to join anything with. This is the
+test to do once it answers, and the log line that proves each step. All
+lines have the tag `Morningstar` (`adb logcat -s Morningstar`); the ones
+that begin `live:` are the host's (`MorningstarLive.kt`), the ones that
+begin `service:` are the Rust side's. `N` is the join's number.
+
+Build and install as usual (`MORNINGSTAR_APP=barua-talk tools/build-android.sh
+--install`; the script's last line should say `with services: live`), give
+the app a name, and on "You and the server" check that it is online.
+
+**0. Without any server: the door.** Install `services-check` the same way
+and press "Join a live room". Expected: Android's microphone question the
+first time; then the line under the button says `the live room failed: …`
+(nothing listens at `ws://127.0.0.1:7880`). In the log:
+
+```
+service: join live room microphone=live sound=loudspeaker id=N
+live: join id=N microphone=live sound=loudspeaker
+live: id=N failed: …                       (a connection error, never a ticket)
+live: id=N room released
+service: id=N live room: the live room failed: …
+live: no room is joined, audio mode normal
+```
+
+This proves that LiveKit's libraries load beside the app's, that the
+permission question is asked from a join, and that a failure comes back.
+Refuse the question once (reinstall, or revoke it in Settings) and the
+line must be `the microphone is not allowed`, with `live: id=N not joined:
+microphone permission denied`.
+
+**1. A room, with the console.** Open `barua.tz/talk/console` on a computer
+and join a room there with its microphone on. On the phone open the same
+room and press the camera button (top right). Expected on the screen:
+"Connecting sound…", the microphone question the first time, then "Sound
+is live." with "Video needs the next version."; speak on each side and
+listen on the other.
+
+```
+service: join live room microphone=live sound=loudspeaker id=N
+live: join id=N microphone=live sound=loudspeaker
+live: id=N connected, microphone published, 1 other(s) in the room
+service: id=N live room connected
+live: id=N someone is in the room (1 other(s) now)
+service: id=N live room: someone is in it
+live: id=N audio mode in communication, sound on the loudspeaker
+```
+
+- **Mute** on the phone: the console stops hearing it. `live: id=N
+  microphone muted`, then `microphone on`.
+- **Leave on the console**: the phone says "Sound is live. Waiting for the
+  other side." `live: id=N someone left (0 other(s) now)`.
+- **Back to chat** on the phone: `service: leave live room id=…`, `live:
+  leave`, `live: id=N room released`, `service: id=N live room over: the
+  room was left`, and a second later `live: no room is joined, audio mode
+  normal`. Music played in another app before and after should sound as it
+  did: the call's audio mode is given back.
+
+**2. A call between two phones** (free). Two phones with the app, two
+names. On one, Contacts, the other person's phone button. The other rings;
+accept. Expected: nothing is joined while it rings (no `live:` line), and
+on accepting both phones join and say "Sound is live." Talk both ways.
+Then, one at a time:
+
+- **Hang up on one**: that phone logs `live: leave` and `room released` at
+  once; the other, within five seconds (its poll), logs the same and goes
+  back, and says "Call ended".
+- **Decline** a second call: neither phone logs a `live: join`.
+- **Leave the screen during a call** (Home): `live: id=N left because the
+  app left the screen`, `room released`, `service: id=N live room over: the
+  app left the screen`; the other side hears nothing more. Come back: the
+  note says "Sound paused while the app was away." for an instant, then a
+  new `live: join id=M`, and sound again.
+- **Aeroplane mode for ten seconds, then off**: "Reconnecting sound…" and
+  `live: id=N reconnecting`, then `reconnected` and sound again. Left on
+  for a minute: "The sound was lost with the connection. Hang up and call
+  again." and `live: id=N disconnected by the room (…)`.
+- **Refuse the microphone** (revoke it in Settings first): "No sound: the
+  microphone is not allowed. Allow it in Settings, then call again." The
+  call's clock still runs and the red button still hangs up.
+- **A wired headset** plugged in during a call takes the sound.
+
+**3. A phone call** (TSh 300 a minute: the owner's decision). Dial a
+number. Expected: `live: join id=N microphone=live sound=earpiece` as soon
+as the dial is answered by the server, the ringing or the other person in
+the earpiece, **Speaker** moving it (`live: id=N sound to the loudspeaker`,
+then `… to the earpiece`), **Mute** silencing the microphone for the other
+phone.
+
+**4. No secret in the log, and nothing in an app that did not ask.**
+
+```sh
+adb logcat -d -s Morningstar | grep -c 'eyJ\|wss://'    # 0: no ticket, no address
+MORNINGSTAR_APP=atlas MORNINGSTAR_ABIS=arm64-v8a tools/build-android.sh
+unzip -l templates/android/app/build/outputs/apk/debug/app-debug.apk | grep -ci 'livekit\|jingle\|kotlin'   # 0
+```
+
+What to write down: the phone and its Android version, which steps were
+done, and for anything that differs the lines around it. Then move the
+rows of `docs/architecture/README.md` that say "Not verified" for live
+rooms.
+
 ## Not verified
 
 Everything here was seen on macOS/Metal only. **Nothing has run on a
-phone**: no APK was built. That includes all of the online behaviour: **the
-app has never talked to the real server** (which was being written at the
-same time), only to the stand-in of `tests/support`, which was written from
-the same `API.md` by the same hand as the client and so cannot catch a
-misreading of it. A phone's own HTTP stack, `adb reverse`, the polling's
-cost in battery and in the server's allowance, and two phones calling each
-other are untried. Unseen on a device are every screen, the photographs
-(their mipmaps on Vulkan or GLES and about 20 MB of textures), the keyboard
-over the fields, the sheets, the sideways drag of the rings, TalkBack, and
-the launcher icon (looked at only in `morningstar-icon --preview`).
+phone.** The APK is built (34.2 MB for arm64 with the live-room service,
+of which the service is 19.6 MB) and was never installed. That includes
+all of the online behaviour: **the app has never talked to the real
+server** (which was being written at the same time), only to the stand-in
+of `tests/support`, which was written from the same `API.md` by the same
+hand as the client and so cannot catch a misreading of it. A phone's own
+HTTP stack, `adb reverse`, the polling's cost in battery and in the
+server's allowance, and two phones calling each other are untried.
+
+**No sound has been heard.** The live room was joined only by the test
+driver: no microphone was opened, no LiveKit server was connected to (the
+real API answered 500 to making rooms and calls, so no ticket existed),
+and what the host does with a join (`MorningstarLive.kt`) compiles and has
+never run. Whether the ticket's identity, the room's name and the moment
+the app joins fit what the server and the other side expect is unknown:
+in particular, that a phone call's line is in the room the caller's ticket
+leads to, and that both sides of a call between two people are given the
+same room. On iOS there is no sound at all: the join is refused and the
+app says so.
+
+Unseen on a device are every screen, the photographs (their mipmaps on
+Vulkan or GLES and about 20 MB of textures), the keyboard over the fields,
+the sheets, the sideways drag of the rings, TalkBack, and the launcher
+icon (looked at only in `morningstar-icon --preview`).

@@ -1,6 +1,6 @@
 [package]
 name = "barua-talk"
-description = "Barua Talk: rooms, chat, in-app calls and phone calls. Five screens reproduced from a design (the test of Morningstar's photographs beside its drawing) and seven of its own. With its server (server/) rooms, messages and calls are real; without it the app works end to end from the design's own people and messages. Live audio and video are not in it yet."
+description = "Barua Talk: rooms, chat, in-app calls and phone calls. Five screens reproduced from a design (the test of Morningstar's photographs beside its drawing) and seven of its own. With its server (server/) rooms, messages and calls are real, and a call carries sound through a live room (LiveKit, on Android); without it the app works end to end from the design's own people and messages. Video is not in it yet."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,9 +9,14 @@ publish.workspace = true
 
 # The home-screen icon and name (ADR 0020). The picture is drawn by
 # `cargo run -p barua-talk --example icon`.
+#
+# `services`: the app joins live rooms (ADR 0038), so its Android host is
+# built with the LiveKit client. An app that does not say this carries none
+# of it.
 [package.metadata.morningstar]
 name = "Barua Talk"
 icon = "assets/icon.png"
+services = ["live"]
 
 [lib]
 # cdylib for Android; tools/build-ios.sh requests the static library itself.

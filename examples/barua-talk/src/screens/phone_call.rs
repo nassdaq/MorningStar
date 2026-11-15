@@ -14,7 +14,7 @@ use crate::theme::{
     ACCENT, DANGER, GROTESK, INK, LINE, MUTED, RADIUS_CARD, SOFT, SURFACE, WHITE, grotesk,
     grotesk_line, inter,
 };
-use crate::{BaruaTalk, Message, NO_PHONE_MEDIA, Screen};
+use crate::{BaruaTalk, Message, Screen};
 
 /// The red button as the design's page draws it. Its column is 22.5 dp
 /// taller than the 844 dp page, and the one thing in it that may shrink
@@ -215,14 +215,16 @@ pub fn view(app: &BaruaTalk, room: f32) -> Element<Message> {
         "Leave call"
     })
     .id("hang-up");
-    // A real call: what this version cannot do, where the page has room
-    // for a line (between the header and the picture). The app's own.
-    let note = (!phone.scripted).then(|| {
-        inter(NO_PHONE_MEDIA, 12.0)
+    // A real call: how its sound stands, in words, where the page has
+    // room for a line or two (between the header and the picture). The
+    // app's own.
+    let note = app.sound_note().map(|sentence| {
+        inter(sentence, 12.0)
+            .line_height_dp(16.0)
             .color(MUTED)
             .centered()
             .fill_width()
-            .id("no-media")
+            .id("sound-note")
     });
     let content = Column::new()
         .push(header)
