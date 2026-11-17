@@ -159,3 +159,9 @@ html::-webkit-scrollbar,.code pre::-webkit-scrollbar,.table::-webkit-scrollbar{w
 html::-webkit-scrollbar-track,.code pre::-webkit-scrollbar-track,.table::-webkit-scrollbar-track{background:transparent}
 html::-webkit-scrollbar-thumb,.code pre::-webkit-scrollbar-thumb,.table::-webkit-scrollbar-thumb{background:#2b2b31;border-radius:8px}
 html::-webkit-scrollbar-thumb:hover,.code pre::-webkit-scrollbar-thumb:hover,.table::-webkit-scrollbar-thumb:hover{background:#3a3a42}
+
+/* "Copy for LLM", at the right of the breadcrumbs. */
+.crumbs{align-items:center}
+.llm{margin-left:auto;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--muted);font:12.5px var(--body);cursor:pointer;white-space:nowrap}
+.llm:hover,.llm:focus-visible{color:var(--gold);border-color:var(--gold)}
+@media print{.llm{display:none}}

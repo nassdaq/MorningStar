@@ -34,7 +34,7 @@
 <main id="content">
 <div class="crumbs"><span>Widgets</span><span aria-hidden="true">/</span><span>Content</span><span aria-hidden="true">/</span><span class="here">LiveVideo</span></div>
 <article>
-<h1>LiveVideo</h1><p class="lead">The picture of a camera or a shared screen from a <a href="../guide/live-rooms.html">live room</a>.</p><div class="code"><pre><code><span class="k">fn</span> <span class="f">view</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
+<h1>LiveVideo</h1><p class="lead">The picture of a camera or a shared screen from a <a href="../guide/live-rooms.html">live room</a>.</p><div class="code" data-lang="rust"><pre><code><span class="k">fn</span> <span class="f">view</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
     <span class="k">let</span> picture: <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; = <span class="k">match</span> <span class="k">self</span>.picture {
         <span class="c">// Frames never pass through the application: it draws the</span>
         <span class="c">// track, and the host fills it in.</span>

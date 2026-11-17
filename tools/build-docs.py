@@ -165,8 +165,9 @@ def highlight(code, lang):
 def code_block(code, lang, title=None):
     code = code.rstrip("\n")
     head = '<div class="code-head"><span>%s</span></div>' % esc(title) if title else ""
-    return '<div class="code%s">%s<pre><code>%s</code></pre></div>' % (
+    return '<div class="code%s" data-lang="%s">%s<pre><code>%s</code></pre></div>' % (
         " titled" if title else "",
+        attr(lang or ""),
         head,
         highlight(code, lang or ""),
     )

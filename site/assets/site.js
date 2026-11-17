@@ -153,4 +153,116 @@
       block.appendChild(button);
     });
   }
+
+  // "Copy for LLM": the page as Markdown, with its samples and tables as they
+  // are shown (already expanded from the source), ready to paste into a chat.
+  function pageAsMarkdown() {
+    var article = document.querySelector('main article');
+    function clean(text) { return text.replace(/\s+/g, ' '); }
+    function inline(node) {
+      var out = '';
+      Array.prototype.forEach.call(node.childNodes, function (child) {
+        if (child.nodeType === 3) { out += clean(child.nodeValue); return; }
+        if (child.nodeType !== 1) return;
+        var tag = child.tagName.toLowerCase();
+        if (tag === 'svg' || tag === 'button' || tag === 'script') return;
+        if (tag === 'code') out += '`' + child.textContent + '`';
+        else if (tag === 'strong' || tag === 'b') out += '**' + inline(child).trim() + '**';
+        else if (tag === 'em' || tag === 'i') out += '*' + inline(child).trim() + '*';
+        else if (tag === 'a') {
+          // The link as written (relative), never the resolved address: on a
+          // local copy that would be a path on this machine.
+          var href = child.getAttribute('href') || '';
+          out += href && href.charAt(0) !== '#' ? '[' + inline(child).trim() + '](' + href + ')' : inline(child);
+        }
+        else if (tag === 'br') out += '\n';
+        else if (tag === 'img') out += child.alt ? '[' + child.alt + ']' : '';
+        else out += inline(child);
+      });
+      return out;
+    }
+    function cell(node) { return inline(node).trim().replace(/\|/g, '\\|').replace(/\n/g, ' '); }
+    function list(node, depth) {
+      var ordered = node.tagName.toLowerCase() === 'ol', n = 0, out = '';
+      Array.prototype.forEach.call(node.children, function (item) {
+        if (item.tagName.toLowerCase() !== 'li') return;
+        n += 1;
+        var own = '', nested = '';
+        Array.prototype.forEach.call(item.childNodes, function (child) {
+          var tag = child.nodeType === 1 ? child.tagName.toLowerCase() : '';
+          if (tag === 'ul' || tag === 'ol') nested += list(child, depth + 1);
+          else if (tag === 'p' || tag === 'div') own += ' ' + inline(child);
+          else if (child.nodeType === 3) own += clean(child.nodeValue);
+          else if (child.nodeType === 1) { var holder = document.createElement('span'); holder.appendChild(child.cloneNode(true)); own += inline(holder); }
+        });
+        out += new Array(depth + 1).join('  ') + (ordered ? n + '. ' : '- ') + own.trim() + '\n' + nested;
+      });
+      return out;
+    }
+    function block(node) {
+      var out = '';
+      Array.prototype.forEach.call(node.children, function (el) {
+        var tag = el.tagName.toLowerCase(), cls = el.classList;
+        if (/^h[1-6]$/.test(tag)) out += new Array(Number(tag[1]) + 1).join('#') + ' ' + inline(el).trim() + '\n\n';
+        else if (tag === 'p') out += inline(el).trim() + '\n\n';
+        else if (tag === 'ul' || tag === 'ol') out += list(el, 0) + '\n';
+        else if (cls.contains('code')) {
+          var head = el.querySelector('.code-head');
+          if (head) out += '`' + head.textContent.trim() + '`:\n\n';
+          out += '```' + (el.getAttribute('data-lang') || '') + '\n' + el.querySelector('pre').textContent.replace(/\n+$/, '') + '\n```\n\n';
+        } else if (tag === 'pre') out += '```\n' + el.textContent.replace(/\n+$/, '') + '\n```\n\n';
+        else if (cls.contains('table') || tag === 'table') {
+          var rows = el.querySelectorAll('tr');
+          Array.prototype.forEach.call(rows, function (row, at) {
+            var cells = Array.prototype.map.call(row.children, cell);
+            out += '| ' + cells.join(' | ') + ' |\n';
+            if (at === 0) out += '|' + cells.map(function () { return ' --- '; }).join('|') + '|\n';
+          });
+          out += '\n';
+        } else if (cls.contains('note') || tag === 'blockquote') {
+          out += block(el).trim().split('\n').map(function (line) { return '> ' + line; }).join('\n') + '\n\n';
+        } else if (cls.contains('cards')) {
+          Array.prototype.forEach.call(el.querySelectorAll('.card'), function (card) {
+            var title = card.querySelector('.card-title'), text = card.querySelector('.card-text');
+            out += '- [' + (title ? title.textContent.trim() : '') + '](' + (card.getAttribute('href') || '') + ')' + (text ? ': ' + clean(text.textContent).trim() : '') + '\n';
+          });
+          out += '\n';
+        } else if (cls.contains('shots') || tag === 'figure') {
+          Array.prototype.forEach.call(el.querySelectorAll('img'), function (img) { out += '- ' + (img.alt || 'Picture') + ' (' + (img.getAttribute('src') || '') + ')\n'; });
+          out += '\n';
+        } else if (tag === 'hr') out += '---\n\n';
+        else if (el.children.length) out += block(el);
+        else if (el.textContent.trim()) out += inline(el).trim() + '\n\n';
+      });
+      return out;
+    }
+    var source = document.querySelector('.foot code:last-of-type');
+    return block(article).replace(/\n{3,}/g, '\n\n').trim() +
+      '\n\n---\nMorningstar documentation' + (source ? ', page source: ' + source.textContent : '') + '\n';
+  }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext !== false) return navigator.clipboard.writeText(text);
+    return new Promise(function (resolve, reject) {
+      var area = document.createElement('textarea');
+      area.value = text; area.setAttribute('readonly', ''); area.style.position = 'fixed'; area.style.opacity = '0';
+      document.body.appendChild(area); area.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      area.remove();
+      if (ok) resolve(); else reject(new Error('copy refused'));
+    });
+  }
+  var crumbs = document.querySelector('main .crumbs');
+  if (crumbs && document.querySelector('main article')) {
+    var llm = document.createElement('button');
+    llm.type = 'button';
+    llm.className = 'llm';
+    llm.title = 'Copy this page as Markdown, to paste into an AI assistant';
+    llm.textContent = 'Copy for LLM';
+    llm.addEventListener('click', function () {
+      copyText(pageAsMarkdown()).then(function () { llm.textContent = 'Copied as Markdown'; }, function () { llm.textContent = 'Not copied'; })
+        .then(function () { setTimeout(function () { llm.textContent = 'Copy for LLM'; }, 1800); });
+    });
+    crumbs.appendChild(llm);
+  }
 })();

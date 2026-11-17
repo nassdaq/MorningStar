@@ -34,7 +34,7 @@
 <main id="content">
 <div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Core concepts</span><span aria-hidden="true">/</span><span class="here">Text input</span></div>
 <article>
-<h1>Text input</h1><p class="lead"><code>TextInput</code> is an editable text. The application owns the string: the widget shows the value it is given and delivers each new value as a message, which <code>update</code> stores.</p><h2 id="a-field"><a class="anchor" href="#a-field">A field</a></h2><p>Like <code>Text</code>, an input has no frame of its own. The box around it is the field.</p><div class="code"><pre><code><span class="k">fn</span> <span class="f">phone_field</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
+<h1>Text input</h1><p class="lead"><code>TextInput</code> is an editable text. The application owns the string: the widget shows the value it is given and delivers each new value as a message, which <code>update</code> stores.</p><h2 id="a-field"><a class="anchor" href="#a-field">A field</a></h2><p>Like <code>Text</code>, an input has no frame of its own. The box around it is the field.</p><div class="code" data-lang="rust"><pre><code><span class="k">fn</span> <span class="f">phone_field</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
     <span class="c">// The input is only its text. The box around it is the field:</span>
     <span class="c">// its height, padding, border, and its look while focused.</span>
     <span class="k">row!</span>[
@@ -61,7 +61,7 @@
     .<span class="f">input_frame</span>()
     .<span class="f">fill_width</span>()
     .<span class="f">into</span>()
-}</code></pre></div><ul><li><code>.input_frame()</code> makes a tap anywhere in the box focus the input.</li><li><code>.focused_border(..)</code> and <code>.focused_background(..)</code> are the box's look while the input has focus.</li><li><code>.id(..)</code> keeps focus with the field when the screen changes around it. An input that leaves the tree loses focus, and the keyboard goes away.</li></ul><h2 id="the-keyboard"><a class="anchor" href="#the-keyboard">The keyboard</a></h2><div class="code"><pre><code><span class="k">fn</span> <span class="f">password_field</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
+}</code></pre></div><ul><li><code>.input_frame()</code> makes a tap anywhere in the box focus the input.</li><li><code>.focused_border(..)</code> and <code>.focused_background(..)</code> are the box's look while the input has focus.</li><li><code>.id(..)</code> keeps focus with the field when the screen changes around it. An input that leaves the tree loses focus, and the keyboard goes away.</li></ul><h2 id="the-keyboard"><a class="anchor" href="#the-keyboard">The keyboard</a></h2><div class="code" data-lang="rust"><pre><code><span class="k">fn</span> <span class="f">password_field</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
     <span class="k">row!</span>[
         <span class="t">TextInput</span>::<span class="f">new</span>(<span class="k">self</span>.password.<span class="f">clone</span>())
             .<span class="f">placeholder</span>(<span class="s">"Password"</span>)

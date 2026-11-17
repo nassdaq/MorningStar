@@ -34,7 +34,7 @@
 <main id="content">
 <div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Core concepts</span><span aria-hidden="true">/</span><span class="here">Navigation and time</span></div>
 <article>
-<h1>Navigation and time</h1><h2 id="screens"><a class="anchor" href="#screens">Screens</a></h2><p>A <code>Navigator</code> is the stack of screens as plain application state. Nothing about it is special to the framework: a screen is a value of your own type, and <code>view</code> draws whichever is on top.</p><div class="code"><pre><code><span class="c">/// The screens there are. Plain data: a screen can carry what it shows.</span>
+<h1>Navigation and time</h1><h2 id="screens"><a class="anchor" href="#screens">Screens</a></h2><p>A <code>Navigator</code> is the stack of screens as plain application state. Nothing about it is special to the framework: a screen is a value of your own type, and <code>view</code> draws whichever is on top.</p><div class="code" data-lang="rust"><pre><code><span class="c">/// The screens there are. Plain data: a screen can carry what it shows.</span>
 <span class="k">#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]</span>
 <span class="k">pub</span> <span class="k">enum</span> <span class="t">Screen</span> {
     <span class="t">Orders</span>,
