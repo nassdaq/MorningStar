@@ -32,7 +32,7 @@ pub const NAME_LIMIT: usize = 40;
 /// phone through `adb reverse tcp:{{port}} tcp:{{port}}`. A build for a
 /// deployed server names it at compile time instead, which keeps the
 /// address out of the repository:
-/// `{{env}}_SERVER_URL=https://... tools/build-android.sh`.
+/// `{{env}}_SERVER_URL=https://... {{build}}`.
 pub const SERVER_URL: &str = match DEPLOYED {
     Some(url) => url,
     None => "http://127.0.0.1:{{port}}",

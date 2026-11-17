@@ -5,7 +5,11 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish.workspace = true
+publish = true
+keywords = ["gui", "layout"]
+categories = ["gui"]
+# The tests read fonts from the examples, which are not published.
+exclude = ["tests/"]
 
 [dependencies]
 morningstar-core.workspace = true

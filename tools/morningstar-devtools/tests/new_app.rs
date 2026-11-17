@@ -41,7 +41,7 @@ impl Workspace {
              [workspace.package]\nversion = \"0.0.1\"\nedition = \"2024\"\n\
              rust-version = \"1.87\"\nlicense = \"MIT OR Apache-2.0\"\npublish = false\n\n\
              [workspace.dependencies]\n\
-             morningstar = {{ path = {:?} }}\n\
+             morningstar = {{ package = \"morningstar-framework\", path = {:?} }}\n\
              morningstar-devtools = {{ path = {:?} }}\n",
             repository.join("crates/morningstar"),
             repository.join("tools/morningstar-devtools"),

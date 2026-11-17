@@ -1,0 +1,27 @@
+Creates a new Morningstar app in ./<package>: a crate of its own that builds,
+passes its own tests and can be installed on a phone as it is.
+
+Usage: morningstar new <package> [options]
+
+  <package>              the Cargo package and the app's directory: lower-case
+                         letters, digits and hyphens, like my-app
+
+Options:
+  --name <text>          the name under the launcher icon
+                         (default: the package in words, "My App")
+  --id <id>              the application id, like com.example.myapp
+                         (default: dev.morningstar.<package>; choose your own
+                         before the app is given to anyone)
+  --services <list>      opt-in platform services, separated by commas:
+                         live (voice rooms) and its parts: live-video,
+                         live-screen, live-background
+                         (default: none; each adds to what the app carries)
+  --server               also write a Node server skeleton in server/, and make
+                         the app talk to it
+  --port <number>        the port that server listens on (default: 8790)
+  --dir <directory>      where the app's directory is made (default: here)
+  -h, --help             print this help
+
+The app depends on this release of the framework (morningstar-framework
+=0.1.0), so that its library and the Android host this command builds it
+into are of one release. Nothing is overwritten.

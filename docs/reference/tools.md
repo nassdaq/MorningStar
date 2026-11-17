@@ -1,9 +1,10 @@
 # Tools and scripts
 
-Everything is run from the root of the repository. The help shown for each tool is the tool's own output, captured when the site was last rebuilt.
+Everything is run from the root of the repository, except the `morningstar` command, which is for apps outside it. The help shown for each tool is the tool's own output, captured when the site was last rebuilt.
 
 | Tool | Does |
 | --- | --- |
+| [`morningstar`](#the-morningstar-command) | The released command, for an app outside this repository: create, preview, build for Android |
 | [`morningstar-new`](#morningstar-new) | Creates a new app |
 | [`tools/preview.sh`](#the-live-preview) | Runs an app in a window on a Mac and reloads it when the source changes |
 | An app's [`screenshot` example](#screenshots) | Renders the app's screens to PNG files with no phone |
@@ -15,6 +16,20 @@ Everything is run from the root of the repository. The help shown for each tool 
 | [`tools/adb-guarded.sh`](#toolsadb-guardedsh) | The only permitted way to send input to a connected phone |
 | [`tools/build-docs.py`](#the-documentation) | Builds this site |
 | [`morningstar-bench`](#benchmarks) | Measures frame costs on the development machine |
+
+## The morningstar command
+
+For an app outside this repository: `cargo install morningstar-cli` (not yet published), then run it in the app's directory. It runs the same code as the tools below, and carries the Android host of its own release. [ADR 0045](../architecture/0045-crates-io-release-and-the-morningstar-command.md).
+
+{{include docs/reference/help/morningstar.txt}}
+
+`morningstar new --help`:
+
+{{include docs/reference/help/morningstar-cli-new.txt}}
+
+`morningstar build android --help`:
+
+{{include docs/reference/help/morningstar-cli-build-android.txt}}
 
 ## morningstar-new
 

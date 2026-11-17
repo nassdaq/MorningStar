@@ -1,11 +1,18 @@
 [package]
-name = "morningstar"
+name = "morningstar-framework"
 description = "Morningstar: a Rust-native, GPU-first mobile application framework. Public developer API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish.workspace = true
+publish = true
+keywords = ["gui", "mobile", "android", "ios", "gpu"]
+categories = ["gui", "rendering"]
+readme = "README.md"
+
+[lib]
+# What apps write: `use morningstar::ui::...`.
+name = "morningstar"
 
 [dependencies]
 morningstar-runtime.workspace = true

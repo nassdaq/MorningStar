@@ -11,6 +11,11 @@
 //! # Ok::<(), morningstar_devtools::ScaffoldError>(())
 //! ```
 //!
+//! An app outside any Morningstar repository is a project of its own
+//! ([`NewApp::standalone`], [`create_standalone_app`]): it depends on the
+//! framework's release on crates.io, and its commands are the `morningstar`
+//! command of the `morningstar-cli` crate (ADR 0045).
+//!
 //! What the app is called and what its host is built with is validated by
 //! the same rules that read it back ([`Identity`](crate::Identity)), so an
 //! app that was generated is an app that builds.
@@ -129,6 +134,7 @@ pub struct NewApp {
     server: bool,
     port: u16,
     directory: String,
+    standalone: bool,
 }
 
 impl NewApp {
@@ -155,6 +161,7 @@ impl NewApp {
             server: false,
             port: DEFAULT_SERVER_PORT,
             directory: DEFAULT_APP_DIR.to_owned(),
+            standalone: false,
         })
     }
 
@@ -242,6 +249,22 @@ impl NewApp {
         }
         self.directory = trimmed.to_owned();
         Ok(self)
+    }
+
+    /// Whether the app is a project of its own, outside any workspace: it
+    /// depends on the framework's release on crates.io (this crate's
+    /// version, which every crate of a release shares), is its own
+    /// workspace, and its README gives the `morningstar` command's
+    /// commands. Otherwise it is a member of a Morningstar workspace and
+    /// depends on the framework's crates there.
+    pub fn standalone(mut self, standalone: bool) -> Self {
+        self.standalone = standalone;
+        self
+    }
+
+    /// Whether the app is a project of its own ([`NewApp::standalone`]).
+    pub fn is_standalone(&self) -> bool {
+        self.standalone
     }
 
     /// The Cargo package.
@@ -380,18 +403,23 @@ impl NewApp {
         // Open Font License, which travels with them.
         files.push((
             "assets/fonts/NotoSans-Regular.ttf".into(),
-            include_bytes!("../../../examples/hello-gpu/assets/fonts/NotoSans-Regular.ttf")
-                .to_vec(),
+            include_bytes!("../templates/app/assets/fonts/NotoSans-Regular.ttf").to_vec(),
         ));
         files.push((
             "assets/fonts/NotoSans-Bold.ttf".into(),
-            include_bytes!("../../../examples/hello-gpu/assets/fonts/NotoSans-Bold.ttf").to_vec(),
+            include_bytes!("../templates/app/assets/fonts/NotoSans-Bold.ttf").to_vec(),
         ));
         files.push((
             "assets/fonts/OFL.txt".into(),
-            include_bytes!("../../../examples/hello-gpu/assets/fonts/OFL.txt").to_vec(),
+            include_bytes!("../templates/app/assets/fonts/OFL.txt").to_vec(),
         ));
         files.push(("assets/icon.png".into(), icon(self.accent()).to_png()));
+        if self.standalone {
+            files.push((
+                ".gitignore".into(),
+                include_bytes!("../templates/app/gitignore.tmpl").to_vec(),
+            ));
+        }
         files
     }
 
@@ -409,6 +437,53 @@ impl NewApp {
         // quote and a backslash the same way, and the name has no control
         // characters.
         let name_str = self.name.replace('\\', "\\\\").replace('"', "\\\"");
+        let package = &self.package;
+        // How each command is written: from the repository root with its
+        // scripts, or in the app's own directory with the `morningstar`
+        // command.
+        let commands: [(&str, String); 7] = if self.standalone {
+            [
+                ("preview", "morningstar preview".to_owned()),
+                (
+                    "install",
+                    "morningstar build android --abis arm64-v8a --install".to_owned(),
+                ),
+                ("build", "morningstar build android".to_owned()),
+                ("icon", "morningstar icon --preview out/icon.png".to_owned()),
+                ("diff", "morningstar diff".to_owned()),
+                // From where the commands are run to the app's directory.
+                ("here", String::new()),
+                ("from", "in this directory".to_owned()),
+            ]
+        } else {
+            [
+                ("preview", format!("tools/preview.sh {package}")),
+                (
+                    "install",
+                    format!(
+                        "MORNINGSTAR_APP={package} MORNINGSTAR_ABIS=arm64-v8a \
+                         tools/build-android.sh --install"
+                    ),
+                ),
+                (
+                    "build",
+                    format!("MORNINGSTAR_APP={package} tools/build-android.sh"),
+                ),
+                (
+                    "icon",
+                    format!(
+                        "cargo run -q -p morningstar-devtools --bin morningstar-icon -- \
+                         {package} --preview out/icon.png"
+                    ),
+                ),
+                (
+                    "diff",
+                    "cargo run -q -p morningstar-devtools --bin morningstar-diff --".to_owned(),
+                ),
+                ("here", format!("{}/{package}/", self.directory)),
+                ("from", "from the repository root".to_owned()),
+            ]
+        };
         let values = [
             ("package", self.package.clone()),
             ("crate", self.crate_name()),
@@ -421,6 +496,7 @@ impl NewApp {
             // From the app's directory back to the workspace root.
             ("up", "../".repeat(self.directory.split('/').count() + 1)),
             ("port", self.port.to_string()),
+            ("version", env!("CARGO_PKG_VERSION").to_owned()),
             ("env", self.crate_name().to_ascii_uppercase()),
             (
                 "accent",
@@ -441,6 +517,8 @@ impl NewApp {
         for line in template.split_inclusive('\n') {
             match line.trim() {
                 "@@if server" => keeping.push(self.server),
+                "@@if standalone" => keeping.push(self.standalone),
+                "@@if workspace" => keeping.push(!self.standalone),
                 "@@else" => {
                     if let Some(kept) = keeping.last_mut() {
                         *kept = !*kept;
@@ -453,7 +531,7 @@ impl NewApp {
                 _ => {}
             }
         }
-        for (key, value) in values {
+        for (key, value) in values.into_iter().chain(commands) {
             out = out.replace(&format!("{{{{{key}}}}}"), &value);
         }
         out
@@ -688,6 +766,33 @@ pub fn create_app(workspace: &Path, app: &NewApp) -> Result<CreatedApp, Scaffold
     }
     std::fs::write(&manifest_path, with_member)
         .map_err(|error| ScaffoldError::Io(manifest_path, error))?;
+    Ok(CreatedApp {
+        directory,
+        files: written,
+        member,
+    })
+}
+
+/// Creates `app` as a project of its own in `parent/<package>`, outside any
+/// workspace ([`NewApp::standalone`] is set for it). Nothing is written if
+/// that directory exists.
+pub fn create_standalone_app(parent: &Path, app: &NewApp) -> Result<CreatedApp, ScaffoldError> {
+    let app = app.clone().standalone(true);
+    let member = app.package.clone();
+    let directory = parent.join(&member);
+    if directory.exists() {
+        return Err(ScaffoldError::Exists(directory));
+    }
+    let mut written = Vec::new();
+    for (path, content) in app.files() {
+        let target = directory.join(&path);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| ScaffoldError::Io(parent.to_owned(), error))?;
+        }
+        std::fs::write(&target, content).map_err(|error| ScaffoldError::Io(target, error))?;
+        written.push(Path::new(&member).join(path));
+    }
     Ok(CreatedApp {
         directory,
         files: written,
@@ -1106,5 +1211,87 @@ version = \"0.0.1\"
             member_packages(MANIFEST),
             ["morningstar", "morningstar-devtools"]
         );
+    }
+
+    #[test]
+    fn a_standalone_app_is_a_project_of_its_own_on_the_released_framework() {
+        for server in [false, true] {
+            let app = NewApp::new("my-app")
+                .unwrap()
+                .with_server(server)
+                .standalone(true);
+            let files = app.files();
+            let text = |name: &str| {
+                files
+                    .iter()
+                    .find(|(path, _)| path == Path::new(name))
+                    .map(|(_, content)| String::from_utf8(content.clone()).unwrap())
+                    .unwrap_or_else(|| panic!("{name} is among the files"))
+            };
+            let manifest = text("Cargo.toml");
+            assert!(!manifest.contains(".workspace = true"), "{manifest}");
+            assert!(manifest.contains("\n[workspace]\n"), "its own workspace");
+            let version = env!("CARGO_PKG_VERSION");
+            assert!(manifest.contains(&format!(
+                "morningstar = {{ package = \"morningstar-framework\", version = \"={version}\" }}"
+            )));
+            assert!(manifest.contains(&format!("morningstar-devtools = \"={version}\"")));
+            assert!(manifest.contains("[profile.release]"));
+            assert_eq!(text(".gitignore"), "/target\n/out\n");
+            let readme = text("README.md");
+            assert!(readme.contains("morningstar preview"));
+            assert!(readme.contains("morningstar build android --abis arm64-v8a --install"));
+            for (path, content) in &files {
+                let Ok(content) = std::str::from_utf8(content) else {
+                    continue;
+                };
+                // A placeholder left unfilled: `{{` and a lower-case word.
+                let unfilled = content.match_indices("{{").any(|(at, _)| {
+                    let rest = &content[at + 2..];
+                    let word = rest.len()
+                        - rest
+                            .trim_start_matches(|c: char| c.is_ascii_lowercase() || c == '_')
+                            .len();
+                    word > 0 && rest[word..].starts_with("}}")
+                });
+                assert!(!unfilled, "{} has a placeholder left", path.display());
+                for gone in [
+                    "@@",
+                    "tools/preview.sh",
+                    "tools/build-android.sh",
+                    "AGENTS.md",
+                ] {
+                    assert!(!content.contains(gone), "{} has {gone}", path.display());
+                }
+            }
+        }
+        // The workspace's app is unchanged by the mode's existence.
+        let member = NewApp::new("my-app").unwrap();
+        assert!(!member.is_standalone());
+        assert!(
+            !member
+                .files()
+                .iter()
+                .any(|(path, _)| path == Path::new(".gitignore"))
+        );
+    }
+
+    #[test]
+    fn a_standalone_app_is_written_into_its_own_directory_and_nowhere_else() {
+        let parent = std::env::temp_dir().join(format!("ms-standalone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&parent);
+        std::fs::create_dir_all(&parent).unwrap();
+        let app = NewApp::new("my-app").unwrap();
+        let created = create_standalone_app(&parent, &app).unwrap();
+        assert_eq!(created.directory, parent.join("my-app"));
+        assert!(created.files.contains(&PathBuf::from("my-app/Cargo.toml")));
+        assert!(parent.join("my-app/src/lib.rs").is_file());
+        let entries: Vec<_> = std::fs::read_dir(&parent).unwrap().collect();
+        assert_eq!(entries.len(), 1, "nothing beside the app's directory");
+        assert!(matches!(
+            create_standalone_app(&parent, &app),
+            Err(ScaffoldError::Exists(_))
+        ));
+        std::fs::remove_dir_all(&parent).unwrap();
     }
 }

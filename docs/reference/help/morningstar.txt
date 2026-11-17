@@ -1,0 +1,18 @@
+morningstar: create a Morningstar app, run it in a window, build it for Android.
+
+Usage: morningstar <command> [arguments]
+
+Commands:
+  new <package> [options]   a new app in ./<package>: a project of its own on
+                            this release of the framework (new --help)
+  preview [options]         the app of this directory live in a window on the
+                            Mac; reloads when its source changes (preview --help)
+  build android [options]   the app of this directory as an APK; --install puts
+                            it on the connected phone (build android --help)
+  icon [options]            the app's launcher icon: --preview out/icon.png
+  diff <design> <render>    how much a rendered screen differs from its design
+  svg <file> <out.png>      an SVG file as an app would draw it
+  version                   this release
+
+Run them in the app's directory (or below it). cargo test and cargo run
+--example screenshot need no command of their own.

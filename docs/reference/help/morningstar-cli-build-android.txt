@@ -1,0 +1,20 @@
+Builds the app of this directory for Android and packages it into a debug APK.
+
+Usage: morningstar build android [options]
+
+Options:
+  --abis <list>          the ABIs to build, separated by commas
+                         (default: arm64-v8a,x86_64, or MORNINGSTAR_ABIS;
+                         arm64-v8a alone halves the time and the disk used)
+  --install              install the APK on the connected phone and start it
+  --manifest-path <file> the app's Cargo.toml, if not this directory's package
+  -h, --help             print this help
+
+The app's name, application id, launcher icon and opt-in services come from
+[package.metadata.morningstar] in its Cargo.toml. Environment variables (such
+as a server address the app reads at compile time) reach the build as they
+are.
+
+Needs: the Android SDK and NDK (ANDROID_HOME; ANDROID_NDK_HOME, or the newest
+complete NDK under the SDK), cargo-ndk (cargo install cargo-ndk), a JDK 17 or
+newer, and for --install adb.

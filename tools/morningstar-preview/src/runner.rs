@@ -27,15 +27,25 @@ pub struct Runner {
     pub app_dir: PathBuf,
     /// The directory of this crate's `Cargo.toml`.
     pub preview_dir: PathBuf,
+    /// Whether this copy of the preview is a release from crates.io (as
+    /// under `cargo install morningstar-cli`) rather than a checkout of the
+    /// repository. A release's sources sit in Cargo's cache, which Cargo
+    /// may clean, so the runner names the same release by its version
+    /// instead of by that path (ADR 0045).
+    pub released: bool,
 }
 
 impl Runner {
     /// The runner for an app, linked to this copy of the preview.
     pub fn new(package: &str, app_dir: &Path) -> Self {
+        let preview_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         Self {
             package: package.to_owned(),
             app_dir: app_dir.to_owned(),
-            preview_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+            // `cargo package` keeps the manifest as written beside the one
+            // it normalises, in every published crate and in no checkout.
+            released: preview_dir.join("Cargo.toml.orig").is_file(),
+            preview_dir,
         }
     }
 
@@ -60,12 +70,19 @@ publish = false
 
 [dependencies]
 app = {{ package = {package}, path = {app} }}
-morningstar-preview = {{ path = {preview} }}
+morningstar-preview = {preview}
 ",
             name = toml_string(&self.binary_name()),
             package = toml_string(&self.package),
             app = toml_string(&self.app_dir.display().to_string()),
-            preview = toml_string(&self.preview_dir.display().to_string()),
+            preview = if self.released {
+                format!("\"={}\"", env!("CARGO_PKG_VERSION"))
+            } else {
+                format!(
+                    "{{ path = {} }}",
+                    toml_string(&self.preview_dir.display().to_string())
+                )
+            },
         )
     }
 
@@ -233,6 +250,7 @@ mod tests {
             package: "barua-talk".to_owned(),
             app_dir: PathBuf::from("/work/Morning Star/examples/barua-talk"),
             preview_dir: PathBuf::from("/work/Morning Star/tools/morningstar-preview"),
+            released: false,
         }
     }
 
@@ -250,6 +268,22 @@ mod tests {
             manifest.contains("\n[workspace]\n"),
             "it is its own workspace"
         );
+    }
+
+    #[test]
+    fn a_released_preview_is_named_by_its_version() {
+        let manifest = Runner {
+            released: true,
+            ..runner()
+        }
+        .manifest();
+        assert!(manifest.contains(&format!(
+            "morningstar-preview = \"={}\"",
+            env!("CARGO_PKG_VERSION")
+        )));
+        assert!(!manifest.contains("tools/morningstar-preview"));
+        // This checkout is not a release.
+        assert!(!Runner::new("barua-talk", Path::new("/w")).released);
     }
 
     #[test]

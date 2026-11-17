@@ -85,7 +85,7 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-morningstar = { path = "$root/crates/morningstar" }
+morningstar = { package = "morningstar-framework", path = "$root/crates/morningstar" }
 morningstar-devtools = { path = "$root/tools/morningstar-devtools" }
 MANIFEST
     cargo run -q -p morningstar-devtools --bin morningstar-new -- starter --name "Starter" --workspace "$ws" >/dev/null
@@ -103,6 +103,9 @@ app_tools() {
         cargo run -q -p morningstar-devtools --bin "$tool" -- --help > "$dir/$tool.txt"
     done
     cargo run -q -p morningstar-preview -- --help > "$dir/morningstar-preview.txt"
+    cargo run -q -p morningstar-cli -- --help > "$dir/morningstar.txt"
+    cargo run -q -p morningstar-cli -- new --help > "$dir/morningstar-cli-new.txt"
+    cargo run -q -p morningstar-cli -- build android --help > "$dir/morningstar-cli-build-android.txt"
 }
 
 ALL="showcase fundidesk callready atlas barua-talk services-check hello-gpu starter tools"

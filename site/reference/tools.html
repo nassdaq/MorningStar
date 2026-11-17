@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tools and scripts · Morningstar</title>
-<meta name="description" content="Everything is run from the root of the repository. The help shown for each tool is the tool&#x27;s own output, captured when the site was last rebuilt.">
+<meta name="description" content="Everything is run from the root of the repository, except the morningstar command, which is for apps outside it. The help shown for each tool is the tool&#x27;s own output, captured when the site was last rebuilt.">
 <meta name="color-scheme" content="dark">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
@@ -16,7 +16,7 @@
 <header class="top">
 <button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
 <a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
-<span class="version">v0.0.1</span>
+<span class="version">v0.1.0</span>
 <div class="srch" role="search">
 <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
 <input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
@@ -34,7 +34,69 @@
 <main id="content">
 <div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><span>Tools</span><span aria-hidden="true">/</span><span class="here">Tools and scripts</span></div>
 <article>
-<h1>Tools and scripts</h1><p class="lead">Everything is run from the root of the repository. The help shown for each tool is the tool's own output, captured when the site was last rebuilt.</p><div class="table"><table><thead><tr><th>Tool</th><th>Does</th></tr></thead><tbody><tr><td><a href="#morningstar-new"><code>morningstar-new</code></a></td><td>Creates a new app</td></tr><tr><td><a href="#the-live-preview"><code>tools/preview.sh</code></a></td><td>Runs an app in a window on a Mac and reloads it when the source changes</td></tr><tr><td>An app's <a href="#screenshots"><code>screenshot</code> example</a></td><td>Renders the app's screens to PNG files with no phone</td></tr><tr><td><a href="#morningstar-diff"><code>morningstar-diff</code></a></td><td>Compares a screenshot with a design's picture</td></tr><tr><td><a href="#morningstar-svg"><code>morningstar-svg</code></a></td><td>Renders an SVG file as an app would draw it</td></tr><tr><td><a href="#morningstar-icon"><code>morningstar-icon</code></a></td><td>Generates launcher icons and prints an app's identity</td></tr><tr><td><a href="#toolsbuild-androidsh"><code>tools/build-android.sh</code></a></td><td>Builds, packages and installs an Android APK</td></tr><tr><td><a href="#toolsbuild-iossh"><code>tools/build-ios.sh</code></a></td><td>Builds an XCFramework for the iOS host. Never verified</td></tr><tr><td><a href="#toolsadb-guardedsh"><code>tools/adb-guarded.sh</code></a></td><td>The only permitted way to send input to a connected phone</td></tr><tr><td><a href="#the-documentation"><code>tools/build-docs.py</code></a></td><td>Builds this site</td></tr><tr><td><a href="#benchmarks"><code>morningstar-bench</code></a></td><td>Measures frame costs on the development machine</td></tr></tbody></table></div><h2 id="morningstar-new"><a class="anchor" href="#morningstar-new">morningstar-new</a></h2><div class="code" data-lang="sh"><pre><code><span class="f">cargo</span> run -q -p morningstar-devtools --bin morningstar-new -- my-app --name <span class="s">&quot;My App&quot;</span> --id com.example.myapp</code></pre></div><div class="code" data-lang=""><pre><code>Creates a new Morningstar application in this workspace: a crate that builds,
+<h1>Tools and scripts</h1><p class="lead">Everything is run from the root of the repository, except the <code>morningstar</code> command, which is for apps outside it. The help shown for each tool is the tool's own output, captured when the site was last rebuilt.</p><div class="table"><table><thead><tr><th>Tool</th><th>Does</th></tr></thead><tbody><tr><td><a href="#the-morningstar-command"><code>morningstar</code></a></td><td>The released command, for an app outside this repository: create, preview, build for Android</td></tr><tr><td><a href="#morningstar-new"><code>morningstar-new</code></a></td><td>Creates a new app</td></tr><tr><td><a href="#the-live-preview"><code>tools/preview.sh</code></a></td><td>Runs an app in a window on a Mac and reloads it when the source changes</td></tr><tr><td>An app's <a href="#screenshots"><code>screenshot</code> example</a></td><td>Renders the app's screens to PNG files with no phone</td></tr><tr><td><a href="#morningstar-diff"><code>morningstar-diff</code></a></td><td>Compares a screenshot with a design's picture</td></tr><tr><td><a href="#morningstar-svg"><code>morningstar-svg</code></a></td><td>Renders an SVG file as an app would draw it</td></tr><tr><td><a href="#morningstar-icon"><code>morningstar-icon</code></a></td><td>Generates launcher icons and prints an app's identity</td></tr><tr><td><a href="#toolsbuild-androidsh"><code>tools/build-android.sh</code></a></td><td>Builds, packages and installs an Android APK</td></tr><tr><td><a href="#toolsbuild-iossh"><code>tools/build-ios.sh</code></a></td><td>Builds an XCFramework for the iOS host. Never verified</td></tr><tr><td><a href="#toolsadb-guardedsh"><code>tools/adb-guarded.sh</code></a></td><td>The only permitted way to send input to a connected phone</td></tr><tr><td><a href="#the-documentation"><code>tools/build-docs.py</code></a></td><td>Builds this site</td></tr><tr><td><a href="#benchmarks"><code>morningstar-bench</code></a></td><td>Measures frame costs on the development machine</td></tr></tbody></table></div><h2 id="the-morningstar-command"><a class="anchor" href="#the-morningstar-command">The morningstar command</a></h2><p>For an app outside this repository: <code>cargo install morningstar-cli</code> (not yet published), then run it in the app's directory. It runs the same code as the tools below, and carries the Android host of its own release. <a href="../architecture/0045-crates-io-release-and-the-morningstar-command.html">ADR 0045</a>.</p><div class="code" data-lang=""><pre><code>morningstar: create a Morningstar app, run it in a window, build it for Android.
+
+Usage: morningstar &lt;command&gt; [arguments]
+
+Commands:
+  new &lt;package&gt; [options]   a new app in ./&lt;package&gt;: a project of its own on
+                            this release of the framework (new --help)
+  preview [options]         the app of this directory live in a window on the
+                            Mac; reloads when its source changes (preview --help)
+  build android [options]   the app of this directory as an APK; --install puts
+                            it on the connected phone (build android --help)
+  icon [options]            the app's launcher icon: --preview out/icon.png
+  diff &lt;design&gt; &lt;render&gt;    how much a rendered screen differs from its design
+  svg &lt;file&gt; &lt;out.png&gt;      an SVG file as an app would draw it
+  version                   this release
+
+Run them in the app's directory (or below it). cargo test and cargo run
+--example screenshot need no command of their own.</code></pre></div><p><code>morningstar new --help</code>:</p><div class="code" data-lang=""><pre><code>Creates a new Morningstar app in ./&lt;package&gt;: a crate of its own that builds,
+passes its own tests and can be installed on a phone as it is.
+
+Usage: morningstar new &lt;package&gt; [options]
+
+  &lt;package&gt;              the Cargo package and the app's directory: lower-case
+                         letters, digits and hyphens, like my-app
+
+Options:
+  --name &lt;text&gt;          the name under the launcher icon
+                         (default: the package in words, "My App")
+  --id &lt;id&gt;              the application id, like com.example.myapp
+                         (default: dev.morningstar.&lt;package&gt;; choose your own
+                         before the app is given to anyone)
+  --services &lt;list&gt;      opt-in platform services, separated by commas:
+                         live (voice rooms) and its parts: live-video,
+                         live-screen, live-background
+                         (default: none; each adds to what the app carries)
+  --server               also write a Node server skeleton in server/, and make
+                         the app talk to it
+  --port &lt;number&gt;        the port that server listens on (default: 8790)
+  --dir &lt;directory&gt;      where the app's directory is made (default: here)
+  -h, --help             print this help
+
+The app depends on this release of the framework (morningstar-framework
+=0.1.0), so that its library and the Android host this command builds it
+into are of one release. Nothing is overwritten.</code></pre></div><p><code>morningstar build android --help</code>:</p><div class="code" data-lang=""><pre><code>Builds the app of this directory for Android and packages it into a debug APK.
+
+Usage: morningstar build android [options]
+
+Options:
+  --abis &lt;list&gt;          the ABIs to build, separated by commas
+                         (default: arm64-v8a,x86_64, or MORNINGSTAR_ABIS;
+                         arm64-v8a alone halves the time and the disk used)
+  --install              install the APK on the connected phone and start it
+  --manifest-path &lt;file&gt; the app's Cargo.toml, if not this directory's package
+  -h, --help             print this help
+
+The app's name, application id, launcher icon and opt-in services come from
+[package.metadata.morningstar] in its Cargo.toml. Environment variables (such
+as a server address the app reads at compile time) reach the build as they
+are.
+
+Needs: the Android SDK and NDK (ANDROID_HOME; ANDROID_NDK_HOME, or the newest
+complete NDK under the SDK), cargo-ndk (cargo install cargo-ndk), a JDK 17 or
+newer, and for --install adb.</code></pre></div><h2 id="morningstar-new"><a class="anchor" href="#morningstar-new">morningstar-new</a></h2><div class="code" data-lang="sh"><pre><code><span class="f">cargo</span> run -q -p morningstar-devtools --bin morningstar-new -- my-app --name <span class="s">&quot;My App&quot;</span> --id com.example.myapp</code></pre></div><div class="code" data-lang=""><pre><code>Creates a new Morningstar application in this workspace: a crate that builds,
 passes its own tests and can be installed on a phone as it is.
 
 Usage: morningstar-new &lt;package&gt; [options]
@@ -201,7 +263,7 @@ Exit status: 0 done, 2 usage error or a problem with the manifest or icon.</code
 <nav class="pager" aria-label="Previous and next page"><a href="theme.html"><span>Previous</span>Theme</a><a class="next" href="services.html"><span>Next</span>Opt-in services</a></nav>
 <footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/reference/tools.md</code>.</footer>
 </main>
-<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#morningstar-new">morningstar-new</a><a class="ti" href="#the-live-preview">The live preview</a><a class="ti" href="#screenshots">Screenshots</a><a class="ti" href="#morningstar-diff">morningstar-diff</a><a class="ti" href="#morningstar-svg">morningstar-svg</a><a class="ti" href="#morningstar-icon">morningstar-icon</a><a class="ti" href="#toolsbuild-androidsh">tools/build-android.sh</a><a class="ti" href="#toolsbuild-iossh">tools/build-ios.sh</a><a class="ti" href="#toolsadb-guardedsh">tools/adb-guarded.sh</a><a class="ti" href="#the-documentation">The documentation</a><a class="ti" href="#benchmarks">Benchmarks</a></aside>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#the-morningstar-command">The morningstar command</a><a class="ti" href="#morningstar-new">morningstar-new</a><a class="ti" href="#the-live-preview">The live preview</a><a class="ti" href="#screenshots">Screenshots</a><a class="ti" href="#morningstar-diff">morningstar-diff</a><a class="ti" href="#morningstar-svg">morningstar-svg</a><a class="ti" href="#morningstar-icon">morningstar-icon</a><a class="ti" href="#toolsbuild-androidsh">tools/build-android.sh</a><a class="ti" href="#toolsbuild-iossh">tools/build-ios.sh</a><a class="ti" href="#toolsadb-guardedsh">tools/adb-guarded.sh</a><a class="ti" href="#the-documentation">The documentation</a><a class="ti" href="#benchmarks">Benchmarks</a></aside>
 </div>
 <script>window.MS_ROOT = "..";</script>
 <script src="../assets/site.js" defer></script>

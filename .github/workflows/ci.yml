@@ -62,7 +62,16 @@ jobs:
       # rasterising on the CPU. Everything else builds a renderer somewhere
       # in its tests and runs in the `gpu` job.
       - name: Tests that need no GPU
-        run: cargo test --locked -p morningstar-core -p morningstar-layout -p morningstar-text
+        run: cargo test --locked -p morningstar-core -p morningstar-layout -p morningstar-text -p morningstar-cli
+      # The released crates (ADR 0045) still package: every file they need
+      # is inside them, and their manifests are ones crates.io takes. Not
+      # built again here; the lint above compiled them.
+      - name: The release packages
+        run: >
+          cargo package --workspace --no-verify --locked
+          --exclude atlas --exclude barua-talk --exclude callready --exclude docs-snippets
+          --exclude fundidesk --exclude hello-gpu --exclude showcase --exclude services-check
+          --exclude morningstar-bench
       # The documentation site is committed output (ADR 0044): it must be
       # what docs/ gives, and every link in it must lead somewhere. Its code
       # samples (examples/docs-snippets) were compiled by the lint above.

@@ -20,27 +20,38 @@ members = [
     "examples/docs-snippets",
     "tools/morningstar-devtools",
     "tools/morningstar-preview",
+    "tools/morningstar-cli",
     "benchmarks/host",
 ]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.87"
 license = "MIT OR Apache-2.0"
+# Not published unless a crate says otherwise: the examples, the benchmark
+# and the documentation's samples stay here. The framework's crates and its
+# tools set `publish = true` and are released together (ADR 0045).
 publish = false
 
 [workspace.dependencies]
-morningstar = { path = "crates/morningstar" }
-morningstar-core = { path = "crates/morningstar-core" }
-morningstar-gpu = { path = "crates/morningstar-gpu" }
-morningstar-runtime = { path = "crates/morningstar-runtime" }
-morningstar-text = { path = "crates/morningstar-text" }
-morningstar-layout = { path = "crates/morningstar-layout" }
-morningstar-ui = { path = "crates/morningstar-ui" }
-morningstar-android = { path = "crates/morningstar-android" }
-morningstar-ios = { path = "crates/morningstar-ios" }
-morningstar-devtools = { path = "tools/morningstar-devtools" }
+# Path for this repository, version for crates.io: `cargo publish` keeps
+# the version and drops the path (ADR 0045). The framework's crates share
+# one version and are released together; the exact requirement keeps an
+# app's library and the Android host of the same release together.
+# The public crate is `morningstar-framework` on crates.io (`morningstar`
+# is another project's there); its library is still `morningstar`.
+morningstar = { package = "morningstar-framework", path = "crates/morningstar", version = "=0.1.0" }
+morningstar-core = { path = "crates/morningstar-core", version = "=0.1.0" }
+morningstar-gpu = { path = "crates/morningstar-gpu", version = "=0.1.0" }
+morningstar-runtime = { path = "crates/morningstar-runtime", version = "=0.1.0" }
+morningstar-text = { path = "crates/morningstar-text", version = "=0.1.0" }
+morningstar-layout = { path = "crates/morningstar-layout", version = "=0.1.0" }
+morningstar-ui = { path = "crates/morningstar-ui", version = "=0.1.0" }
+morningstar-android = { path = "crates/morningstar-android", version = "=0.1.0" }
+morningstar-ios = { path = "crates/morningstar-ios", version = "=0.1.0" }
+morningstar-devtools = { path = "tools/morningstar-devtools", version = "=0.1.0" }
+morningstar-preview = { path = "tools/morningstar-preview", version = "=0.1.0" }
 
 # Only the backends the two mobile targets (and the macOS dev host, for tests)
 # need: Vulkan + GLES on Android, Metal on Apple platforms.

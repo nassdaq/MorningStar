@@ -31,6 +31,7 @@
 //! every node it can land on outlined and numbered in reading order, with
 //! a legend of what each says and offers (ADR 0032).
 
+pub mod commands;
 mod diff;
 mod frame;
 mod icon;
@@ -61,7 +62,7 @@ pub use reference::{
 };
 pub use scaffold::{
     CreatedApp, DEFAULT_APP_DIR, DEFAULT_SERVER_PORT, MAX_PACKAGE_LENGTH, NewApp, ScaffoldError,
-    add_workspace_member, create_app,
+    add_workspace_member, create_app, create_standalone_app,
 };
 pub use semantics::screenshot_semantics;
 pub use svg::{SvgBackground, color_from_srgb, render_svg};

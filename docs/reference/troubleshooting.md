@@ -21,7 +21,7 @@ Everything under `target/` and `templates/android/app/build` can be rebuilt and 
 
 - Build one package: `cargo test -p my-app`, not `--workspace`.
 - Build Android for one architecture: `MORNINGSTAR_ABIS=arm64-v8a`.
-- After a failed build on a full disk: `cargo clean -p my-app -p morningstar -p morningstar-ui`.
+- After a failed build on a full disk: `cargo clean -p my-app -p morningstar-framework -p morningstar-ui`.
 
 ## The app on the phone cannot reach the server
 

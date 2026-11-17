@@ -1,0 +1,41 @@
+[package]
+name = "morningstar-cli"
+description = "The `morningstar` command: create a Morningstar app, run it live in a window, and build it for Android, from any directory."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = true
+keywords = ["gui", "mobile", "android", "cli", "morningstar"]
+categories = ["development-tools", "command-line-utilities"]
+readme = "README.md"
+# The Android host is `android/`, a link to the repository's
+# `templates/android`: its sources only, never what Gradle builds there.
+include = [
+    "src/**",
+    "android/build.gradle.kts",
+    "android/settings.gradle.kts",
+    "android/gradle.properties",
+    "android/gradlew",
+    "android/gradlew.bat",
+    "android/gradle/wrapper/**",
+    "android/app/build.gradle.kts",
+    "android/app/src/main/AndroidManifest.xml",
+    "android/app/src/main/java/**",
+    "android/app/src/main/res/**",
+    "android/app/src/live/**",
+    "android/app/src/nolive/**",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+]
+
+[[bin]]
+name = "morningstar"
+path = "src/main.rs"
+
+[dependencies]
+# The generator, the icons and the comparison (ADR 0041, 0020, 0007).
+morningstar-devtools.workspace = true
+# `morningstar preview` (ADR 0040).
+morningstar-preview.workspace = true

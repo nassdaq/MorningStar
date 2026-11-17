@@ -1,8 +1,12 @@
 # The design of {{name}}
 
+@@if workspace
 Put the design here, and hold the app to it. The method is in
 `docs/design-to-code.md`; `examples/fundidesk` and `examples/barua-talk`
 show it carried through.
+@@else
+Put the design here, and hold the app to it.
+@@end
 
 ```
 design/
@@ -21,8 +25,8 @@ Render the screen at the reference's size and scale, then compare:
 
 ```sh
 cargo run -p {{package}} --example screenshot -- out/ 2
-cargo run -q -p morningstar-devtools --bin morningstar-diff -- \
-    {{dir}}/{{package}}/design/reference/01-home.png out/home.png --out out/home.heat.png
+{{diff}} \
+    {{here}}design/reference/01-home.png out/home.png --out out/home.heat.png
 ```
 
 `morningstar-diff` prints how much differs and writes a heat map of
@@ -31,5 +35,6 @@ where. Change `examples/screenshot.rs` so its size is the reference's
 
 When a screen is close, make the comparison a test: add a
 `tests/fidelity.rs` that renders it and asserts the difference stays under
-a limit, as `examples/fundidesk/tests/` does. A screen then cannot drift
+a limit, as `examples/fundidesk/tests/` in the Morningstar repository
+does. A screen then cannot drift
 from its design unnoticed.

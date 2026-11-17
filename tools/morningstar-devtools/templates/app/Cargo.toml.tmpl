@@ -1,11 +1,17 @@
 [package]
 name = "{{package}}"
 description = "{{name_str}}: a Morningstar application."
+@@if workspace
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+@@else
+version = "0.1.0"
+edition = "2024"
+publish = false
+@@end
 
 # What the phone shows and what the host is built with (ADR 0020, 0038):
 # the name under the icon, the application id, the launcher icon, and the
@@ -17,11 +23,34 @@ icon = "assets/icon.png"
 services = [{{services}}]
 
 [lib]
-# cdylib for Android; tools/build-ios.sh requests the static library itself.
+# cdylib for Android; the iOS build requests the static library itself.
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
+@@if workspace
 morningstar.workspace = true
+@@else
+# One release of Morningstar: the framework, its tools and the Android host
+# that `morningstar build android` builds the app into share one version.
+# Change it together with the `morningstar` command (cargo install
+# morningstar-cli --version ...).
+morningstar = { package = "morningstar-framework", version = "={{version}}" }
+@@end
 
 [dev-dependencies]
+@@if workspace
 morningstar-devtools.workspace = true
+@@else
+morningstar-devtools = "={{version}}"
+
+# A project of its own, not a member of whatever workspace is around it.
+[workspace]
+
+# What a phone gets: small and fast.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"
+@@end

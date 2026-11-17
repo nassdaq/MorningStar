@@ -2,7 +2,7 @@
 
 For a developer or an AI agent starting a new Morningstar app. It takes one command to have an app that builds, passes its tests and can be installed; the rest of this page is what to do with it. The decision behind the command is [ADR 0041](architecture/0041-new-app-generator.md).
 
-Everything is run from the repository root.
+This page works inside the Morningstar repository, and everything is run from the repository root. For an app anywhere else, see [Outside this repository](#outside-this-repository) at the end: the steps are the same, but the commands change.
 
 ## What you need
 
@@ -123,3 +123,21 @@ MY_APP_SERVER_URL=https://api.example.com MORNINGSTAR_APP=my-app tools/build-and
 ## Removing an app
 
 Delete its directory and its line under `members` in the root `Cargo.toml`.
+
+## Outside this repository
+
+Morningstar is released on crates.io ([ADR 0045](architecture/0045-crates-io-release-and-the-morningstar-command.md)). The `morningstar` command does there what this repository's scripts do here:
+
+```sh
+cargo install morningstar-cli
+morningstar new my-app --name "My App" --id com.example.myapp     # ./my-app, a project of its own
+cd my-app
+cargo test                                                       # step 2
+cargo run --example screenshot -- out/                           # step 3
+morningstar preview                                              # step 3, on a Mac
+morningstar build android --abis arm64-v8a --install             # step 6
+```
+
+`morningstar new` takes the same options as `morningstar-new`, except `--dir`, which here names the parent directory (default: the current one). The app depends on one release, `morningstar = { package = "morningstar-framework", version = "=0.1.0" }`. The crate is `morningstar-framework` on crates.io because `morningstar` belongs to another project there, but its library is still `morningstar`. The command carries the Android host of its own release and refuses to build an app on another release. Keep the two the same.
+
+The release has not been published yet. Until it is, this section describes what the command will do, not what `cargo install` can fetch today.

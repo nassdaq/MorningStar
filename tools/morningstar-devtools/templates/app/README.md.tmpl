@@ -1,32 +1,45 @@
 # {{name}}
 
+@@if workspace
 A [Morningstar]({{up}}AGENTS.md) application: one Rust crate, drawn on the
 GPU, the same on Android and iOS. Made by `morningstar-new`; everything
 here is yours to change.
+@@else
+A [Morningstar](https://docs.rs/morningstar-framework) application: one
+Rust crate, drawn on the GPU, the same on Android and iOS. Made by
+`morningstar new`; everything here is yours to change.
+@@end
 
 ## Commands
 
-Run them from the repository root.
+Run them {{from}}.
 
 ```sh
 cargo test -p {{package}}                                  # the app driven with no device
 cargo run -p {{package}} --example screenshot -- out/      # the screens as PNGs; look at them
-tools/preview.sh {{package}}                               # live in a window on this Mac; reloads on save
-MORNINGSTAR_APP={{package}} MORNINGSTAR_ABIS=arm64-v8a tools/build-android.sh --install   # onto a phone
-cargo run -q -p morningstar-devtools --bin morningstar-icon -- {{package}} --preview out/icon.png   # the launcher icon in every form
+{{preview}}                               # live in a window on this Mac; reloads on save
+{{install}}   # onto a phone
+{{icon}}   # the launcher icon in every form
 ```
+@@if standalone
+
+`morningstar` is the command of the `morningstar-cli` crate
+(`cargo install morningstar-cli --version {{version}}`), of the same release
+as the framework this app depends on. Building for Android needs the
+Android SDK and NDK (`ANDROID_HOME`), `cargo-ndk` and a JDK 17 or newer.
+@@end
 @@if server
 
 The server (`server/`, Node 20 or newer, no dependencies):
 
 ```sh
-cd {{dir}}/{{package}}/server && npm test && npm start     # 127.0.0.1:{{port}}
+cd {{here}}server && npm test && npm start     # 127.0.0.1:{{port}}
 adb reverse tcp:{{port}} tcp:{{port}}                      # lets a phone on USB reach it
 ```
 
 A build for a deployed server names it at compile time, so the address is
 never in the repository:
-`{{env}}_SERVER_URL=https://... tools/build-android.sh`.
+`{{env}}_SERVER_URL=https://... {{build}}`.
 @@end
 
 The first `cargo test` writes `tests/references/*.png`. Look at them and
@@ -62,9 +75,15 @@ commit them: they are what the screens are held to from then on.
   keeps state (scroll position, focus).
 - After changing anything visual, render a screenshot and look at it.
 
+@@if workspace
 Read next: `docs/getting-started.md`, `docs/building-screens.md`,
 `docs/design-to-code.md`, and `examples/fundidesk` for an app built from a
 real design.
+@@else
+Read next: the framework's API on
+[docs.rs](https://docs.rs/morningstar-framework), where every widget and
+effect is documented.
+@@end
 
 ## Not verified
 
