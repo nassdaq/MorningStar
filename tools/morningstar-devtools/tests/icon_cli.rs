@@ -70,7 +70,10 @@ fn prints_what_the_build_scripts_read_one_value_per_line() {
     assert!(output.status.success(), "{}", stderr(&output));
     // Several are one line, separated by commas (ADR 0039's two beside
     // `live`), in the order the app wrote them.
-    assert_eq!(stdout(&output), "barua_talk\nlive,live-video,live-screen,live-background\n");
+    assert_eq!(
+        stdout(&output),
+        "barua_talk\nlive,live-video,live-screen,live-background\n"
+    );
     let output = run(&["atlas", "--print", "services"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "\n");
