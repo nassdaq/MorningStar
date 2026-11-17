@@ -316,10 +316,10 @@ pub use viewport::Viewport;
 
 pub use morningstar_core::{Action, Actions, Live, Role, SemanticsNode, SemanticsTree, States};
 pub use morningstar_core::{
-    AudioClip, AudioError, HostState, HttpError, HttpMethod, HttpRequest, HttpResponse, LiveData,
-    LiveDisconnect, LiveError, LiveEvent, LiveJoin, LiveParticipant, LiveVideoSource,
-    LiveVideoStream, Recording, ServiceCall, ServiceId, ServiceRequest, ServiceResult, VideoFrame,
-    VideoRotation, VideoTrack,
+    AudioClip, AudioError, HostState, HttpError, HttpMethod, HttpRequest, HttpResponse,
+    LiveAudioRoute, LiveAudioRoutes, LiveBackground, LiveData, LiveDisconnect, LiveError,
+    LiveEvent, LiveJoin, LiveParticipant, LiveVideoSource, LiveVideoStream, Recording, ServiceCall,
+    ServiceId, ServiceRequest, ServiceResult, VideoFrame, VideoRotation, VideoTrack,
 };
 pub use morningstar_core::{
     BarContent, Capitalization, CaretMove, Color, Image, ImageError, ImageFit, ImeAction,
@@ -345,9 +345,10 @@ pub mod prelude {
         with_alpha,
     };
     pub use crate::{
-        AudioClip, AudioError, Effects, HttpError, HttpMethod, HttpRequest, HttpResponse, LiveData,
-        LiveDisconnect, LiveError, LiveEvent, LiveJoin, LiveParticipant, LiveVideoSource,
-        LiveVideoStream, Recording, ServiceRequest, ServiceResult, VideoTrack,
+        AudioClip, AudioError, Effects, HttpError, HttpMethod, HttpRequest, HttpResponse,
+        LiveAudioRoute, LiveAudioRoutes, LiveBackground, LiveData, LiveDisconnect, LiveError,
+        LiveEvent, LiveJoin, LiveParticipant, LiveVideoSource, LiveVideoStream, Recording,
+        ServiceRequest, ServiceResult, VideoTrack,
     };
     pub use crate::{BarContent, SystemBars};
     pub use crate::{Easing, Navigation, Navigator, ScrollTo, Transition, Viewport, Wrap};

@@ -16,7 +16,8 @@ use barua_talk::model::{CallStatus, PhoneStatus};
 use barua_talk::{POLL_INCOMING, POLL_PHONE, POLL_RINGING, Screen, Sound, sound};
 use morningstar::ui::LiveRoom;
 use morningstar::{
-    LiveDisconnect, LiveError, LiveEvent, LiveParticipant, ServiceRequest, ServiceResult,
+    LiveAudioRoute, LiveAudioRoutes, LiveDisconnect, LiveError, LiveEvent, LiveParticipant,
+    ServiceRequest, ServiceResult,
 };
 
 use support::{Device, Shared, design, galaxy_a27, lock, world};
@@ -637,4 +638,144 @@ fn the_designs_own_pages_join_nothing() {
         assert_eq!(device.app().sound(), &Sound::Off);
         assert_eq!(device.app().sound_note(), None);
     }
+}
+
+// --- Calls that go on behind another app (ADR 0042) -------------------------
+
+#[test]
+fn a_call_is_joined_with_a_notice_that_names_it() {
+    let world = world();
+    let device = accepted_call(&world, false);
+    let notice = room(&device).join.background.clone().expect("a notice");
+    assert_eq!(notice.title, "Call with Baraka Mushi");
+    assert_eq!(notice.text, sound::NOTICE);
+    assert_eq!(notice.hang_up, "Hang up");
+
+    let mut device = online(&world);
+    dial(&mut device);
+    let notice = room(&device).join.background.clone().expect("a notice");
+    assert!(notice.title.starts_with("Call to "), "{}", notice.title);
+}
+
+#[test]
+fn a_call_goes_on_while_the_app_is_away_and_is_still_there_on_return() {
+    let world = world();
+    let mut device = accepted_call(&world, false);
+    happens(&mut device, LiveEvent::Connected);
+    happens(&mut device, baraka());
+    assert!(device.ui.live_app_hidden(), "the room goes on");
+    assert_eq!(device.app().sound(), &Sound::On, "nothing was paused");
+    // Back: the same room, never joined a second time.
+    device.ticks(2);
+    assert_eq!(device.app().sound(), &Sound::On);
+    assert_eq!(room(&device).join.token, "callee-ticket");
+    assert_eq!(note(&device), Some(sound::LIVE));
+}
+
+#[test]
+fn hanging_up_from_the_notification_hangs_the_call_up_on_the_server() {
+    let world = world();
+    let mut device = accepted_call(&world, false);
+    happens(&mut device, LiveEvent::Connected);
+    assert!(device.ui.live_app_hidden());
+    // No frame and no tick while the app is away: the notification's
+    // action alone must end the call everywhere.
+    assert!(device.ui.live_hang_up_from_notice());
+    assert!(!joined(&device), "the microphone is closed");
+    device.ui.deliver_effects();
+    assert_eq!(lock(&world).call("c9").status, "ended");
+    // Back on screen the call is over and nothing is joined again.
+    device.ticks(3);
+    assert!(device.app().call().is_none());
+    assert!(!joined(&device));
+    assert_eq!(device.screen(), Screen::Home);
+}
+
+#[test]
+fn hanging_up_a_phone_call_from_the_notification_leaves_it_on_the_server() {
+    let world = world();
+    let mut device = online(&world);
+    dial(&mut device);
+    happens(&mut device, LiveEvent::Connected);
+    assert!(device.ui.live_app_hidden());
+    assert!(device.ui.live_hang_up_from_notice());
+    assert!(!joined(&device));
+    assert!(
+        device.app().phone().is_none(),
+        "the call is over in the app"
+    );
+    device.ticks(2);
+    assert!(!joined(&device), "and is not joined again");
+}
+
+#[test]
+fn the_other_side_leaving_is_checked_at_once_even_with_no_tick() {
+    let world = world();
+    let mut device = accepted_call(&world, false);
+    happens(&mut device, LiveEvent::Connected);
+    happens(&mut device, baraka());
+    assert!(device.ui.live_app_hidden());
+    // Baraka hangs up while this app is behind another one: the server
+    // knows, and the room says he left. No tick will come to poll.
+    lock(&world).call("c9").status = "ended";
+    assert!(
+        device
+            .ui
+            .live_event(LiveEvent::ParticipantLeft("baraka".into()))
+    );
+    device.ui.deliver_effects();
+    assert!(device.app().call().is_none(), "asked at once, and over");
+    assert!(!joined(&device), "no microphone left open in an empty call");
+}
+
+// --- Where the sound goes (ADR 0042) ----------------------------------------
+
+fn routes(available: &[LiveAudioRoute], selected: LiveAudioRoute) -> LiveEvent {
+    LiveEvent::AudioRoutes(LiveAudioRoutes {
+        available: available.to_vec(),
+        selected: Some(selected),
+    })
+}
+
+#[test]
+fn a_headset_is_said_and_the_speaker_button_follows_the_route() {
+    use LiveAudioRoute::{Bluetooth, Earpiece, Speaker};
+    let world = world();
+    let mut device = online(&world);
+    dial(&mut device);
+    happens(&mut device, LiveEvent::Connected);
+    happens(
+        &mut device,
+        LiveEvent::ParticipantJoined(LiveParticipant {
+            identity: "sip_+255712345678".into(),
+            name: String::new(),
+        }),
+    );
+    happens(&mut device, routes(&[Earpiece, Speaker], Earpiece));
+    assert_eq!(note(&device), Some(sound::LIVE));
+
+    // The loudspeaker, by the button: asked for as a route now.
+    device.tap("speaker");
+    assert_eq!(room(&device).audio_route, Some(Speaker));
+    happens(&mut device, routes(&[Earpiece, Speaker], Speaker));
+    assert!(device.app().phone().unwrap().speaker);
+
+    // A headset connects in the middle of the call and takes the sound:
+    // the button is no longer lit, and the note says where the sound is.
+    happens(
+        &mut device,
+        routes(&[Earpiece, Speaker, Bluetooth], Bluetooth),
+    );
+    assert!(!device.app().phone().unwrap().speaker);
+    assert_eq!(note(&device), Some(sound::LIVE_BLUETOOTH));
+
+    // Speaker on, then off again: back to the headset, not to the ear.
+    device.tap("speaker");
+    assert_eq!(room(&device).audio_route, Some(Speaker));
+    happens(
+        &mut device,
+        routes(&[Earpiece, Speaker, Bluetooth], Speaker),
+    );
+    device.tap("speaker");
+    assert_eq!(room(&device).audio_route, Some(Bluetooth));
 }

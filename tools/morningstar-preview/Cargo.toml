@@ -1,0 +1,20 @@
+[package]
+name = "morningstar-preview"
+description = "Runs a Morningstar app in a window on the development machine, and reloads it when its source changes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+morningstar-runtime.workspace = true
+morningstar-gpu.workspace = true
+# The app's name and library from its Cargo.toml, and PNG encoding for the
+# screenshot key. Already a development tool (ADR 0007).
+morningstar-devtools.workspace = true
+
+# The window, its events and its handle. Never linked into an app: only this
+# crate uses it, and only on the Mac, where the host is written (ADR 0040).
+[target.'cfg(target_os = "macos")'.dependencies]
+winit = { version = "0.30", default-features = false, features = ["rwh_06"] }

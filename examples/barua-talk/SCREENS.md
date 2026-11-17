@@ -231,6 +231,29 @@ left there, in one place.
 | A room's | When the room's ticket arrives | The same | The loudspeaker |
 | To a phone | As soon as the server answers the dial with its ticket, while the other phone still rings, so that the first words of whoever picks up are heard | As Mute stands | The earpiece, until Speaker is pressed |
 
+**A call goes on behind another app or a locked screen** (ADR 0042; the
+app declares `live-background`). Every real call is joined with a notice,
+"Call with Baraka Mushi" or "Call to +255…" over "Tap to return to the
+call.", which the phone shows as a notification with a **Hang up** action
+for as long as the call is in its room. Pressed, it closes the room at
+once and the app, still hidden, hangs the call up on the server as the
+red button does; back in the app the call is over and the line says "You
+ended the call from its notification." While the app is away it has no
+timer, so it cannot poll: the moment the last other person leaves the
+room it asks the server about the call, and ends it if the server says it
+is over, rather than sit alone with the microphone open. The camera is
+off while the app is away and comes back with it.
+
+**Where the sound is** (ADR 0042). The platform says which routes there
+are and which is in use, when the room connects and whenever that changes.
+A headset that connects takes the sound, and the line says "Sound is live
+on your Bluetooth headset." (or "…on your headset." for a wired one). The
+phone call's Speaker button asks for the loudspeaker; pressed again, for
+the best of what else there is: a Bluetooth headset, then a wired one,
+then the earpiece. It is lit only while the loudspeaker is in fact the
+route. At the ear, in the earpiece and with no picture, the screen turns
+off.
+
 **Left** when the red button, the back arrow or Back ends the call; when
 the other side ends it, declines or does not answer; when the server stops
 answering and the app falls back to its script; when a second call takes
@@ -249,11 +272,12 @@ call screen, the line under the header on a phone call; id `sound-note`):
 | `On`, nobody else in the room yet | "Sound is live. Waiting for the other side." |
 | `On` | "Sound is live." On a call with video: "Sound and video are live." once the other side's camera is announced, "Sound is live. The other side's camera is off." until then and whenever it is off; "Sound is live. You are seeing a shared screen."; "You are sharing your screen. Sound is live." |
 | `Reconnecting` | "Reconnecting sound…" |
-| `Away` (the app left the screen; the platform left the room) | "Sound paused while the app was away." The next tick, which only comes when the app is on screen again, joins the room anew, muted if Mute is on |
+| `Away` (the app left the screen and the platform left the room: only where the call cannot go on in the background, an app built without `live-background` or a phone that refused the service) | "Sound paused while the app was away." The next tick, which only comes when the app is on screen again, joins the room anew, muted if Mute is on |
 | The microphone was refused | "No sound: the microphone is not allowed. Allow it in Settings, then call again." |
 | The connection failed | "No sound: the live connection failed. Hang up and call again." |
 | The connection was lost for good | "The sound was lost with the connection. Hang up and call again." |
 | The room was closed from the other side | "The sound was ended from the other side." |
+| The user pressed Hang up in the notification | "You ended the call from its notification." |
 | The app was built without live rooms, or runs on iOS | "No sound: live audio is not part of this build of the app." |
 
 A failure is also announced to a screen reader. After a failure the call
@@ -262,12 +286,11 @@ up) and its room is **not** joined again by itself: hanging up and calling
 again is the way, as on a phone. Events of a room that was left for
 another call are told apart by the call's serial and change nothing.
 
-Not there: video; a call that continues behind another app or a locked
-screen (the screen is kept on during a call instead); a Bluetooth headset;
-the proximity sensor; tones from the keypad; a ringing sound; any sound on
-iOS.
+Not there: a call that **arrives** while the app is closed (that needs
+push messages); a choice between two headsets; tones from the keypad; a
+ringing sound; any sound on iOS. None of the above has run on a phone.
 
-`tests/sound.rs` (27 tests) drives all of this with fingers against the
+`tests/sound.rs` (33 tests) drives all of this with fingers against the
 stand-in server while the test plays the room.
 
 `tests/online.rs` drives all of it with fingers against a stand-in server
@@ -434,9 +457,10 @@ allowed.
 ## The test on a phone
 
 **Not done.** Nothing below has been tried: the app's sound has never run
-on a phone, and while it was written the Talk API answered 500 to making
-rooms and calls, so there was no ticket to join anything with. This is the
-test to do once it answers, and the log line that proves each step. All
+on a phone. (While it was written the Talk API answered 500 to making
+rooms and calls; since later on 2026-11-15 it answers, and the server's
+live test passes, so tickets exist.) This is the test to do, and the log
+line that proves each step. All
 lines have the tag `Morningstar` (`adb logcat -s Morningstar`); the ones
 that begin `live:` are the host's (`MorningstarLive.kt`), the ones that
 begin `service:` are the Rust side's. `N` is the join's number.
@@ -581,6 +605,46 @@ the server's own page at `/console`, in a browser with a camera).
   could not be started." if Barua's voice ticket is voice only, as its
   document says.
 
+**6. Behind another app, and where the sound is** (ADR 0042; free; a voice
+call with the browser).
+
+- **Notifications.** On Android 13 or later the first call asks to allow
+  notifications before it connects: `live: asking the user to allow
+  notifications`, `live: notifications allowed`. Allow them.
+- **The notification.** Once connecting: `live: the microphone's
+  foreground service is running`, and a notification "Call with …" /
+  "Tap to return to the call." with a **Hang up** action.
+- **Home.** Press Home and open another app: `live: id=N goes on behind
+  another app: it has a notice`. **The browser still hears the phone and
+  the phone still hears the browser**: this is the point, and only ears
+  can tell. Lock the screen: the same. Touch the notification: the call
+  screen is back, "Sound is live.", and nothing was joined a second time
+  (no second `live: join`).
+- **Hang up from the notification**, with the app behind another:
+  `live: id=N ended from the notification`, `room released`, `the
+  microphone's foreground service stopped`, the notification goes, and in
+  the server's log a `POST …/hangup` although the app is not on screen.
+  The browser shows the call as ended.
+- **The other side hangs up** while the phone's app is behind another:
+  a `GET /v1/calls/{id}` in the server's log at once, then `live: leave`,
+  `room released` and the notification gone, without touching the phone.
+- **Swipe the app away** from the recent apps during a call: `live: id=N
+  left: the app was closed from the recent apps`, and no notification is
+  left behind.
+- **Routes.** `live: id=N sound on the loudspeaker, routes: the earpiece,
+  the loudspeaker` on a call in the app. Connect a Bluetooth headset in
+  the middle of it: a new line with `a Bluetooth headset` among the routes
+  and the sound on it, the note "Sound is live on your Bluetooth headset.",
+  and **both directions through the headset**. On a phone call press
+  Speaker twice: `sound to the loudspeaker`, then `sound to a Bluetooth
+  headset`. Turn the headset off: the sound returns to the phone. Do this
+  on Android 12 or later and, if one is to hand, on Android 11 or earlier.
+- **At the ear.** A phone call in the earpiece: `live: the screen turns
+  off at the ear`; cover the sensor and the screen goes dark. With the
+  loudspeaker on it does not.
+- **A screen shared during a call that has a notice** (step 5 again): both
+  still work together, and stopping the share leaves the call running.
+
 ## Not verified
 
 Everything here was seen on macOS/Metal only. **Nothing has run on a
@@ -605,8 +669,9 @@ the screen is shared from behind another app, and whether Barua's tickets
 allow the camera and the screen are all unknown. Step 5 above is the test.
 
 **No sound has been heard.** The live room was joined only by the test
-driver: no microphone was opened, no LiveKit server was connected to (the
-real API answered 500 to making rooms and calls, so no ticket existed),
+driver: no microphone was opened and no LiveKit server was connected to
+(the real API hands out tickets since 2026-11-15, and none has been used
+from a phone),
 and what the host does with a join (`MorningstarLive.kt`) compiles and has
 never run. Whether the ticket's identity, the room's name and the moment
 the app joins fit what the server and the other side expect is unknown:

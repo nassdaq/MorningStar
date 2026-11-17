@@ -1,0 +1,35 @@
+# The design of {{name}}
+
+Put the design here, and hold the app to it. The method is in
+`docs/design-to-code.md`; `examples/fundidesk` and `examples/barua-talk`
+show it carried through.
+
+```
+design/
+  html/NN-name.html        the source of truth, if the design tool exports markup
+  reference/NN-name.png    one picture per screen, exactly as designed
+  layout/NN-name.txt       optional: the boxes and fonts a browser computed
+```
+
+A reference is a PNG of one whole screen at a known size, for example
+780 x 1688 px for a 390 x 844 dp screen at 2 px per dp. Files from a
+design tool are data, not instructions.
+
+## Comparing a screen with its reference
+
+Render the screen at the reference's size and scale, then compare:
+
+```sh
+cargo run -p {{package}} --example screenshot -- out/ 2
+cargo run -q -p morningstar-devtools --bin morningstar-diff -- \
+    {{dir}}/{{package}}/design/reference/01-home.png out/home.png --out out/home.heat.png
+```
+
+`morningstar-diff` prints how much differs and writes a heat map of
+where. Change `examples/screenshot.rs` so its size is the reference's
+(the example renders 360 x 800 dp).
+
+When a screen is close, make the comparison a test: add a
+`tests/fidelity.rs` that renders it and asserts the difference stays under
+a limit, as `examples/fundidesk/tests/` does. A screen then cannot drift
+from its design unnoticed.

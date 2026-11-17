@@ -1,0 +1,72 @@
+# {{name}}
+
+A [Morningstar]({{up}}AGENTS.md) application: one Rust crate, drawn on the
+GPU, the same on Android and iOS. Made by `morningstar-new`; everything
+here is yours to change.
+
+## Commands
+
+Run them from the repository root.
+
+```sh
+cargo test -p {{package}}                                  # the app driven with no device
+cargo run -p {{package}} --example screenshot -- out/      # the screens as PNGs; look at them
+tools/preview.sh {{package}}                               # live in a window on this Mac; reloads on save
+MORNINGSTAR_APP={{package}} MORNINGSTAR_ABIS=arm64-v8a tools/build-android.sh --install   # onto a phone
+cargo run -q -p morningstar-devtools --bin morningstar-icon -- {{package}} --preview out/icon.png   # the launcher icon in every form
+```
+@@if server
+
+The server (`server/`, Node 20 or newer, no dependencies):
+
+```sh
+cd {{dir}}/{{package}}/server && npm test && npm start     # 127.0.0.1:{{port}}
+adb reverse tcp:{{port}} tcp:{{port}}                      # lets a phone on USB reach it
+```
+
+A build for a deployed server names it at compile time, so the address is
+never in the repository:
+`{{env}}_SERVER_URL=https://... tools/build-android.sh`.
+@@end
+
+The first `cargo test` writes `tests/references/*.png`. Look at them and
+commit them: they are what the screens are held to from then on.
+
+## Where things are
+
+| Path | Holds |
+| --- | --- |
+| `Cargo.toml` | The app's name, id, icon and platform services, under `[package.metadata.morningstar]`, and nowhere else |
+| `src/lib.rs` | The whole app: state, messages, screens, effects |
+@@if server
+| `src/json.rs` | The little JSON the app reads and writes |
+| `server/` | The app's server and its contract, `server/API.md` |
+@@end
+| `tests/e2e.rs` | Journeys made with taps and keys |
+| `tests/accessibility.rs` | Every screen passes the accessibility check |
+| `tests/screens.rs` | What the screens look like, against `tests/references/` |
+| `examples/screenshot.rs` | Renders the screens to PNGs |
+| `assets/icon.png` | The launcher icon's source, 1024 x 1024. Replace it with your own |
+| `assets/fonts/` | Noto Sans (SIL Open Font License, `OFL.txt`) |
+| `design/` | Where a design's reference pictures go; `design/README.md` |
+| `SCREENS.md` | The screens and what each control does |
+
+## How the app is written
+
+- `view` draws the state; it changes nothing. `update` changes the state
+  for one message; it draws nothing and does no I/O.
+- Work that takes time (a request, a stored value, sound, a live room) is
+  asked for in `effects` and comes back as a message (ADR 0019). Tests
+  answer it with `Ui::testing`, which is why they need no phone.
+- Sizes are in dp. Give a widget an `id` when a test needs to find it or it
+  keeps state (scroll position, focus).
+- After changing anything visual, render a screenshot and look at it.
+
+Read next: `docs/getting-started.md`, `docs/building-screens.md`,
+`docs/design-to-code.md`, and `examples/fundidesk` for an app built from a
+real design.
+
+## Not verified
+
+This app was generated on a development machine. Nothing in it has run on
+a phone until you install it and say so here.

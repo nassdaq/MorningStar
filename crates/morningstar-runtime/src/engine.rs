@@ -755,6 +755,14 @@ impl Engine {
         self.bars_declared
     }
 
+    /// The frame last built: its background, display list, glyph atlas and
+    /// images, exactly as they were presented. For a development host that
+    /// saves what is on screen as a picture (ADR 0040); a phone host has no
+    /// use for it.
+    pub fn last_frame(&self) -> &Frame {
+        &self.frame
+    }
+
     /// Number of frames presented so far.
     pub fn frames_presented(&self) -> u64 {
         self.frame_index
@@ -2085,6 +2093,44 @@ mod tests {
         let hidden = ServiceResult::Live(LiveEvent::Disconnected(LiveDisconnect::Hidden));
         assert!(h.engine.service_result(ServiceId(1), hidden.clone()));
         assert_eq!(h.probe.lock().unwrap().results, [(ServiceId(1), hidden)]);
+    }
+
+    #[test]
+    fn a_room_in_the_background_is_heard_and_answered_while_hidden() {
+        use morningstar_core::{
+            LiveAudioRoute, LiveAudioRoutes, LiveBackground, LiveDisconnect, LiveEvent, LiveJoin,
+        };
+        let mut h = Harness::idle();
+        let join = LiveJoin::new("wss://live.example.com", "t")
+            .background(LiveBackground::new("Call", "Tap to return"));
+        h.ask(ServiceCall {
+            id: ServiceId(1),
+            request: ServiceRequest::LiveJoin(join),
+        });
+        h.take();
+        h.engine.pause();
+        // A room that goes on behind another app (ADR 0042) keeps telling
+        // the application what happens in it: a headset connecting, and
+        // above all its end from the notification, which the application
+        // must hear while hidden to hang up on its own server.
+        let routes = ServiceResult::Live(LiveEvent::AudioRoutes(LiveAudioRoutes {
+            available: vec![LiveAudioRoute::Earpiece, LiveAudioRoute::Bluetooth],
+            selected: Some(LiveAudioRoute::Bluetooth),
+        }));
+        let hung_up = ServiceResult::Live(LiveEvent::Disconnected(LiveDisconnect::HungUp));
+        assert!(h.engine.service_result(ServiceId(1), routes.clone()));
+        assert!(h.engine.service_result(ServiceId(1), hung_up.clone()));
+        assert_eq!(
+            h.probe.lock().unwrap().results,
+            [(ServiceId(1), routes), (ServiceId(1), hung_up)]
+        );
+        assert_eq!(h.run(), 0, "nothing is drawn while hidden");
+        // What the application asks in answer leaves at once, hidden or not.
+        h.ask(ServiceCall {
+            id: ServiceId(2),
+            request: ServiceRequest::LiveLeave,
+        });
+        assert_eq!(h.take().len(), 1);
     }
 
     #[test]

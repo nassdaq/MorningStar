@@ -363,8 +363,11 @@ final class MorningstarNative {
      * secret that is never logged; data: four bytes, each zero for no:
      * the microphone is live from the start, sound goes to the loudspeaker
      * rather than the earpiece, speaking reports are wanted, the camera is
-     * on from the start (a host that reads three takes the fourth as no).
-     * Answered with
+     * on from the start, the room goes on while the app is not on screen
+     * (a host that reads fewer takes the rest as no); and after those five,
+     * for a room that goes on, its notice as UTF-8, three lines: title,
+     * text, the name of the action that ends the room
+     * (docs/architecture/0042). Answered with
      * a nativeLiveEvent for each event of the room, under this id, the
      * last of them LIVE_DISCONNECTED or LIVE_FAILED.
      */
@@ -391,6 +394,11 @@ final class MorningstarNative {
     static final int SERVICE_LIVE_SWITCH_CAMERA = 16;
     /** data: one byte, zero to stop sharing this device's screen. As for the camera. */
     static final int SERVICE_LIVE_SCREEN_SHARE = 17;
+    /**
+     * data: one byte, a LIVE_ROUTE_*: send the room's sound there
+     * (docs/architecture/0042). Not answered: LIVE_AUDIO_ROUTES follows.
+     */
+    static final int SERVICE_LIVE_AUDIO_ROUTE = 18;
 
     // Values of nativeLiveEvent's kind argument. Must match
     // LiveEvent::from_wire in morningstar-core.
@@ -423,6 +431,20 @@ final class MorningstarNative {
      * Not the end of the room.
      */
     static final int LIVE_MEDIA_FAILED = 10;
+    /**
+     * Where the sound can go and where it goes: once connected, and when
+     * either changes. code: the LIVE_ROUTE_* in use (0 for none yet), plus
+     * 16, 32, 64 and 128 for the earpiece, the loudspeaker, a wired headset
+     * and a Bluetooth headset when there is one.
+     */
+    static final int LIVE_AUDIO_ROUTES = 11;
+
+    // A live room's audio routes. Must match LiveAudioRoute in
+    // morningstar-core.
+    static final int LIVE_ROUTE_EARPIECE = 1;
+    static final int LIVE_ROUTE_SPEAKER = 2;
+    static final int LIVE_ROUTE_WIRED = 3;
+    static final int LIVE_ROUTE_BLUETOOTH = 4;
 
     // nativeLiveEvent's code with LIVE_DISCONNECTED.
     static final int LIVE_END_LEFT = 0;
@@ -430,6 +452,8 @@ final class MorningstarNative {
     static final int LIVE_END_HIDDEN = 2;
     static final int LIVE_END_ENDED = 3;
     static final int LIVE_END_LOST = 4;
+    /** The user ended it from the notification of a room in the background. */
+    static final int LIVE_END_HUNG_UP = 5;
 
     // nativeLiveEvent's code with LIVE_FAILED.
     static final int LIVE_ERROR_PERMISSION_DENIED = 1;
@@ -563,7 +587,7 @@ final class MorningstarNative {
             MAIN.post(() -> MorningstarAccessibility.announce(first, "assertive".equals(second)));
             return;
         }
-        if (command >= SERVICE_LIVE_JOIN && command <= SERVICE_LIVE_SCREEN_SHARE) {
+        if (command >= SERVICE_LIVE_JOIN && command <= SERVICE_LIVE_AUDIO_ROUTE) {
             // The live room has its own class, which exists in two forms:
             // the real one in an app that declares the service, and one
             // that refuses in every other app (ADR 0038).

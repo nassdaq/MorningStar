@@ -18,6 +18,8 @@ members = [
     "examples/barua-talk",
     "examples/services-check",
     "tools/morningstar-devtools",
+    "tools/morningstar-preview",
+    "benchmarks/host",
 ]
 
 [workspace.package]

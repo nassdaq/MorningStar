@@ -1,0 +1,104 @@
+//! The app's journeys, made with taps and keys and no device: the test
+//! plays {{plays}}.
+
+mod support;
+
+use morningstar::HostState;
+@@if server
+use morningstar::{HttpError, HttpMethod, HttpResponse, ServiceRequest};
+
+use {{crate}}::{Message, Model, NAME_KEY, Screen};
+use {{crate}}::{SERVER_TIMEOUT, SERVER_URL};
+@@else
+
+use {{crate}}::{Model, NAME_KEY, Screen};
+@@end
+
+use support::Device;
+
+#[test]
+fn a_name_is_typed_saved_and_greeted() {
+    let mut device = Device::fresh();
+    assert_eq!(device.app().screen(), Screen::Home);
+
+    device.tap("open-settings");
+    assert_eq!(device.app().screen(), Screen::Settings);
+    device.tap("name");
+    device.type_text("  Ada ");
+    assert_eq!(device.app().draft, "  Ada ");
+
+    device.tap("save");
+    assert_eq!(device.app().name, "Ada", "spaces around it are dropped");
+    assert_eq!(device.app().screen(), Screen::Home);
+    assert_eq!(device.ui.stored(NAME_KEY), Some("Ada"), "kept on the phone");
+}
+
+#[test]
+fn a_name_stored_on_an_earlier_run_is_there_at_once() {
+    let host = HostState::new().with_stored(NAME_KEY, "Neema");
+    let mut device = Device::new(Model::new(), &host);
+    assert_eq!(device.app().name, "Neema");
+
+    device.tap("open-settings");
+    assert_eq!(device.app().draft, "Neema", "the field starts from it");
+}
+
+#[test]
+fn back_leaves_settings_and_then_leaves_the_app_to_the_system() {
+    let mut device = Device::fresh();
+    device.tap("open-settings");
+    device.tap("back");
+    assert_eq!(device.app().screen(), Screen::Home);
+
+    device.tap("open-settings");
+    assert!(device.ui.back(), "the system's Back closes Settings");
+    assert_eq!(device.app().screen(), Screen::Home);
+    assert!(!device.ui.back(), "on the first screen it is the system's");
+}
+@@if server
+
+#[test]
+fn the_server_is_asked_once_and_its_message_is_shown() {
+    let host = HostState::new().with_stored(NAME_KEY, "Ada");
+    let mut device = Device::new(Model::new(), &host);
+    device.tap("ask");
+    assert_eq!(device.app().server, "Waiting for the server...");
+    {
+        let pending = device.ui.pending_effects();
+        assert_eq!(pending.len(), 1);
+        let ServiceRequest::Http(request) = &pending[0].request else {
+            panic!("expected a request");
+        };
+        assert_eq!(request.method, HttpMethod::Post);
+        assert_eq!(request.url, format!("{SERVER_URL}/v1/hello"));
+        assert_eq!(request.timeout, SERVER_TIMEOUT);
+        assert_eq!(request.body, br#"{"name":"Ada"}"#);
+        assert_eq!(request.header_value("X-Device-Id").map(str::len), Some(32));
+    }
+
+    device.ui.send(Message::Ask);
+    assert_eq!(device.ui.pending_effects().len(), 1, "one at a time");
+
+    let body = r#"{"message":"Hello, Ada. That is 1 from this phone.","count":1}"#;
+    device
+        .ui
+        .answer_http(Ok(HttpResponse::new(200).with_body(body)));
+    assert_eq!(
+        device.app().server,
+        "Hello, Ada. That is 1 from this phone."
+    );
+}
+
+#[test]
+fn a_server_that_is_off_or_refuses_is_a_sentence_and_can_be_retried() {
+    let mut device = Device::fresh();
+    device.tap("ask");
+    device.ui.answer_http(Err(HttpError::Offline));
+    assert!(device.app().server.starts_with("No answer: "));
+
+    device.tap("ask");
+    device.ui.answer_http(Ok(HttpResponse::new(429)));
+    assert_eq!(device.app().server, "The server answered 429.");
+    assert!(!device.app().asking);
+}
+@@end

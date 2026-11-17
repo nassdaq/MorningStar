@@ -350,6 +350,15 @@ pub mod sound {
     pub const LOST: &str = "The sound was lost with the connection. Hang up and call again.";
     /// The room was closed from the other side.
     pub const ENDED: &str = "The sound was ended from the other side.";
+    /// Sound flows through a Bluetooth headset.
+    pub const LIVE_BLUETOOTH: &str = "Sound is live on your Bluetooth headset.";
+    /// Sound flows through a headset on a wire.
+    pub const LIVE_WIRED: &str = "Sound is live on your headset.";
+    /// The user ended the call from its notification while the app was
+    /// behind another one.
+    pub const HUNG_UP: &str = "You ended the call from its notification.";
+    /// The second line of the notification a call goes on under.
+    pub const NOTICE: &str = "Tap to return to the call.";
 }
 
 /// What the call screens say when the camera or the screen could not be
@@ -581,6 +590,8 @@ enum Ask {
     Microphone(bool),
     /// Its sound to the loudspeaker or the earpiece.
     Speaker(bool),
+    /// Its sound to this route.
+    Route(LiveAudioRoute),
     /// This phone's camera on or off in it.
     Camera(bool),
     /// The phone's other camera.
@@ -776,6 +787,9 @@ pub struct BaruaTalk {
     sound_others: usize,
     /// The videos the live room has announced.
     pictures: Pictures,
+    /// Where the live room's sound can go and where it goes, as the
+    /// platform last said; empty until it has.
+    routes: LiveAudioRoutes,
 }
 
 impl Default for BaruaTalk {
@@ -848,6 +862,7 @@ impl BaruaTalk {
             sound_for: None,
             sound_others: 0,
             pictures: Pictures::default(),
+            routes: LiveAudioRoutes::default(),
         };
         app.name_draft.clone_from(&app.name);
         match screen {
@@ -1102,7 +1117,11 @@ impl BaruaTalk {
             Sound::On if self.pictures.screen.is_some() => sound::THEIR_SCREEN,
             Sound::On if self.pictures.theirs.is_some() => sound::LIVE_VIDEO,
             Sound::On if video => sound::LIVE_NO_PICTURE,
-            Sound::On => sound::LIVE,
+            Sound::On => match self.routes.selected {
+                Some(LiveAudioRoute::Bluetooth) => sound::LIVE_BLUETOOTH,
+                Some(LiveAudioRoute::Wired) => sound::LIVE_WIRED,
+                _ => sound::LIVE,
+            },
             Sound::Reconnecting => sound::RECONNECTING,
             Sound::Away => sound::AWAY,
             Sound::Failed(sentence) => sentence,
@@ -2266,11 +2285,19 @@ impl BaruaTalk {
     fn sound_wanted(&self) -> Option<(u32, LiveJoin)> {
         if let Some(phone) = &self.phone {
             let ticket = phone.ticket.as_ref().filter(|_| !phone.scripted)?;
+            // A call is a conversation: it goes on while the user looks
+            // something up in another app or the screen locks, under a
+            // notification that names it and can end it (ADR 0042).
+            let title = format!(
+                "Call to {}",
+                phone.name.as_deref().unwrap_or(phone.number.as_str())
+            );
             return Some((
                 phone.serial,
                 LiveJoin::new(ticket.url.clone(), ticket.token.clone())
                     .microphone(!phone.muted)
-                    .speaker(phone.speaker),
+                    .speaker(phone.speaker)
+                    .background(LiveBackground::new(title, sound::NOTICE)),
             ));
         }
         let call = self.call.as_ref()?;
@@ -2285,7 +2312,11 @@ impl BaruaTalk {
                 .speaker(true)
                 // A call with video starts with the camera as its button
                 // stands; a voice call starts without.
-                .camera(call.video && call.camera),
+                .camera(call.video && call.camera)
+                .background(LiveBackground::new(
+                    format!("Call with {}", call.subject.title()),
+                    sound::NOTICE,
+                )),
         ))
     }
 
@@ -2306,6 +2337,7 @@ impl BaruaTalk {
         self.sound_for = None;
         self.sound_others = 0;
         self.pictures = Pictures::default();
+        self.routes = LiveAudioRoutes::default();
         if let Some((serial, join)) = wanted {
             self.sound = Sound::Joining;
             self.sound_for = Some(serial);
@@ -2334,6 +2366,38 @@ impl BaruaTalk {
             }
             LiveEvent::ParticipantLeft(_) => {
                 self.sound_others = self.sound_others.saturating_sub(1);
+                // The other side is gone. Whether the call is over is the
+                // server's to say, and it is asked now rather than at the
+                // next tick: a call that goes on behind another app has no
+                // ticks, and must not sit there alone with the microphone
+                // open until the user comes back.
+                if self.sound_others == 0 {
+                    self.poll_call.due = self.clock;
+                    self.poll();
+                }
+                return;
+            }
+            // Where the sound is: the Speaker button follows what is true
+            // (a headset that connects takes the sound from the loudspeaker).
+            LiveEvent::AudioRoutes(routes) => {
+                if let Some(phone) = &mut self.phone {
+                    phone.speaker = routes.selected == Some(LiveAudioRoute::Speaker);
+                }
+                self.routes = routes;
+                return;
+            }
+            // Ended from the notification, while the app was behind another
+            // one: the room is closed already, and the call is hung up as
+            // the red button hangs it up.
+            LiveEvent::Disconnected(LiveDisconnect::HungUp) => {
+                self.sound = Sound::Failed(sound::HUNG_UP);
+                self.sound_others = 0;
+                self.pictures = Pictures::default();
+                if self.phone.is_some() {
+                    self.hang_up_phone();
+                } else {
+                    self.hang_up_call(None);
+                }
                 return;
             }
             // Not asked for.
@@ -3451,7 +3515,22 @@ impl BaruaTalk {
                 if let Some(phone) = &mut self.phone {
                     phone.speaker = !phone.speaker;
                     if self.sound.in_room() {
-                        self.asks.push(Ask::Speaker(phone.speaker));
+                        // On: the loudspeaker. Off: back to the best of
+                        // what else there is, a headset before the ear.
+                        // Before the platform has said what there is, the
+                        // plain choice between loudspeaker and earpiece.
+                        let quiet = [
+                            LiveAudioRoute::Bluetooth,
+                            LiveAudioRoute::Wired,
+                            LiveAudioRoute::Earpiece,
+                        ]
+                        .into_iter()
+                        .find(|route| self.routes.available.contains(route));
+                        self.asks.push(match (phone.speaker, quiet) {
+                            (true, Some(_)) => Ask::Route(LiveAudioRoute::Speaker),
+                            (false, Some(route)) => Ask::Route(route),
+                            (on, None) => Ask::Speaker(on),
+                        });
                     }
                 }
             }
@@ -3767,6 +3846,7 @@ impl Application for BaruaTalk {
                 Ask::Leave => out.leave_live(),
                 Ask::Microphone(live) => out.set_live_microphone(live),
                 Ask::Speaker(on) => out.set_live_speaker(on),
+                Ask::Route(route) => out.set_live_audio_route(route),
                 Ask::Camera(on) => out.set_live_camera(on),
                 Ask::SwitchCamera => out.switch_live_camera(),
                 Ask::ShareScreen(on) => out.set_live_screen_share(on),

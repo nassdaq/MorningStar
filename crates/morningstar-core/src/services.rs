@@ -380,6 +380,69 @@ pub struct LiveJoin {
     /// turned on, and a refusal is
     /// [`LiveEvent::MediaFailed`], not the end of the room.
     pub camera: bool,
+    /// What lets the room go on while the app is not on screen (ADR 0042):
+    /// the notice the system shows for as long as it does. `None`, the
+    /// default, and the room ends when the app leaves the screen
+    /// ([`LiveDisconnect::Hidden`]). Only an app built with the
+    /// `live-background` service can go on; in any other the notice is
+    /// ignored and the room ends as before.
+    pub background: Option<LiveBackground>,
+}
+
+/// The notice a live room shows while it goes on behind another app or a
+/// locked screen (ADR 0042): what the user reads in the system's
+/// notification, and the name of the action that ends the room from there.
+/// The user must be able to see that the microphone is open and to close
+/// it without finding the app again, which is why a room cannot go on
+/// without one.
+///
+/// ```
+/// use morningstar_core::{LiveBackground, LiveJoin};
+///
+/// let notice = LiveBackground::new("Call with Baraka", "Tap to return to the call");
+/// assert_eq!(notice.hang_up, "Hang up");
+/// let join = LiveJoin::new("wss://live.example.com", "a-ticket").background(notice);
+/// assert!(join.background.is_some());
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveBackground {
+    /// The notification's first line: what is going on ("Call with ...").
+    pub title: String,
+    /// Its second line.
+    pub text: String,
+    /// The name of the action that ends the room: "Hang up" unless
+    /// changed.
+    pub hang_up: String,
+}
+
+impl LiveBackground {
+    /// A notice with these two lines and an action called "Hang up".
+    pub fn new(title: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            text: text.into(),
+            hang_up: "Hang up".to_owned(),
+        }
+    }
+
+    /// Names the action that ends the room, in the user's language.
+    pub fn hang_up(mut self, label: impl Into<String>) -> Self {
+        self.hang_up = label.into();
+        self
+    }
+
+    /// The three texts as they cross to a host: one per line, in the
+    /// order title, text, action, with any line break inside one of them
+    /// made a space.
+    pub fn to_wire(&self) -> String {
+        let line = |text: &str| text.replace(['\n', '\r'], " ");
+        format!(
+            "{}\n{}\n{}",
+            line(&self.title),
+            line(&self.text),
+            line(&self.hang_up)
+        )
+    }
 }
 
 impl LiveJoin {
@@ -393,7 +456,15 @@ impl LiveJoin {
             speaker: false,
             report_speaking: false,
             camera: false,
+            background: None,
         }
+    }
+
+    /// Lets the room go on while the app is not on screen, under this
+    /// notice (ADR 0042). See [`LiveJoin::background`].
+    pub fn background(mut self, notice: LiveBackground) -> Self {
+        self.background = Some(notice);
+        self
     }
 
     /// Whether the camera is on from the start.
@@ -433,6 +504,7 @@ impl fmt::Debug for LiveJoin {
             .field("speaker", &self.speaker)
             .field("report_speaking", &self.report_speaking)
             .field("camera", &self.camera)
+            .field("background", &self.background.is_some())
             .finish()
     }
 }
@@ -470,6 +542,74 @@ pub struct LiveVideoStream {
     /// a track like any other, but no pictures are delivered for it: the
     /// screen is already in front of its user.
     pub track: VideoTrack,
+}
+
+/// Where a live room's sound comes out, and where its microphone is (ADR
+/// 0042).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LiveAudioRoute {
+    /// The speaker at the ear. A tablet has none.
+    Earpiece,
+    /// The loudspeaker.
+    Speaker,
+    /// A headset or headphones on a wire.
+    Wired,
+    /// A Bluetooth headset.
+    Bluetooth,
+}
+
+impl LiveAudioRoute {
+    /// Every route, in the order of their wire numbers (1 to 4).
+    pub const ALL: [Self; 4] = [Self::Earpiece, Self::Speaker, Self::Wired, Self::Bluetooth];
+
+    /// The number this route crosses to a host as: 1 to 4.
+    pub fn to_wire(self) -> u8 {
+        match self {
+            Self::Earpiece => 1,
+            Self::Speaker => 2,
+            Self::Wired => 3,
+            Self::Bluetooth => 4,
+        }
+    }
+
+    /// The route a host means by `number`; `None` for zero ("none") and
+    /// for a number this library does not know.
+    pub fn from_wire(number: u32) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|route| u32::from(route.to_wire()) == number)
+    }
+}
+
+/// The routes a live room's sound can take on this device now, and the one
+/// it takes (ADR 0042).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LiveAudioRoutes {
+    /// What there is to choose from, in the order of
+    /// [`LiveAudioRoute::ALL`].
+    pub available: Vec<LiveAudioRoute>,
+    /// The one in use; `None` while the platform has not settled on one.
+    pub selected: Option<LiveAudioRoute>,
+}
+
+impl LiveAudioRoutes {
+    /// These routes as the code of [`LiveEvent::from_wire`]'s kind 11.
+    pub fn to_wire(&self) -> u32 {
+        let selected = self.selected.map_or(0, |route| u32::from(route.to_wire()));
+        self.available.iter().fold(selected, |code, route| {
+            code | 1 << (3 + u32::from(route.to_wire()))
+        })
+    }
+
+    fn from_wire(code: u32) -> Self {
+        Self {
+            available: LiveAudioRoute::ALL
+                .into_iter()
+                .filter(|route| code & 1 << (3 + u32::from(route.to_wire())) != 0)
+                .collect(),
+            selected: LiveAudioRoute::from_wire(code & 0xf),
+        }
+    }
 }
 
 /// The most that [`ServiceRequest::LiveData`] sends in one message: what
@@ -542,6 +682,10 @@ pub enum LiveEvent {
     },
     /// Someone sent a message to the room.
     Data(LiveData),
+    /// Where the sound can go and where it goes now (ADR 0042): sent once
+    /// the room is connected and again whenever either changes, a headset
+    /// connecting in the middle of a call included.
+    AudioRoutes(LiveAudioRoutes),
     /// The room is over for this device, for the reason given. Final.
     Disconnected(LiveDisconnect),
     /// The room could not be joined, or broke. Final.
@@ -569,11 +713,12 @@ impl LiveEvent {
     /// | 3 | `Speaking` | | identities, one per line | |
     /// | 4 | `Reconnecting` | | | |
     /// | 5 | `Reconnected` | | | |
-    /// | 6 | `Disconnected` | 0 left, 1 replaced, 2 hidden, 3 ended, 4 lost | | |
+    /// | 6 | `Disconnected` | 0 left, 1 replaced, 2 hidden, 3 ended, 4 lost, 5 hung up | | |
     /// | 7 | `Failed` | 1 permission denied, 2 unsupported, 3 failed | the reason, for `failed` | |
     /// | 8 | `VideoStarted` | track * 4 + (2 if local) + (1 if a screen) | identity | |
     /// | 9 | `VideoStopped` | as for 8 | identity | |
     /// | 10 | `MediaFailed` | error * 2 + (1 if the screen), errors as for 7 | the reason, for `failed` | |
+    /// | 11 | `AudioRoutes` | the route in use (0 none, 1 earpiece, 2 loudspeaker, 3 wired, 4 Bluetooth) + 16, 32, 64, 128 for each of those four that is available | | |
     ///
     /// [`Data`](Self::Data) does not come this way: it carries bytes, and
     /// has a call of its own on both platforms.
@@ -603,6 +748,7 @@ impl LiveEvent {
                 1 => LiveDisconnect::Replaced,
                 2 => LiveDisconnect::Hidden,
                 4 => LiveDisconnect::Lost,
+                5 => LiveDisconnect::HungUp,
                 _ => LiveDisconnect::Ended,
             }),
             7 => Self::Failed(live_error(code, first)),
@@ -623,6 +769,7 @@ impl LiveEvent {
                 source: live_source(code & 1),
                 error: live_error(code >> 1, first),
             },
+            11 => Self::AudioRoutes(LiveAudioRoutes::from_wire(code)),
             _ => return None,
         })
     }
@@ -653,9 +800,14 @@ pub enum LiveDisconnect {
     /// The application joined another room: there is one at a time.
     Replaced,
     /// The app left the screen. A room does not continue in the
-    /// background: the microphone would stay open where the user cannot
-    /// see it.
+    /// background (the microphone would stay open where the user cannot
+    /// see it) unless it was joined with a [`LiveBackground`] notice in an
+    /// app built for that, or this device's screen is shared in it.
     Hidden,
+    /// The user ended it from the notification of a room that was going on
+    /// in the background (ADR 0042). The application has had no say: it is
+    /// told so that it can do what its own hang-up does besides.
+    HungUp,
     /// The other side ended it: the room was closed, this person was
     /// removed, or the same ticket joined from somewhere else.
     Ended,
@@ -671,6 +823,7 @@ impl fmt::Display for LiveDisconnect {
             Self::Hidden => "the app left the screen",
             Self::Ended => "the room was ended from the other side",
             Self::Lost => "the connection was lost",
+            Self::HungUp => "it was ended from the notification",
         })
     }
 }
@@ -799,6 +952,10 @@ pub enum ServiceRequest {
     /// Start or stop sharing this device's screen with the live room. Not
     /// answered: as for the camera. The user is asked each time.
     LiveScreenShare(bool),
+    /// Send the live room's sound to this route (ADR 0042). Not answered:
+    /// [`LiveEvent::AudioRoutes`] says where it went. Nothing happens when
+    /// the device has no such route now.
+    LiveAudioRoute(LiveAudioRoute),
 }
 
 impl ServiceRequest {
@@ -817,6 +974,7 @@ impl ServiceRequest {
                 | Self::LiveCamera(_)
                 | Self::LiveSwitchCamera
                 | Self::LiveScreenShare(_)
+                | Self::LiveAudioRoute(_)
         )
     }
 
@@ -842,7 +1000,8 @@ impl ServiceRequest {
             | Self::LiveData { .. }
             | Self::LiveCamera(_)
             | Self::LiveSwitchCamera
-            | Self::LiveScreenShare(_) => return None,
+            | Self::LiveScreenShare(_)
+            | Self::LiveAudioRoute(_) => return None,
         })
     }
 
@@ -871,6 +1030,12 @@ impl ServiceRequest {
             Self::LiveSwitchCamera => "live camera switched",
             Self::LiveScreenShare(true) => "share the screen",
             Self::LiveScreenShare(false) => "stop sharing the screen",
+            Self::LiveAudioRoute(LiveAudioRoute::Earpiece) => "live sound to the earpiece",
+            Self::LiveAudioRoute(LiveAudioRoute::Speaker) => "live sound to the loudspeaker",
+            Self::LiveAudioRoute(LiveAudioRoute::Wired) => "live sound to the wired headset",
+            Self::LiveAudioRoute(LiveAudioRoute::Bluetooth) => {
+                "live sound to the Bluetooth headset"
+            }
         }
     }
 }
@@ -1214,7 +1379,7 @@ mod tests {
         let failed = LiveEvent::from_wire(7, 99, "why", "").expect("still a failure");
         assert_eq!(failed, LiveEvent::Failed(LiveError::Failed("why".into())));
         assert!(ended.is_final() && failed.is_final());
-        assert_eq!(LiveEvent::from_wire(11, 0, "", ""), None);
+        assert_eq!(LiveEvent::from_wire(12, 0, "", ""), None);
     }
 
     #[test]
@@ -1298,5 +1463,64 @@ mod tests {
                 .camera(true)
                 .camera
         );
+    }
+
+    #[test]
+    fn a_background_notice_crosses_as_three_lines() {
+        let notice = LiveBackground::new("Call with\nBaraka", "Tap to return").hang_up("Kata simu");
+        assert_eq!(
+            notice.to_wire(),
+            "Call with Baraka\nTap to return\nKata simu"
+        );
+        let join = LiveJoin::new("wss://live.example.com", "ticket");
+        assert_eq!(
+            join.background, None,
+            "a room ends with the screen unless asked"
+        );
+        let join = join.background(notice.clone());
+        assert_eq!(join.background, Some(notice));
+        assert!(format!("{join:?}").contains("background: true"));
+    }
+
+    #[test]
+    fn hung_up_from_the_notification_is_a_final_event_of_its_own() {
+        let event = LiveEvent::from_wire(6, 5, "", "").unwrap();
+        assert_eq!(event, LiveEvent::Disconnected(LiveDisconnect::HungUp));
+        assert!(event.is_final());
+    }
+
+    #[test]
+    fn audio_routes_cross_as_one_number_and_back() {
+        let none = LiveAudioRoutes::default();
+        assert_eq!(none.to_wire(), 0);
+        assert_eq!(
+            LiveEvent::from_wire(11, 0, "", ""),
+            Some(LiveEvent::AudioRoutes(none))
+        );
+        let routes = LiveAudioRoutes {
+            available: vec![
+                LiveAudioRoute::Earpiece,
+                LiveAudioRoute::Speaker,
+                LiveAudioRoute::Bluetooth,
+            ],
+            selected: Some(LiveAudioRoute::Bluetooth),
+        };
+        assert_eq!(routes.to_wire(), 4 + 16 + 32 + 128);
+        assert_eq!(
+            LiveEvent::from_wire(11, routes.to_wire(), "", ""),
+            Some(LiveEvent::AudioRoutes(routes))
+        );
+        // A route this library has not heard of is no route, not a guess.
+        assert_eq!(LiveAudioRoute::from_wire(9), None);
+        for route in LiveAudioRoute::ALL {
+            assert_eq!(
+                LiveAudioRoute::from_wire(u32::from(route.to_wire())),
+                Some(route)
+            );
+            let request = ServiceRequest::LiveAudioRoute(route);
+            assert!(!request.expects_result());
+            assert_eq!(request.unsupported(), None);
+        }
+        assert!(!LiveEvent::AudioRoutes(LiveAudioRoutes::default()).is_final());
     }
 }

@@ -23,6 +23,20 @@ export const upstreamFailed = (message) => new HttpError(502, 'upstream_failed',
 export const voiceUnavailable = () =>
   new HttpError(503, 'voice_unavailable', 'Voice is not set up on this server. Send the reply as text.');
 
+export const databaseUnavailable = () =>
+  new HttpError(503, 'database_unavailable', 'The server’s database is not answering just now. Please try again.', {
+    'Retry-After': '5',
+  });
+
+/** The database could not be reached (or is not migrated yet). */
+export class DatabaseDown extends Error {
+  constructor(cause) {
+    super('database unavailable');
+    this.name = 'DatabaseDown';
+    this.cause = cause;
+  }
+}
+
 /** A failure of the model or the voice service, raised inside their clients. */
 export class UpstreamError extends Error {
   constructor(service, message) {

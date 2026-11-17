@@ -5,7 +5,7 @@
 
 import { createHash, timingSafeEqual } from 'node:crypto';
 
-import { HttpError, badRequest, rateLimited, unauthorized } from './errors.js';
+import { badRequest, DatabaseDown, databaseUnavailable, HttpError, rateLimited, unauthorized } from './errors.js';
 import { send, sendJson } from './http.js';
 import { createRoutes } from './routes.js';
 import { createAudioStore, createRateLimiter } from './stores.js';
@@ -61,7 +61,10 @@ export function createApp({ config, db, model, voice, log, now = Date.now }) {
     }
     try {
       await respond(req, res, path);
-    } catch (err) {
+    } catch (thrown) {
+      // A database that cannot be reached is a 503 the app can retry, not
+      // a crash and not a 500.
+      const err = thrown instanceof DatabaseDown ? databaseUnavailable() : thrown;
       if (err instanceof HttpError) {
         sendJson(req, res, err.status, { error: { code: err.code, message: err.message } }, err.headers);
       } else {

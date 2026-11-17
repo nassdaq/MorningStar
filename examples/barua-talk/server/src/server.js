@@ -12,6 +12,29 @@ import { createLogger } from './log.js';
 import { createTalk } from './talk.js';
 
 /**
+ * Keeps the process alive through an error nothing caught: a rejected
+ * promise nobody awaited, or an exception thrown from a timer or an event
+ * (a database connection that drops while a query holds it emits one).
+ * Node's own answer to both is to print the error and exit, which for
+ * this server means every phone loses its calls until someone starts it
+ * again. Here it is logged, through the logger that redacts secrets, and
+ * the server carries on: each request has its own error handling, and
+ * the state that matters is in the database, not in this process.
+ * Returns a function that takes the two listeners off again.
+ */
+export function guardProcess(log, proc = process) {
+  const describe = (thrown) => (thrown instanceof Error ? thrown : new Error(String(thrown)));
+  const onRejection = (reason) => log.error('unhandled rejection; the server carries on', describe(reason));
+  const onException = (err, origin) => log.error(`${origin ?? 'uncaughtException'}; the server carries on`, describe(err));
+  proc.on('unhandledRejection', onRejection);
+  proc.on('uncaughtException', onException);
+  return () => {
+    proc.off('unhandledRejection', onRejection);
+    proc.off('uncaughtException', onException);
+  };
+}
+
+/**
  * Connects to the database (trying a few times: a name that does not
  * resolve at the first attempt often does at the second) and starts
  * listening. A database that still cannot be reached does not stop the
@@ -45,7 +68,21 @@ export async function start(config, { quiet = false, dbOptions, connectAttempts 
 
   const app = createApp({ config, db, talk, log, background });
   const server = http.createServer((req, res) => {
-    app.handle(req, res);
+    // `handle` answers its own errors; if it ever fails all the same, the
+    // request gets a 500 and the process is not asked to judge it.
+    app.handle(req, res).catch((err) => {
+      log.error(`request handler failed on ${req.method}`, err);
+      try {
+        if (res.headersSent) {
+          res.destroy();
+        } else {
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end('{"error":{"code":"internal_error","message":"Something went wrong on the server."}}');
+        }
+      } catch {
+        res.destroy();
+      }
+    });
   });
   server.requestTimeout = 60000; // a slow upload cannot hold a socket for ever
   server.headersTimeout = 15000;
@@ -82,6 +119,7 @@ async function main() {
   loadEnvFile();
   const config = loadConfig();
   const fallback = createLogger({ secrets: secrets(config) });
+  guardProcess(fallback);
   let running;
   try {
     running = await start(config);

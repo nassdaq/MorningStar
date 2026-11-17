@@ -20,23 +20,19 @@
          camera, for screen sharing in a foreground service and (up to
          Android 11) for Bluetooth, and with them tells a store that the
          device must have a camera and Bluetooth. What an app has not asked
-         for is taken out of the merged manifest again:
+         for is taken out of the merged manifest again: the camera, unless
+         the app declares `live-video`; the foreground-service permissions
+         and LiveKit's screen capture service, unless it declares
+         `live-screen` (ADR 0039) or, for the microphone's, `live-background`
+         (ADR 0042). Those lines depend on the app, so they are not here but
+         in a manifest that app/build.gradle.kts writes for each build and
+         merges over this one (build/generated/morningstar/manifest).
 
-         - Bluetooth, here, always: a Bluetooth headset is not used by a
-           live room in this version.
-         - The camera, unless the app declares `live-video`; the
-           foreground-service permissions and LiveKit's screen capture
-           service, unless it declares `live-screen` (ADR 0039). Those
-           lines depend on the app, so they are not here but in a manifest
-           that app/build.gradle.kts writes for each build and merges over
-           this one (build/generated/morningstar/manifest).
-
-         A removal takes out nothing in an app without the service, where
-         there is nothing to take out. What LiveKit's manifest leaves in a
-         voice-only app is ACCESS_NETWORK_STATE (to notice a network change
-         and reconnect) and MODIFY_AUDIO_SETTINGS (the call's audio mode
-         and the loudspeaker); neither is asked of the user. -->
-    <uses-permission android:name="android.permission.BLUETOOTH" tools:node="remove" />
+         What LiveKit's manifest leaves in a voice-only app is
+         ACCESS_NETWORK_STATE (to notice a network change and reconnect),
+         MODIFY_AUDIO_SETTINGS (the call's audio mode and where its sound
+         goes) and, up to Android 11 only, BLUETOOTH (a Bluetooth headset
+         as a place for the sound, ADR 0042); none is asked of the user. -->
 
     <!-- enableOnBackInvokedCallback: from API 33 the system's Back goes to
          the callback MorningstarActivity registers, on every release rather

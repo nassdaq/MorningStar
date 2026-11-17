@@ -968,9 +968,16 @@ pub unsafe extern "C" fn morningstar_ios_take_service_request(
                 u8::from(join.report_speaking),
                 u8::from(join.camera),
             ];
+            // A room that goes on in the background (ADR 0042) says so
+            // with its notice, three lines, as the third text.
+            let notice = join
+                .background
+                .as_ref()
+                .map(morningstar_runtime::LiveBackground::to_wire)
+                .unwrap_or_default();
             (
                 11,
-                [join.url.clone(), join.token.clone(), String::new()],
+                [join.url.clone(), join.token.clone(), notice],
                 &host.flags[..],
             )
         }
@@ -1005,6 +1012,11 @@ pub unsafe extern "C" fn morningstar_ios_take_service_request(
         ServiceRequest::LiveScreenShare(on) => {
             host.flags = [u8::from(*on), 0, 0, 0];
             (18, Default::default(), &host.flags[..1])
+        }
+        // Where the sound goes (ADR 0042): the route's number.
+        ServiceRequest::LiveAudioRoute(route) => {
+            host.flags = [route.to_wire(), 0, 0, 0];
+            (19, Default::default(), &host.flags[..1])
         }
     };
     let strings = texts.map(|text| c_string(&text));

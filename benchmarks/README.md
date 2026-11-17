@@ -35,6 +35,24 @@ Morningstar: stats frames=600 interval[n=480 min=… p50=… p95=… p99=… max
 
 **Rendering is demand-driven** (ADR 0012): an idle app produces no frames, and the interval statistic only covers back-to-back frames. To benchmark sustained rendering, launch in continuous mode (`am start … --ez dev.morningstar.continuous true`); `measure.sh` relaunches the app several times, so do not run it on a phone someone is using.
 
+## Host baseline (no phone)
+
+`benchmarks/host` (`cargo run --release -p morningstar-bench -- --markdown`) measures, on the machine it runs on, what a frame of every designed example screen costs in a phone's frame: the CPU time to **build** it (view, layout, text, paint into a display list), the time to **draw** it offscreen and read the pixels back, the same for an empty frame, the first frame of each screen, and for video the copy of a 720p I420 frame and a draw with and without a new picture. It prints the instances, draw calls and passes of each screen beside the times.
+
+It is the exception to "real devices" above, and what it is for is narrow: **noticing a regression on one machine between two commits**. It is not a device measurement: another GPU, another driver, no compositor, no display, and a read-back no phone does. Rules for a report made with it:
+
+- Release build, the machine idle (say so if it was not), three runs, the commit and the machine named.
+- Report the build figures as they are; report the draw figures with their spread between runs, and never rank two screens whose difference is inside it.
+- Compare only with a report from the same machine.
+
+| Metric | How | Status |
+| --- | --- | --- |
+| Frame build time per screen (CPU) | `morningstar-bench` | Measured on the host: `reports/2026-11-17-host-baseline.md` |
+| Offscreen draw + read back per screen | `morningstar-bench` | Measured on the host, noisy (the machine was busy) |
+| Video: copy of a 720p frame | `morningstar-bench` | Measured on the host |
+| Video: upload and conversion of a frame | `morningstar-bench`, by difference | Not resolved: inside the noise |
+| Any of these on a phone | `android/measure.sh` | Not done for the designed screens or for video |
+
 ## Running
 
 ```sh

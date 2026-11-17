@@ -1,0 +1,29 @@
+# {{name}}: screens
+
+One section per screen: what it shows, what each control does, and what is
+not done. Keep it true; it is what a reader checks the app against.
+
+## Home
+
+Where the app opens.
+
+| Element | Does |
+| --- | --- |
+| "Hello, <name>." | The stored name; "Hello." before one is saved |
+| Settings | Opens Settings on top |
+@@if server
+| Ask the server | `POST /v1/hello` with the name; the line under it shows the server's message, or why there was none. One request at a time |
+@@end
+
+## Settings
+
+| Element | Does |
+| --- | --- |
+| Back | Returns to Home without saving. The system's Back does the same |
+| Your name | A text field, at most 40 characters |
+| Save | Keeps the name on the phone (spaces around it dropped) and returns to Home. The keyboard's action key does the same |
+
+## Not done
+
+- Nothing here follows a design yet. See `design/README.md`.
+- Not run on a device.

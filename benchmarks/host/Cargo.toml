@@ -1,0 +1,16 @@
+[package]
+name = "morningstar-bench"
+description = "Host benchmark: what building and drawing each example screen costs on this machine, with no phone."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+morningstar.workspace = true
+morningstar-gpu.workspace = true
+fundidesk = { path = "../../examples/fundidesk" }
+callready = { path = "../../examples/callready" }
+atlas = { path = "../../examples/atlas" }
+barua-talk = { path = "../../examples/barua-talk" }

@@ -16,6 +16,9 @@ const URL: &str = "wss://live.example.com";
 enum Want {
     Join(&'static str),
     JoinMutedOnSpeaker(&'static str),
+    JoinForBackground(&'static str),
+    Route(LiveAudioRoute),
+    Share(bool),
     Leave,
     Microphone(bool),
     Speaker(bool),
@@ -73,6 +76,13 @@ impl Application for Caller {
                     LiveJoin::new(URL, ticket).microphone(false).speaker(true),
                     move |event| Msg::Live(ticket, event),
                 ),
+                Want::JoinForBackground(ticket) => out.join_live(
+                    LiveJoin::new(URL, ticket)
+                        .background(LiveBackground::new("Call", "Tap to return")),
+                    move |event| Msg::Live(ticket, event),
+                ),
+                Want::Route(route) => out.set_live_audio_route(route),
+                Want::Share(on) => out.set_live_screen_share(on),
                 Want::Leave => out.leave_live(),
                 Want::Microphone(live) => out.set_live_microphone(live),
                 Want::Speaker(on) => out.set_live_speaker(on),
@@ -279,6 +289,137 @@ fn the_app_leaving_the_screen_ends_the_room_as_hidden() {
     want(&mut ui, Want::Join("t"));
     assert!(ui.live_room().is_some());
     assert_eq!(ui.effects_in_flight(), 1);
+}
+
+// --- Rooms that go on in the background (ADR 0042) --------------------------
+
+#[test]
+fn a_room_without_a_notice_ends_when_the_app_leaves_the_screen() {
+    let mut ui = testing();
+    want(&mut ui, Want::Join("t"));
+    ui.live_event(LiveEvent::Connected);
+    assert!(!ui.live_app_hidden(), "nothing goes on");
+    assert!(ui.live_room().is_none());
+    assert_eq!(
+        ui.app().log.last(),
+        Some(&Msg::Live(
+            "t",
+            LiveEvent::Disconnected(LiveDisconnect::Hidden)
+        ))
+    );
+    assert!(
+        !ui.live_app_hidden(),
+        "and with no room there is nothing to keep"
+    );
+}
+
+#[test]
+fn a_room_with_a_notice_goes_on_and_ends_only_by_one_of_its_endings() {
+    // Each way a room in the background ends, and that it has ended.
+    type Ending = fn(&mut Ui<Caller>);
+    let endings: [(Ending, LiveDisconnect); 5] = [
+        (|ui| want(ui, Want::Leave), LiveDisconnect::Left),
+        (|ui| want(ui, Want::Join("other")), LiveDisconnect::Replaced),
+        (
+            |ui| assert!(ui.live_hang_up_from_notice()),
+            LiveDisconnect::HungUp,
+        ),
+        (
+            |ui| assert!(ui.live_event(LiveEvent::Disconnected(LiveDisconnect::Ended))),
+            LiveDisconnect::Ended,
+        ),
+        (
+            |ui| assert!(ui.live_event(LiveEvent::Disconnected(LiveDisconnect::Lost))),
+            LiveDisconnect::Lost,
+        ),
+    ];
+    for (end, reason) in endings {
+        let mut ui = testing();
+        want(&mut ui, Want::JoinForBackground("t"));
+        ui.live_event(LiveEvent::Connected);
+        assert!(ui.live_app_hidden(), "the room goes on");
+        assert!(ui.live_app_hidden(), "however long the app stays away");
+        assert!(ui.live_room().is_some_and(|room| room.connected));
+        assert_eq!(ui.app().log.len(), 1, "going on is not an event");
+
+        end(&mut ui);
+        ui.deliver_effects();
+        let ended = Msg::Live("t", LiveEvent::Disconnected(reason));
+        assert!(ui.app().log.contains(&ended), "{reason:?}");
+        assert!(
+            ui.live_room().is_none_or(|room| room.join.token != "t"),
+            "{reason:?}: the room is over"
+        );
+    }
+}
+
+#[test]
+fn forgetting_pending_work_leaves_a_room_in_the_background_too() {
+    let mut ui = testing();
+    want(&mut ui, Want::JoinForBackground("t"));
+    ui.live_event(LiveEvent::Connected);
+    assert!(ui.live_app_hidden());
+    want(&mut ui, Want::Forget);
+    assert!(ui.live_room().is_none(), "never left connected and unheard");
+    assert!(!ui.live_hang_up_from_notice());
+}
+
+#[test]
+fn the_notification_can_only_end_a_room_that_has_one() {
+    let mut ui = testing();
+    assert!(!ui.live_hang_up_from_notice(), "no room");
+    want(&mut ui, Want::Join("t"));
+    ui.live_event(LiveEvent::Connected);
+    assert!(!ui.live_hang_up_from_notice(), "no notice, no notification");
+    assert!(ui.live_room().is_some());
+}
+
+#[test]
+fn a_shared_screen_keeps_a_room_without_a_notice_until_sharing_stops() {
+    let mut ui = testing();
+    want(&mut ui, Want::Join("t"));
+    ui.live_event(LiveEvent::Connected);
+    want(&mut ui, Want::Share(true));
+    assert!(
+        ui.live_app_hidden(),
+        "ADR 0039: sharing is for showing other apps"
+    );
+    want(&mut ui, Want::Share(false));
+    assert!(!ui.live_app_hidden(), "and nothing else keeps it");
+    assert!(ui.live_room().is_none());
+}
+
+// --- Audio routes (ADR 0042) -------------------------------------------------
+
+#[test]
+fn the_routes_arrive_as_events_and_a_choice_is_set_on_the_room() {
+    let mut ui = testing();
+    want(&mut ui, Want::Join("t"));
+    ui.live_event(LiveEvent::Connected);
+    assert_eq!(ui.live_room().unwrap().audio_route, None);
+    let routes = LiveAudioRoutes {
+        available: vec![LiveAudioRoute::Earpiece, LiveAudioRoute::Speaker],
+        selected: Some(LiveAudioRoute::Earpiece),
+    };
+    ui.live_event(LiveEvent::AudioRoutes(routes.clone()));
+    assert_eq!(
+        ui.app().log.last(),
+        Some(&Msg::Live("t", LiveEvent::AudioRoutes(routes)))
+    );
+    want(&mut ui, Want::Route(LiveAudioRoute::Bluetooth));
+    assert_eq!(
+        ui.live_room().unwrap().audio_route,
+        Some(LiveAudioRoute::Bluetooth)
+    );
+    assert!(ui.live_room().is_some(), "a route is not an ending");
+}
+
+#[test]
+fn a_route_chosen_with_no_room_does_nothing() {
+    let mut ui = testing();
+    want(&mut ui, Want::Route(LiveAudioRoute::Speaker));
+    assert!(ui.live_room().is_none());
+    assert_eq!(ui.deliver_effects(), 0);
 }
 
 #[test]

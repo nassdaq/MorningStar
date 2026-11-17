@@ -128,7 +128,9 @@ ten minutes after it was made.
 ## As implemented: additions the client must handle
 
 - `429 rate_limited` (with `Retry-After`) above 60 requests a minute per
-  device; `500 internal_error` for unexpected failures.
+  device; `500 internal_error` for unexpected failures;
+  `503 database_unavailable` (with `Retry-After`) while the database
+  cannot be reached: try again.
 - `GET /v1/health` needs no `X-Device-Id`.
 - A turn's `text` is 1..600 characters after whitespace is collapsed, else
   400. A recording with no speech in it is 400 `bad_request`.

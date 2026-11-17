@@ -70,6 +70,9 @@ export function loadConfig(env = process.env) {
     port: int(env.PORT, 8787, 0, 65535),
     appToken: str(env.APP_TOKEN),
     databaseUrl: str(env.DATABASE_URL),
+    // After a failed attempt to reach the database, how long before the
+    // next one: a database that is down is not tried by every request.
+    databaseRetryMs: int(env.DATABASE_RETRY_MS, 3000, 0, 600000),
     // The day boundary used for the practice streak.
     streakTimeZone: timeZone(env.STREAK_TZ),
     rateLimitPerMinute: int(env.RATE_LIMIT_PER_MIN, 60, 1, 100000),

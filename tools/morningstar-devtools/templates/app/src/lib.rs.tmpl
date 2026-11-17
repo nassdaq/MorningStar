@@ -1,0 +1,317 @@
+//! {{name}}: a Morningstar application.
+//!
+//! Everything the app is lives in this crate, once, for Android and iOS:
+//! its state ([`Model`]), what can happen to it ([`Message`]), what it
+//! looks like (`view`), and the work it asks the phone to do (`effects`).
+//! It never does I/O itself: work that takes time, such as keeping a value
+//! on the phone, is asked for as data and comes back as messages
+//! (ADR 0019), which is what lets `tests/` drive the whole app with no
+//! device.
+//!
+//! Start here: add a screen to [`Screen`], draw it in `view`, and give it
+//! a message. `README.md` has the commands; `SCREENS.md` lists the
+//! screens.
+
+@@if server
+mod json;
+
+use std::time::Duration;
+
+@@end
+use morningstar::ui::prelude::*;
+
+/// The name on the first screen. The name under the launcher icon is in
+/// `Cargo.toml`.
+pub const APP_NAME: &str = "{{name_str}}";
+/// The key the person's name is stored under on the phone.
+pub const NAME_KEY: &str = "name";
+/// The most characters a name may have.
+pub const NAME_LIMIT: usize = 40;
+@@if server
+/// Where the app's server is: the development machine, reached from a
+/// phone through `adb reverse tcp:{{port}} tcp:{{port}}`. A build for a
+/// deployed server names it at compile time instead, which keeps the
+/// address out of the repository:
+/// `{{env}}_SERVER_URL=https://... tools/build-android.sh`.
+pub const SERVER_URL: &str = match DEPLOYED {
+    Some(url) => url,
+    None => "http://127.0.0.1:{{port}}",
+};
+const DEPLOYED: Option<&str> = option_env!("{{env}}_SERVER_URL");
+/// How long the server is waited for.
+pub const SERVER_TIMEOUT: Duration = Duration::from_secs(10);
+@@end
+
+/// The brand colour. The launcher icon (`assets/icon.png`) uses it too.
+const ACCENT: Color = hex(0x{{accent}});
+
+/// The app's theme: the default light theme with the brand's colour.
+const THEME: Theme = Theme {
+    colors: Colors {
+        primary: ACCENT,
+        ..Theme::LIGHT.colors
+    },
+    ..Theme::LIGHT
+};
+
+/// The screens there are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Screen {
+    /// Where the app opens.
+    Home,
+    /// Where the person says what they are called.
+    Settings,
+}
+
+/// What a tap, a keystroke or an answer asks of the application.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Message {
+    /// Show this screen on top of the current one.
+    Open(Screen),
+    /// The Back button of a screen.
+    Back,
+    /// The name field changed.
+    Draft(String),
+    /// "Save": keep the name and go back.
+    Save,
+@@if server
+    /// "Ask the server".
+    Ask,
+    /// The server's answer, or why there was none.
+    Answered(Result<HttpResponse, HttpError>),
+@@end
+}
+
+/// Work `update` has decided on and `effects` has not started yet.
+enum Start {
+    Store(String),
+@@if server
+    Ask,
+@@end
+}
+
+/// The application's state.
+pub struct Model {
+    screens: Navigator<Screen>,
+    start: Vec<Start>,
+    /// This installation's id, handed over by the host at setup.
+    pub install_id: String,
+    /// What the person is called; empty until they say.
+    pub name: String,
+    /// The name field as it is being typed.
+    pub draft: String,
+@@if server
+    /// What the server last said, as a sentence.
+    pub server: String,
+    /// A request is out: the button waits for its answer.
+    pub asking: bool,
+@@end
+}
+
+impl Model {
+    /// The application as it starts.
+    pub fn new() -> Self {
+        Self::on(Screen::Home)
+    }
+
+    /// The application opened on `screen` with nothing under it, as a
+    /// screenshot or a test of one screen wants it: no screen slides in,
+    /// and Back from it is the system's.
+    pub fn on(screen: Screen) -> Self {
+        Self {
+            screens: Navigator::new(screen),
+            start: Vec::new(),
+            install_id: String::new(),
+            name: String::new(),
+            draft: String::new(),
+@@if server
+            server: "Not asked yet.".to_owned(),
+            asking: false,
+@@end
+        }
+    }
+
+    /// The screen being shown.
+    pub fn screen(&self) -> Screen {
+        *self.screens.current()
+    }
+
+    fn home(&self) -> Element<Message> {
+        let greeting = if self.name.is_empty() {
+            "Hello.".to_owned()
+        } else {
+            format!("Hello, {}.", self.name)
+        };
+        col![
+            text(APP_NAME).title(),
+            text(greeting).fill_width(),
+            text("This screen is drawn by src/lib.rs. Change it and run the tests.")
+                .caption()
+                .muted()
+                .fill_width(),
+            Button::new("Settings")
+                .on_press(Message::Open(Screen::Settings))
+                .fill_width()
+                .id("open-settings"),
+@@if server
+            Button::new("Ask the server")
+                .on_press(Message::Ask)
+                .fill_width()
+                .id("ask"),
+            text(self.server.clone()).caption().muted().fill_width(),
+@@end
+        ]
+        .gap(16.0)
+        .padding(20.0)
+        .fill_width()
+        .into()
+    }
+
+    fn settings(&self) -> Element<Message> {
+        col![
+            row![
+                Button::new("Back")
+                    .plain()
+                    .on_press(Message::Back)
+                    .id("back"),
+                text("Settings").title(),
+            ]
+            .gap(12.0)
+            .cross_align(CrossAlign::Center)
+            .fill_width(),
+            text("Your name").caption().muted().fill_width(),
+            // A text input is only its text: the box around it is the
+            // frame, which a tap anywhere focuses.
+            row![
+                TextInput::new(self.draft.clone())
+                    .placeholder("Ada")
+                    .max_length(NAME_LIMIT)
+                    .on_input(Message::Draft)
+                    .on_submit(Message::Save)
+                    .semantic_label("Your name")
+                    .id("name")
+                    .fill_width(),
+            ]
+            .height(52.0)
+            .cross_align(CrossAlign::Center)
+            .padding_xy(16.0, 0.0)
+            .radius(12.0)
+            .border(1.0, ThemeColor::Divider)
+            .focused_border(2.0, ThemeColor::Primary)
+            .fill_width(),
+            Button::new("Save")
+                .on_press(Message::Save)
+                .fill_width()
+                .id("save"),
+            text("Kept on this phone, and still there the next time the app opens.")
+                .caption()
+                .muted()
+                .fill_width(),
+        ]
+        .gap(16.0)
+        .padding(20.0)
+        .fill_width()
+        .into()
+    }
+}
+
+impl Default for Model {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Application for Model {
+    type Message = Message;
+
+    fn setup(&mut self, setup: &mut Setup<'_>) {
+        setup.add_font(include_bytes!("../assets/fonts/NotoSans-Regular.ttf"));
+        setup.add_font(include_bytes!("../assets/fonts/NotoSans-Bold.ttf"));
+        // Known before the first frame, with no request and no waiting.
+        self.install_id = setup.install_id().to_owned();
+        self.name = setup.stored(NAME_KEY).unwrap_or_default().to_owned();
+    }
+
+    fn theme(&self) -> Theme {
+        THEME
+    }
+
+    fn view(&self) -> Element<Message> {
+        let screen = self.screen();
+        let content = match screen {
+            Screen::Home => self.home(),
+            Screen::Settings => self.settings(),
+        };
+        // The id gives each screen its own scroll position and focus; the
+        // transition slides screens in the direction of the last change.
+        SafeArea::new(ScrollView::new(content).id(("scroll", screen)))
+            .id(screen)
+            .transition(self.screens.transition())
+            .into()
+    }
+
+    fn update(&mut self, message: Message) {
+        match message {
+            Message::Open(screen) => {
+                if screen == Screen::Settings {
+                    self.draft = self.name.clone();
+                }
+                self.screens.push(screen);
+            }
+            Message::Back => {
+                self.screens.back();
+            }
+            Message::Draft(draft) => self.draft = draft,
+            Message::Save => {
+                self.name = self.draft.trim().to_owned();
+                self.start.push(Start::Store(self.name.clone()));
+                self.screens.back();
+            }
+@@if server
+            Message::Ask => {
+                if !self.asking {
+                    self.asking = true;
+                    self.server = "Waiting for the server...".to_owned();
+                    self.start.push(Start::Ask);
+                }
+            }
+            Message::Answered(result) => {
+                self.asking = false;
+                self.server = match result {
+                    Ok(response) if response.is_success() => {
+                        json::string(response.text().unwrap_or_default(), "message")
+                            .unwrap_or_else(|| "The server answered without a message.".to_owned())
+                    }
+                    Ok(response) => format!("The server answered {}.", response.status),
+                    Err(error) => format!("No answer: {error}."),
+                };
+            }
+@@end
+        }
+    }
+
+    /// The system's Back: leaves the screen on top; on the first screen it
+    /// is left to the system, which leaves the app.
+    fn back(&mut self) -> bool {
+        self.screens.back()
+    }
+
+    fn effects(&mut self, out: &mut Effects<Message>) {
+        for start in self.start.drain(..) {
+            match start {
+                Start::Store(name) => out.store(NAME_KEY, name),
+@@if server
+                Start::Ask => out.http(
+                    HttpRequest::post(format!("{SERVER_URL}/v1/hello"))
+                        .header("X-Device-Id", self.install_id.clone())
+                        .json_body(format!("{{\"name\":{}}}", json::quoted(&self.name)))
+                        .timeout(SERVER_TIMEOUT),
+                    Message::Answered,
+                ),
+@@end
+            }
+        }
+    }
+}
+
+morningstar::app!(Ui::new(Model::new()));

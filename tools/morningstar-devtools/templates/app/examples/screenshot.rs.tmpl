@@ -1,0 +1,37 @@
+//! Renders the app's screens to PNGs on this machine's GPU. No device.
+//!
+//!   cargo run -p {{package}} --example screenshot [output-dir] [scale]
+//!
+//! Look at them after changing anything visual: passing tests do not show
+//! that a screen looks right.
+
+use std::path::PathBuf;
+
+use morningstar::ui::Ui;
+use morningstar::{FrameInfo, Insets, SurfaceSize};
+use morningstar_devtools::screenshot_frame;
+
+use {{crate}}::{Model, Screen};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut arguments = std::env::args().skip(1);
+    let directory = PathBuf::from(arguments.next().unwrap_or_else(|| "out".to_owned()));
+    let scale: f32 = match arguments.next() {
+        Some(scale) => scale.parse()?,
+        None => 3.0,
+    };
+    std::fs::create_dir_all(&directory)?;
+    // 360 x 800 dp with a 32 dp status bar and a 20 dp gesture bar.
+    let size = SurfaceSize::new((360.0 * scale) as u32, (800.0 * scale) as u32);
+    let info = FrameInfo::new(size)
+        .with_scale(scale)
+        .with_insets(Insets::new(0.0, 32.0 * scale, 0.0, 20.0 * scale));
+
+    for (screen, name) in [(Screen::Home, "home"), (Screen::Settings, "settings")] {
+        let mut ui = Ui::new(Model::on(screen));
+        let path = directory.join(format!("{name}.png"));
+        std::fs::write(&path, screenshot_frame(&mut ui, &info)?)?;
+        println!("{}", path.display());
+    }
+    Ok(())
+}

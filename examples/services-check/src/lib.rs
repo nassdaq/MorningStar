@@ -313,6 +313,12 @@ impl Application for ServicesCheck {
                     LiveEvent::Data(data) => {
                         format!("{} bytes of data arrived", data.payload.len())
                     }
+                    // Where the sound is (ADR 0042): the device smoke test
+                    // of a headset is to connect one and read this line.
+                    LiveEvent::AudioRoutes(routes) => format!(
+                        "sound on {:?}; routes: {:?}",
+                        routes.selected, routes.available
+                    ),
                 };
             }
             Message::Loaded(value) => {

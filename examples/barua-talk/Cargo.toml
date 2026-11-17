@@ -13,12 +13,13 @@ publish.workspace = true
 # `services`: the app joins live rooms (ADR 0038), so its Android host is
 # built with the LiveKit client; its calls have video (`live-video`: the
 # camera permission) and can share the phone's screen (`live-screen`: the
-# foreground services that needs), ADR 0039. An app that does not name a
-# service carries none of it.
+# foreground services that needs), ADR 0039; and go on behind another app
+# or a locked screen under a notification (`live-background`), ADR 0042.
+# An app that does not name a service carries none of it.
 [package.metadata.morningstar]
 name = "Barua Talk"
 icon = "assets/icon.png"
-services = ["live", "live-video", "live-screen"]
+services = ["live", "live-video", "live-screen", "live-background"]
 
 [lib]
 # cdylib for Android; tools/build-ios.sh requests the static library itself.

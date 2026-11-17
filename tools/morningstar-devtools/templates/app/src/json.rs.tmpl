@@ -1,0 +1,88 @@
+//! The little JSON this app needs to talk to its server: writing one
+//! string and reading one. When the app needs lists and numbers, copy a
+//! whole reader (`examples/atlas/src/json.rs` is one) rather than growing
+//! this.
+
+/// `text` as a JSON string, quotes included.
+pub fn quoted(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for character in text.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The string under `key` in the object `body`, or `None` if there is
+/// none. It looks for the first `"key":` followed by a string, so it is
+/// only right for a key that no string value before it contains.
+pub fn string(body: &str, key: &str) -> Option<String> {
+    let after_key = body.split_once(&quoted(key))?.1.trim_start();
+    let value = after_key.strip_prefix(':')?.trim_start();
+    let mut characters = value.strip_prefix('"')?.chars();
+    let mut out = String::new();
+    loop {
+        match characters.next()? {
+            '"' => return Some(out),
+            '\\' => match characters.next()? {
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                'b' => out.push('\u{8}'),
+                'f' => out.push('\u{c}'),
+                'u' => {
+                    let digits: String = characters.by_ref().take(4).collect();
+                    let code = u32::from_str_radix(&digits, 16).ok()?;
+                    // A lone surrogate half cannot be a `char`.
+                    out.push(char::from_u32(code).unwrap_or('\u{fffd}'));
+                }
+                other => out.push(other),
+            },
+            character => out.push(character),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{quoted, string};
+
+    #[test]
+    fn what_is_written_is_read_back() {
+        for text in [
+            "Ada",
+            "",
+            "a \"quoted\" word",
+            "back\\slash",
+            "two\nlines",
+            "\u{1}",
+        ] {
+            let body = format!("{{\"message\":{}}}", quoted(text));
+            assert_eq!(string(&body, "message").as_deref(), Some(text));
+        }
+    }
+
+    #[test]
+    fn spaces_escapes_and_other_keys_are_read() {
+        let body = r#"{"visits": 3, "message" : "Habari, Ada.", "x": "y"}"#;
+        assert_eq!(string(body, "message").as_deref(), Some("Habari, Ada."));
+        assert_eq!(string(body, "x").as_deref(), Some("y"));
+    }
+
+    #[test]
+    fn what_is_not_a_string_or_not_there_is_none() {
+        assert_eq!(string(r#"{"message": 3}"#, "message"), None);
+        assert_eq!(string(r#"{"other": "x"}"#, "message"), None);
+        assert_eq!(string(r#"{"message": "cut of"#, "message"), None);
+        assert_eq!(string("", "message"), None);
+    }
+}

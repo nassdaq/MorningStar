@@ -631,10 +631,14 @@ real Barua Talk API turned out to differ from its document (details in
   `POST /v1/recordings {"call": …}` answers `409 recording_unsupported`.
   Recording a room works as described. The Video call screen's recording
   toggle should treat `recording_unsupported` as "not available".
-- **On 2026-11-15 the real service answered `500` to making a room and to
-  ringing a call** (its room backend was not answering). The app sees
-  `502 upstream_failed` for `POST /v1/rooms` and `POST /v1/calls`, and
-  nothing is stored. Everything else in this contract behaves as written.
+- **Making a room and ringing a call work against the real service.**
+  For part of 2026-11-15 it answered `500` to both (its room backend was
+  not answering); later that day it answered `201`, and the opt-in live
+  test (`BARUA_LIVE=1 node --test test/live.test.js`: a room made,
+  ticketed, written in and closed; a call rung, accepted and hung up, and
+  one declined) passed 3 of 3. Should upstream fail like that again, the
+  app sees `502 upstream_failed` for `POST /v1/rooms` and
+  `POST /v1/calls`, and nothing is stored.
 - `POST` bodies may be left out where every field is optional
   (`…/ticket`, `…/read`, `…/accept`, `…/decline`, `…/hangup`, `…/close`,
   `…/stop`).

@@ -223,7 +223,7 @@ final class HostServices: NSObject, URLSessionDataDelegate, AVAudioRecorderDeleg
             case MORNINGSTAR_SERVICE_LIVE_LEAVE, MORNINGSTAR_SERVICE_LIVE_MICROPHONE,
                 MORNINGSTAR_SERVICE_LIVE_SPEAKER, MORNINGSTAR_SERVICE_LIVE_DATA,
                 MORNINGSTAR_SERVICE_LIVE_CAMERA, MORNINGSTAR_SERVICE_LIVE_SWITCH_CAMERA,
-                MORNINGSTAR_SERVICE_LIVE_SCREEN_SHARE:
+                MORNINGSTAR_SERVICE_LIVE_SCREEN_SHARE, MORNINGSTAR_SERVICE_LIVE_AUDIO_ROUTE:
                 break
             default:
                 // A library newer than this host. Nothing here knows whether

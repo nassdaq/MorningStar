@@ -1,0 +1,31 @@
+# {{name}} server
+
+A small Node server with no dependencies (Node 20 or newer). What it
+answers is in `API.md`.
+
+```sh
+cp .env.example .env    # optional: the defaults work on a development machine
+npm start               # listens on 127.0.0.1:{{port}}
+npm test                # node --test
+curl http://127.0.0.1:{{port}}/v1/health
+```
+
+A phone on USB reaches it through `adb reverse tcp:{{port}} tcp:{{port}}`.
+
+## Where things are
+
+| File | Holds |
+| --- | --- |
+| `src/config.js` | Settings from the environment and `.env` |
+| `src/app.js` | The pipeline (token, device id, rate limit, error shape, log line) and the routes |
+| `src/server.js` | Starts it |
+| `test/app.test.js` | The server through real HTTP on a free port |
+
+## Rules worth keeping
+
+- Secrets live in `.env` only, which git ignores. `.env.example` names the
+  settings and holds no real value.
+- The log line is method, path, status and time: never a header, a body
+  or a token.
+- The hello count is in memory. Put a real resource in a database and
+  give the tests an in-memory stand-in.

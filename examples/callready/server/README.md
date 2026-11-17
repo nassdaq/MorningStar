@@ -162,8 +162,16 @@ The learner's name and device id are sent to neither.
 - `429 rate_limited`, in the usual error shape and with a `Retry-After`
   header, when a device sends more than `RATE_LIMIT_PER_MIN` requests in a
   minute.
-- `500 internal_error` for an unexpected failure (the database being down,
-  for example), with a fixed message.
+- `500 internal_error` for an unexpected failure, with a fixed message.
+- `503 database_unavailable`, with `Retry-After: 5`, when the database
+  cannot be reached. That does not stop the server: at start-up the first
+  connection is tried three times, after which the server listens anyway
+  and `GET /v1/health` says `database: false`. Every request that needs
+  the database tries to connect again, at most once every three seconds
+  (`DATABASE_RETRY_MS`), runs the migration when it first succeeds, and
+  carries on; nothing has to be restarted. A connection that drops in the
+  middle of a query, an unhandled rejection and an uncaught exception are
+  logged and survived (`test/robust.test.js`).
 - `GET /v1/health` does not require `X-Device-Id` (it does require the token
   when `APP_TOKEN` is set). `ok` is true when the model key is present and
   the database answers.

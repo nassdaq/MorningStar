@@ -1,0 +1,96 @@
+//! A phone for the tests: the app, a frame to draw into, and fingers.
+//! Nothing here needs a device or a GPU.
+
+#![allow(dead_code)]
+
+use std::time::Duration;
+
+use morningstar::ui::Ui;
+use morningstar::{
+    App, Frame, FrameInfo, HostState, Insets, Point, PointerEvent, PointerPhase, Rect, SurfaceSize,
+    TextInputEvent,
+};
+
+use {{crate}}::Model;
+
+/// 360 x 800 dp with a 32 dp status bar and a 20 dp gesture bar.
+pub fn phone(scale: f32) -> FrameInfo {
+    let size = SurfaceSize::new((360.0 * scale) as u32, (800.0 * scale) as u32);
+    FrameInfo::new(size)
+        .with_scale(scale)
+        .with_insets(Insets::new(0.0, 32.0 * scale, 0.0, 20.0 * scale))
+}
+
+pub struct Device {
+    pub ui: Ui<Model>,
+    frame: Frame,
+    info: FrameInfo,
+    elapsed: Duration,
+}
+
+impl Device {
+    /// A phone on which the app has just been opened. `Ui::testing` keeps
+    /// what the app asks for (requests, stored values) for the test to
+    /// look at and answer.
+    pub fn new(app: Model, host: &HostState) -> Self {
+        let mut ui = Ui::testing(app);
+        let frame = Frame::for_app_with_host(&mut ui, host);
+        let mut device = Self {
+            ui,
+            frame,
+            info: phone(3.0),
+            elapsed: Duration::ZERO,
+        };
+        device.draw();
+        device
+    }
+
+    pub fn fresh() -> Self {
+        Self::new(Model::new(), &HostState::new())
+    }
+
+    pub fn draw(&mut self) {
+        self.frame.begin();
+        let info = self.info.with_elapsed(self.elapsed);
+        self.ui.frame(&info, &mut self.frame);
+    }
+
+    /// Lets a transition between screens finish.
+    pub fn settle(&mut self) {
+        for _ in 0..3 {
+            self.elapsed += Duration::from_millis(400);
+            self.draw();
+        }
+    }
+
+    fn touch(&mut self, phase: PointerPhase, position: Point) {
+        self.ui.pointer(&PointerEvent {
+            id: 1,
+            phase,
+            position,
+        });
+    }
+
+    /// A tap on the widget with this id.
+    pub fn tap(&mut self, id: impl std::hash::Hash) {
+        // What is on screen is what is tapped: an answer that arrived since
+        // the last frame has been drawn by the time a finger comes down.
+        self.draw();
+        let rect: Rect = self.ui.rect_of(id).expect("the widget is on screen");
+        self.touch(PointerPhase::Down, rect.center());
+        self.draw();
+        self.touch(PointerPhase::Up, rect.center());
+        self.draw();
+        self.settle();
+    }
+
+    /// What the keyboard sends for typed text.
+    pub fn type_text(&mut self, text: &str) {
+        self.ui.text_input(&TextInputEvent::Commit(text.to_owned()));
+        self.draw();
+    }
+
+    pub fn app(&self) -> &Model {
+        self.ui.app()
+    }
+}

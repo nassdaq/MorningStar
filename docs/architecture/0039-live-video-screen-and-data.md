@@ -98,9 +98,9 @@ Barua Talk's APK is 34,291,318 bytes with all three, against 34,241,966 with `li
 - **No choice of what is received**: no simulcast layer, no pausing of a video that is off screen (it is still received and decoded; only the drawing stops).
 - **No sound of the shared screen**, no choice of resolution or frame rate, no choice of camera by name (front and back only).
 - **The notification** of a shared screen is not asked permission for (`POST_NOTIFICATIONS`, Android 13 and later): where notifications are off the system's own indicator is what shows.
-- **A room without a shared screen still ends in the background**, as in 0038. A voice call that survives the background is not this record.
+- **A room without a shared screen still ends in the background**, as in 0038 (unless it was joined with a notice: [0042](0042-live-rooms-in-the-background-and-audio-routes.md)). A voice call that survives the background is not this record.
 - **Data**: to everyone, never to chosen people; 15,000 bytes; no report of delivery.
-- As 0038: one room at a time, no Bluetooth headset.
+- As 0038: one room at a time. (Bluetooth headsets: [0042](0042-live-rooms-in-the-background-and-audio-routes.md).)
 
 ## Tests
 

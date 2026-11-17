@@ -1,0 +1,143 @@
+# Continuous integration for Morningstar.
+#
+# Four jobs. Three run on Linux for every push and pull request and need no
+# GPU; the fourth runs the whole test suite, pixel and fidelity tests
+# included, on a macOS runner (Metal, the only GPU these tests have ever
+# been verified on) and only for `main` and by hand, because a macOS minute
+# costs about ten times a Linux one. See benchmarks/README.md for what is
+# measured where, and docs/architecture/0043-continuous-integration.md for
+# why the jobs are split this way.
+#
+# No job uses a secret. The servers' tests that need a database or a model
+# key skip themselves when there is no `.env`, which there never is here.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # The toolchain everything in this repository was last verified with.
+  # `rust-toolchain.toml` says "stable", which on a runner is whatever is
+  # newest that week, with whatever lints it has added; CI should fail
+  # because of a change to the code, not because of the calendar. Moving
+  # this forward is a change of its own.
+  RUSTUP_TOOLCHAIN: "1.92.0"
+
+jobs:
+  rust:
+    name: Format, lint, tests without a GPU
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component clippy,rustfmt
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ env.RUSTUP_TOOLCHAIN }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            rust-${{ runner.os }}-${{ env.RUSTUP_TOOLCHAIN }}-
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The crates whose tests draw nothing: types, layout, text shaping and
+      # rasterising on the CPU. Everything else builds a renderer somewhere
+      # in its tests and runs in the `gpu` job.
+      - name: Tests that need no GPU
+        run: cargo test --locked -p morningstar-core -p morningstar-layout -p morningstar-text
+
+  android:
+    name: Android code type-checks and lints
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain and target
+        run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component clippy
+          rustup target add aarch64-linux-android --toolchain "$RUSTUP_TOOLCHAIN"
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-ndk
+            target
+          key: android-${{ runner.os }}-${{ env.RUSTUP_TOOLCHAIN }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            android-${{ runner.os }}-${{ env.RUSTUP_TOOLCHAIN }}-
+      - name: cargo-ndk
+        run: command -v cargo-ndk || cargo install cargo-ndk --version 4.1.2 --locked
+      # The runner image sets ANDROID_NDK_HOME to its default NDK. Only the
+      # Rust half of the host is checked here: no Gradle, no APK.
+      - name: Lint for arm64 Android
+        run: >
+          cargo ndk -t arm64-v8a clippy --locked
+          -p hello-gpu -p showcase -p services-check -p fundidesk
+          -p callready -p atlas -p barua-talk
+          -- -D warnings
+
+  servers:
+    name: Server tests (${{ matrix.app }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [atlas, callready, barua-talk]
+    defaults:
+      run:
+        working-directory: examples/${{ matrix.app }}/server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci
+      # No `.env` here: the tests against a real database, model or Talk
+      # API skip themselves, and everything else runs on in-memory fakes.
+      - run: npm test
+
+  gpu:
+    name: Every test, on a GPU (macOS, Metal)
+    # Ten times the price of a Linux minute: run by hand only (Actions tab,
+    # "Run workflow"), until its real cost has been seen once.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: gpu-${{ runner.os }}-${{ env.RUSTUP_TOOLCHAIN }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            gpu-${{ runner.os }}-${{ env.RUSTUP_TOOLCHAIN }}-
+      # Pixel tests of the renderer and the fidelity tests of every example
+      # against its design. `-j2` keeps two test binaries from holding the
+      # one GPU at once more than they need to.
+      - name: All tests
+        run: cargo test --workspace --locked -j2

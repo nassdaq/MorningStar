@@ -8,8 +8,9 @@
 use std::collections::{HashMap, VecDeque};
 
 use morningstar_core::{
-    AudioClip, AudioError, HttpError, HttpRequest, HttpResponse, LiveDisconnect, LiveError,
-    LiveEvent, LiveJoin, Recording, ServiceCall, ServiceId, ServiceRequest, ServiceResult,
+    AudioClip, AudioError, HttpError, HttpRequest, HttpResponse, LiveAudioRoute, LiveDisconnect,
+    LiveError, LiveEvent, LiveJoin, Recording, ServiceCall, ServiceId, ServiceRequest,
+    ServiceResult,
 };
 
 use crate::scroll::ScrollTo;
@@ -59,6 +60,8 @@ pub struct LiveRoom {
     pub screen_share: bool,
     /// What it has sent to the room, oldest first: topic and payload.
     pub sent: Vec<(String, Vec<u8>)>,
+    /// The audio route it has asked for last (ADR 0042), if any.
+    pub audio_route: Option<LiveAudioRoute>,
 }
 
 /// The work an application wants started: requests to the platform, each
@@ -300,6 +303,10 @@ impl<M> Effects<M> {
     ///   [`LiveError::PermissionDenied`].
     /// * There is one room at a time: joining another ends this one with
     ///   [`LiveDisconnect::Replaced`].
+    /// * A room joined with [`LiveJoin::background`], in an app built with
+    ///   the `live-background` service, goes on behind another app or a
+    ///   locked screen under a notification, from which the user can end
+    ///   it ([`LiveDisconnect::HungUp`]); see ADR 0042. Any other:
     /// * A room does not outlive the screen: when the app goes to the
     ///   background the host leaves it and the application is told
     ///   [`LiveDisconnect::Hidden`]. It may join again when it is back.
@@ -401,6 +408,21 @@ impl<M> Effects<M> {
         self.push(ServiceRequest::LiveScreenShare(on), None);
     }
 
+    /// Sends the live room's sound to `route` (ADR 0042): the earpiece,
+    /// the loudspeaker, a wired headset or a Bluetooth one. There is no
+    /// message of its own: [`LiveEvent::AudioRoutes`], which also arrives
+    /// when the room connects and when a headset comes or goes, says which
+    /// routes there are and which is in use. Nothing happens when the
+    /// device has no such route now.
+    ///
+    /// ```ignore
+    /// // update: Message::Live(LiveEvent::AudioRoutes(routes)) => self.routes = routes,
+    /// out.set_live_audio_route(LiveAudioRoute::Bluetooth);
+    /// ```
+    pub fn set_live_audio_route(&mut self, route: LiveAudioRoute) {
+        self.push(ServiceRequest::LiveAudioRoute(route), None);
+    }
+
     /// Gives up on every request made before this call that has not been
     /// answered yet: their messages will never arrive. The platform may
     /// still finish the work (a request already sent reaches the server),
@@ -432,8 +454,9 @@ enum Carrier {
     /// A real host, through the engine. `attached` once it has asked for
     /// requests; until then nobody is known to be there.
     Host { attached: bool },
-    /// The test driver.
-    Driver(Driver),
+    /// The test driver. Boxed: it is much the larger of the two, and a
+    /// real application carries only the other.
+    Driver(Box<Driver>),
 }
 
 /// Stands in for a host: keeps stored values in memory, lets a closure
@@ -490,12 +513,12 @@ impl<M> EffectState<M> {
 
     pub(crate) fn with_driver(fake: FakeHost) -> Self {
         Self {
-            carrier: Carrier::Driver(Driver {
+            carrier: Carrier::Driver(Box::new(Driver {
                 fake,
                 held: Vec::new(),
                 stored: HashMap::new(),
                 live: None,
-            }),
+            })),
             ..Self::new()
         }
     }
@@ -652,6 +675,11 @@ impl<M> EffectState<M> {
                     room.screen_share = *on;
                 }
             }
+            ServiceRequest::LiveAudioRoute(route) => {
+                if let Some((_, room)) = &mut driver.live {
+                    room.audio_route = Some(*route);
+                }
+            }
             ServiceRequest::LiveData { topic, payload, .. } => {
                 if let Some((_, room)) = &mut driver.live
                     && payload.len() <= morningstar_core::MAX_LIVE_DATA_BYTES
@@ -671,6 +699,7 @@ impl<M> EffectState<M> {
                         camera_switches: 0,
                         screen_share: false,
                         sent: Vec::new(),
+                        audio_route: None,
                         join: join.clone(),
                     },
                 ));

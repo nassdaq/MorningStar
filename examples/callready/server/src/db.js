@@ -10,6 +10,34 @@
 
 import pg from 'pg';
 
+import { DatabaseDown } from './errors.js';
+
+const NETWORK_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EPIPE',
+]);
+
+/**
+ * Whether an error from `pg` means "the database could not be reached" (as
+ * opposed to "the query was wrong", which is a bug and stays a 500).
+ */
+export function isConnectionError(err) {
+  if (!err) return false;
+  const code = String(err.code ?? '');
+  if (NETWORK_CODES.has(code)) return true;
+  // SQLSTATE class 08 (connection exception), 57P0x (shutdown), 53300 (too many connections).
+  if (/^08/.test(code) || /^57P0/.test(code) || code === '53300') return true;
+  return /connection terminated|timeout exceeded when trying to connect|connection timeout|query read timeout|client has encountered a connection error|getaddrinfo/i.test(
+    String(err.message ?? ''),
+  );
+}
+
 // Each entry runs once, in order, inside a transaction. Add to the end; do
 // not edit an entry that has shipped.
 const MIGRATIONS = [
@@ -89,8 +117,8 @@ export function connectionOptions(databaseUrl) {
   return { connectionString: databaseUrl };
 }
 
-export function createDb(config, log) {
-  const pool = new pg.Pool({
+export function createDb(config, log, { Pool = pg.Pool, now = Date.now } = {}) {
+  const realPool = new Pool({
     ...connectionOptions(config.databaseUrl),
     max: 5,
     // The database is remote and a new TLS connection costs most of a second,
@@ -99,10 +127,109 @@ export function createDb(config, log) {
     idleTimeoutMillis: 5 * 60 * 1000,
     connectionTimeoutMillis: 10000,
     statement_timeout: 15000,
+    // The same limit on this side of the wire: a connection that has gone
+    // silent (a network that dropped it without saying so) fails the query
+    // instead of holding the request for ever.
+    query_timeout: 20000,
+    keepAlive: true,
     application_name: 'callready-server',
   });
   // An idle client dropping its connection must not crash the process.
-  pool.on('error', (err) => log.error('database idle connection error', err));
+  realPool.on('error', (err) => log.error('database idle connection error', err));
+  // Nor must one that drops while a query holds it: the pool listens to a
+  // connection only while it is idle, and an `error` nobody listens to is
+  // an uncaught exception. The query itself fails through its own promise.
+  realPool.on('connect', (client) => {
+    client.on('error', (err) => log.error('database connection error', err));
+  });
+
+  let migrated = false;
+  let migrating = null;
+  let lastFailure = -Infinity;
+
+  /**
+   * Makes sure the schema is there. One attempt at a time, and after a
+   * failed one no other for `databaseRetryMs`: a database that is down is
+   * not hammered by every request, and one that comes back is found by the
+   * first request after that pause. This is what lets the server start,
+   * and keep running, while the database cannot be reached.
+   */
+  function ensure() {
+    if (migrated) return Promise.resolve();
+    if (migrating) return migrating;
+    if (now() - lastFailure < config.databaseRetryMs) return Promise.reject(new DatabaseDown());
+    migrating = (async () => {
+      try {
+        await migrate();
+        migrated = true;
+        log.info('database ready');
+      } catch (err) {
+        lastFailure = now();
+        log.error('database not reachable; will try again', err);
+        throw new DatabaseDown(err);
+      } finally {
+        migrating = null;
+      }
+    })();
+    return migrating;
+  }
+
+  /** A connection problem becomes `DatabaseDown` (a 503); anything else stays what it is. */
+  function translate(err) {
+    if (isConnectionError(err)) {
+      log.error('database query could not connect', err);
+      return new DatabaseDown(err);
+    }
+    return err;
+  }
+
+  // Every query of the functions below goes through here: the schema is
+  // made sure of first, and a lost connection is named as such.
+  const pool = {
+    async query(text, params) {
+      await ensure();
+      try {
+        return await realPool.query(text, params);
+      } catch (err) {
+        throw translate(err);
+      }
+    },
+    async connect() {
+      await ensure();
+      try {
+        return await realPool.connect();
+      } catch (err) {
+        throw translate(err);
+      }
+    },
+  };
+
+  async function migrate() {
+    const client = await realPool.connect();
+    try {
+      await client.query('begin');
+      // Two servers starting together must not race each other.
+      await client.query("select pg_advisory_xact_lock(hashtext('callready_schema_version'))");
+      await client.query(
+        `create table if not exists callready_schema_version (
+           version    integer primary key,
+           applied_at timestamptz not null default now()
+         )`,
+      );
+      const { rows } = await client.query('select coalesce(max(version), 0)::int as version from callready_schema_version');
+      for (let version = rows[0].version + 1; version <= MIGRATIONS.length; version += 1) {
+        await client.query(MIGRATIONS[version - 1]);
+        await client.query('insert into callready_schema_version (version) values ($1)', [version]);
+        log.info(`database migrated to schema version ${version}`);
+      }
+      await client.query('commit');
+    } catch (err) {
+      await client.query('rollback').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
 
   async function transaction(work) {
     const client = await pool.connect();
@@ -113,31 +240,20 @@ export function createDb(config, log) {
       return result;
     } catch (err) {
       await client.query('rollback').catch(() => {});
-      throw err;
+      throw translate(err);
     } finally {
       client.release();
     }
   }
 
   return {
+    /** Migrates now; throws what went wrong. `ensure` is the patient form. */
     async migrate() {
-      await transaction(async (client) => {
-        // Two servers starting together must not race each other.
-        await client.query("select pg_advisory_xact_lock(hashtext('callready_schema_version'))");
-        await client.query(
-          `create table if not exists callready_schema_version (
-             version    integer primary key,
-             applied_at timestamptz not null default now()
-           )`,
-        );
-        const { rows } = await client.query('select coalesce(max(version), 0)::int as version from callready_schema_version');
-        for (let version = rows[0].version + 1; version <= MIGRATIONS.length; version += 1) {
-          await client.query(MIGRATIONS[version - 1]);
-          await client.query('insert into callready_schema_version (version) values ($1)', [version]);
-          log.info(`database migrated to schema version ${version}`);
-        }
-      });
+      await migrate();
+      migrated = true;
     },
+
+    ensure,
 
     async ping() {
       await pool.query('select 1');
@@ -149,7 +265,7 @@ export function createDb(config, log) {
     },
 
     async close() {
-      await pool.end();
+      await realPool.end();
     },
 
     /** The device's profile row, created with defaults on first sight. */

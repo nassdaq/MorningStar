@@ -1,0 +1,60 @@
+# {{name}} server API
+
+The contract between the app (`../src/lib.rs`) and this server
+(`src/app.js`). Change the three together.
+
+```
+Base URL   http://127.0.0.1:{{port}}   (development)
+Content    application/json
+```
+
+## Every request
+
+- `X-Device-Id`: who is asking, 8 to 64 characters of `A-Z a-z 0-9 _ -`.
+  The app sends its installation id. Not needed for `/v1/health`.
+- `Authorization: Bearer <token>`: only when the server was started with
+  `APP_TOKEN`. Not needed for `/v1/health`.
+- A device may make `RATE_LIMIT_PER_MINUTE` requests a minute (60 unless
+  set). Beyond that the answer is `429` with `Retry-After` in seconds.
+
+## Errors
+
+Every error is JSON with a code for programs and a sentence for people:
+
+```json
+{"error": {"code": "bad_request", "message": "The body must be a JSON object."}}
+```
+
+| Status | Code | When |
+| --- | --- | --- |
+| 400 | `bad_request` | A missing or malformed device id, body or field |
+| 401 | `unauthorized` | A token is required and was missing or wrong |
+| 404 | `not_found` | No such address |
+| 405 | `method_not_allowed` | The address exists, the method does not |
+| 413 | `too_large` | A body over 16 KB |
+| 429 | `rate_limited` | Too many requests this minute |
+| 500 | `internal_error` | A fault in the server; the log has it |
+
+## `GET /v1/health`
+
+Whether the server is up. **200** `{"ok": true}`.
+
+## `POST /v1/hello`
+
+The example resource: says hello and counts how often this device has.
+
+```json
+{"name": "Ada"}
+```
+
+`name` is optional, a string of at most 40 characters. **200**
+
+```json
+{"message": "Hello, Ada. That is 3 from this phone.", "count": 3}
+```
+
+## `GET /v1/hello`
+
+**200** `{"count": 3}`: how often this device has said hello.
+
+The count is kept in memory and starts again when the server restarts.

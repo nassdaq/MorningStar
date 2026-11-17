@@ -79,7 +79,7 @@ The microphone is the reason for every rule here. Each is tested where it can be
 | The user refuses the microphone | Not joined: `Failed(PermissionDenied)`. | |
 | Muting fails | The room ends with `Failed`. | `MorningstarLive.setMicrophone` |
 
-**A room does not continue in the background.** Android silences the microphone of a background app and may freeze its process unless a foreground service with a notification holds it; without one, a call that "continues" behind another app is a call that is silently broken, and until it breaks the user is heard from an app they cannot see. So this version ends the room, says so (`Hidden`), and lets the application join again on return, which Barua Talk does by itself. While a room is joined the host keeps the screen on (`FLAG_KEEP_SCREEN_ON`), since a screen that times out is the app leaving the screen. A call that survives the background needs a foreground service of type `microphone` and its notification; that is the next record, not this one.
+**A room does not continue in the background.** (Superseded by [0042](0042-live-rooms-in-the-background-and-audio-routes.md): a room joined with a notice, in an app built with `live-background`, does. What follows is still what happens to every other room.) Android silences the microphone of a background app and may freeze its process unless a foreground service with a notification holds it; without one, a call that "continues" behind another app is a call that is silently broken, and until it breaks the user is heard from an app they cannot see. So this version ends the room, says so (`Hidden`), and lets the application join again on return, which Barua Talk does by itself. While a room is joined the host keeps the screen on (`FLAG_KEEP_SCREEN_ON`), since a screen that times out is the app leaving the screen. A call that survives the background needs a foreground service of type `microphone` and its notification; that is the next record, not this one.
 
 ### Opt-in per app
 
@@ -212,7 +212,7 @@ Not built. Voice had to be whole first, and video cannot be finished properly wi
 - **Voice only** in this record. The camera, remote pictures, screen sharing and data messages are [0039](0039-live-video-screen-and-data.md), which also changes one thing said here: a room in which this device's screen is shared is not left when the app leaves the screen.
 - **One room at a time**, and no way to be in a room without the microphone permission (listening only).
 - **Not in the background.** Leaving the screen, or the screen locking, ends the room. There is no proximity sensor handling either: at the ear, the screen stays on.
-- **No Bluetooth headset.** The permissions for one are not declared or asked for. A wired headset is used when plugged in.
+- **No Bluetooth headset.** (No longer so: [0042](0042-live-rooms-in-the-background-and-audio-routes.md) reports and takes audio routes, Bluetooth included, and stops removing the permission older Androids need.) The permissions for one are not declared or asked for. A wired headset is used when plugged in.
 - No audio levels (only who is speaking), no choice of input device, no control of what is subscribed to. The media volume control of Barua Talk's call screen still changes a number only; the volume keys set the call's volume.
 - **The ticket is used as given.** It is not refreshed; a room that outlives its ticket's hour ends as the server ends it.
 - **`Failed(text)` is the SDK's wording** and is for logs. Applications show a sentence of their own.

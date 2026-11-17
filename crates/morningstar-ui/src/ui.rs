@@ -987,6 +987,51 @@ impl<A: Application> Ui<A> {
         }
     }
 
+    /// The app leaves the screen, as far as the live room is concerned:
+    /// the driver does what a host that can keep a room in the background
+    /// does (ADR 0042). A room joined with a
+    /// [`LiveBackground`](morningstar_core::LiveBackground) notice, or one
+    /// in which the application is sharing the screen (ADR 0039), goes on,
+    /// its camera off until the app is back; any other ends with
+    /// [`LiveDisconnect::Hidden`](morningstar_core::LiveDisconnect::Hidden),
+    /// delivered at once as on a device. Returns true if a room goes on.
+    ///
+    /// A device whose app was built without `live-background` ends the
+    /// room whatever the join said; a test of that delivers the `Hidden`
+    /// event itself with [`live_event`](Self::live_event).
+    pub fn live_app_hidden(&mut self) -> bool {
+        let Some((id, room)) = self.effects.live() else {
+            return false;
+        };
+        if room.join.background.is_some() || room.screen_share {
+            return true;
+        }
+        self.deliver_result(
+            id,
+            ServiceResult::Live(LiveEvent::Disconnected(
+                morningstar_core::LiveDisconnect::Hidden,
+            )),
+        );
+        false
+    }
+
+    /// The user ends the room from its notification while the app is in
+    /// the background: the room is over
+    /// ([`LiveDisconnect::HungUp`](morningstar_core::LiveDisconnect::HungUp))
+    /// and the application is told at once. Returns false, and does
+    /// nothing, for a room that has no notice (it has no notification).
+    pub fn live_hang_up_from_notice(&mut self) -> bool {
+        match self.effects.live() {
+            Some((id, room)) if room.join.background.is_some() => self.deliver_result(
+                id,
+                ServiceResult::Live(LiveEvent::Disconnected(
+                    morningstar_core::LiveDisconnect::HungUp,
+                )),
+            ),
+            _ => false,
+        }
+    }
+
     fn answer_oldest(
         &mut self,
         wanted: impl Fn(&ServiceRequest) -> bool,

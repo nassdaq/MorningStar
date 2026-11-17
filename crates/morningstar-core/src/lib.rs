@@ -40,9 +40,9 @@ pub use semantics::{
 };
 pub use services::{
     AudioClip, AudioError, DEFAULT_HTTP_TIMEOUT, HostState, HttpError, HttpMethod, HttpRequest,
-    HttpResponse, LiveData, LiveDisconnect, LiveError, LiveEvent, LiveJoin, LiveParticipant,
-    LiveVideoSource, LiveVideoStream, MAX_HTTP_RESPONSE_BYTES, MAX_LIVE_DATA_BYTES,
-    MAX_RECORDING_DURATION, NO_INSTALL_ID, Recording, ServiceCall, ServiceId, ServiceRequest,
-    ServiceResult,
+    HttpResponse, LiveAudioRoute, LiveAudioRoutes, LiveBackground, LiveData, LiveDisconnect,
+    LiveError, LiveEvent, LiveJoin, LiveParticipant, LiveVideoSource, LiveVideoStream,
+    MAX_HTTP_RESPONSE_BYTES, MAX_LIVE_DATA_BYTES, MAX_RECORDING_DURATION, NO_INSTALL_ID, Recording,
+    ServiceCall, ServiceId, ServiceRequest, ServiceResult,
 };
 pub use video::{MAX_VIDEO_DIMENSION, VideoFrame, VideoRotation, VideoTrack, yuv_to_rgba};

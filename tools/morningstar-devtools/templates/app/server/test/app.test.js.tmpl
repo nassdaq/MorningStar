@@ -1,0 +1,119 @@
+// The server through real HTTP on a free port, with a clock the test owns.
+//
+//   npm test
+
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import { after, before, describe, test } from 'node:test';
+
+import { createApp } from '../src/app.js';
+import { loadConfig, parseEnv } from '../src/config.js';
+
+const quiet = { info() {}, error() {} };
+const DEVICE = 'test-device-0001';
+
+function start(overrides = {}) {
+  const clock = { at: 1_000_000 };
+  const config = { ...loadConfig({}, {}), ...overrides };
+  const app = createApp({ config, log: quiet, now: () => clock.at, background: false });
+  const server = http.createServer(app.handle);
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const base = `http://127.0.0.1:${server.address().port}`;
+      const ask = async (method, path, { body, headers = {}, device = DEVICE } = {}) => {
+        const res = await fetch(base + path, {
+          method,
+          headers: { ...(device ? { 'X-Device-Id': device } : {}), ...headers },
+          body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
+        });
+        return { status: res.status, headers: res.headers, json: await res.json() };
+      };
+      resolve({ ask, clock, stop: () => new Promise((done) => server.close(done)) });
+    });
+  });
+}
+
+describe('the server', () => {
+  let s;
+  before(async () => {
+    s = await start({ rateLimitPerMinute: 5 });
+  });
+  after(() => s.stop());
+
+  test('health needs no device id', async () => {
+    const r = await s.ask('GET', '/v1/health', { device: null });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json, { ok: true });
+  });
+
+  test('hello counts for each device and greets by name', async () => {
+    const first = await s.ask('POST', '/v1/hello', { body: { name: ' Ada ' } });
+    assert.equal(first.status, 200);
+    assert.deepEqual(first.json, { message: 'Hello, Ada. That is 1 from this phone.', count: 1 });
+    const second = await s.ask('POST', '/v1/hello', { body: {} });
+    assert.equal(second.json.message, 'Hello. That is 2 from this phone.');
+    assert.deepEqual((await s.ask('GET', '/v1/hello')).json, { count: 2 });
+    assert.deepEqual((await s.ask('GET', '/v1/hello', { device: 'another-device' })).json, { count: 0 });
+  });
+
+  test('errors have one shape', async () => {
+    const missing = await s.ask('GET', '/v1/nothing');
+    assert.equal(missing.status, 404);
+    assert.equal(missing.json.error.code, 'not_found');
+    assert.equal(typeof missing.json.error.message, 'string');
+
+    assert.equal((await s.ask('DELETE', '/v1/hello')).status, 405);
+    assert.equal((await s.ask('GET', '/v1/hello', { device: null })).json.error.code, 'bad_request');
+    assert.equal((await s.ask('GET', '/v1/hello', { device: 'short' })).status, 400);
+    assert.equal((await s.ask('POST', '/v1/hello', { body: 'not json', device: 'bad-body-device' })).status, 400);
+    assert.equal((await s.ask('POST', '/v1/hello', { body: { name: 7 }, device: 'bad-body-device' })).status, 400);
+    assert.equal((await s.ask('POST', '/v1/hello', { body: { name: 'x'.repeat(41) }, device: 'bad-body-device' })).status, 400);
+  });
+
+  test('a device is limited by the minute, and let in again after it', async () => {
+    const device = 'hurried-device';
+    for (let i = 0; i < 5; i += 1) assert.equal((await s.ask('GET', '/v1/hello', { device })).status, 200);
+    const refused = await s.ask('GET', '/v1/hello', { device });
+    assert.equal(refused.status, 429);
+    assert.equal(refused.json.error.code, 'rate_limited');
+    assert.ok(Number(refused.headers.get('retry-after')) >= 1);
+    assert.equal((await s.ask('GET', '/v1/health', { device })).status, 200, 'health is not counted');
+    s.clock.at += 60_000;
+    assert.equal((await s.ask('GET', '/v1/hello', { device })).status, 200);
+  });
+});
+
+describe('with a token', () => {
+  let s;
+  before(async () => {
+    s = await start({ appToken: 'a-token-for-the-test' });
+  });
+  after(() => s.stop());
+
+  test('everything but health needs it', async () => {
+    assert.equal((await s.ask('GET', '/v1/health')).status, 200);
+    assert.equal((await s.ask('GET', '/v1/hello')).status, 401);
+    assert.equal((await s.ask('GET', '/v1/hello', { headers: { Authorization: 'Bearer wrong' } })).status, 401);
+    const ok = await s.ask('GET', '/v1/hello', { headers: { Authorization: 'Bearer a-token-for-the-test' } });
+    assert.equal(ok.status, 200);
+  });
+});
+
+describe('settings', () => {
+  test('.env lines are read, comments and quotes handled', () => {
+    assert.deepEqual(parseEnv('# a comment\nPORT=9000\nAPP_TOKEN="a b"\n\nbroken line\nHOST = 0.0.0.0'), {
+      PORT: '9000',
+      APP_TOKEN: 'a b',
+      HOST: '0.0.0.0',
+    });
+  });
+
+  test('the environment wins over the file, and defaults hold no secret', () => {
+    const config = loadConfig({ PORT: '9100' }, { PORT: '9000', HOST: '0.0.0.0' });
+    assert.equal(config.port, 9100);
+    assert.equal(config.host, '0.0.0.0');
+    assert.equal(loadConfig({}, {}).appToken, '');
+    assert.equal(loadConfig({}, {}).port, {{port}});
+    assert.throws(() => loadConfig({ PORT: 'eighty' }, {}), /PORT must be/);
+  });
+});

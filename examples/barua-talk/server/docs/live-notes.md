@@ -29,6 +29,12 @@ answers.
 
 ## Where the real service differed
 
+**Later on 2026-11-15 points 1 and 2 below stopped being true**: `POST
+/rooms` and `POST /app-calls` answered `201`, and the opt-in live test
+passed 3 of 3 (a room made, ticketed, written in and closed; a call rung,
+accepted and hung up; one declined). They are kept as what the service
+does when its room backend is not answering.
+
 1. **`POST /rooms` answers `500` with an empty body.** Every attempt (five,
    with and without `displayName`, `identity` and `video`, over half an hour).
    No room appears in `GET /rooms` afterwards. So no room could be made,

@@ -213,6 +213,14 @@ export function createDb(config, log, { Pool = pg.Pool, now = Date.now } = {}) {
   });
   // An idle client dropping its connection must not crash the process.
   pool.on('error', (err) => log.error('database idle connection error', err));
+  // Nor must one that drops while a query holds it. The pool listens to a
+  // connection only while it is idle; one that is checked out and emits
+  // `error` with nobody listening (the network went away, or the query
+  // timed out on this side and the socket failed afterwards) is an
+  // uncaught exception. The query itself fails through its own promise.
+  pool.on('connect', (client) => {
+    client.on('error', (err) => log.error('database connection error', err));
+  });
 
   // `databaseSchema` was checked against a strict pattern in `config.js`,
   // so it is safe to place in SQL text.

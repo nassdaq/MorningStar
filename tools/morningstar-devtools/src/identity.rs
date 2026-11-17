@@ -16,7 +16,9 @@
 //! native library, in the case of `live`), and are therefore built into
 //! the host only for an app that says it uses them. With `live` an app
 //! may also name `live-video` (pictures, and a camera permission) and
-//! `live-screen` (sharing the screen, and a foreground service): ADR 0039.
+//! `live-screen` (sharing the screen, and a foreground service): ADR 0039;
+//! and `live-background` (a room that goes on while the app is not on
+//! screen, and its notification): ADR 0042.
 //!
 //! Every key is optional, and so is the table. The manifest is read by
 //! Cargo, not here: [`cargo_metadata`] runs `cargo metadata` and
@@ -43,7 +45,9 @@ const SERVICES_KEY: &str = "services";
 /// `live-video` and `live-screen` (ADR 0039) are parts of it, pictures
 /// with the camera and sharing the screen, and mean nothing without it;
 /// the host's build says so.
-pub const SERVICES: [&str; 3] = ["live", "live-video", "live-screen"];
+/// `live-background` (ADR 0042) is another: a room that goes on while the
+/// app is not on screen.
+pub const SERVICES: [&str; 4] = ["live", "live-video", "live-screen", "live-background"];
 
 /// Where an icon is looked for when the manifest does not say.
 const DEFAULT_ICON: &str = "assets/icon.png";
@@ -421,7 +425,7 @@ pub fn cargo_metadata(manifest_path: Option<&Path>) -> Result<String, IconError>
 }
 
 /// A display name both platforms take as it is.
-fn checked_name(name: &str) -> Result<String, IconError> {
+pub(crate) fn checked_name(name: &str) -> Result<String, IconError> {
     let bad = |reason| {
         Err(IconError::BadValue {
             key: "name",
@@ -454,7 +458,7 @@ fn checked_name(name: &str) -> Result<String, IconError> {
 
 /// An Android application id: two or more segments separated by dots, each
 /// a letter followed by letters, digits and underscores.
-fn checked_id(id: &str) -> Result<String, IconError> {
+pub(crate) fn checked_id(id: &str) -> Result<String, IconError> {
     let segment = |segment: &str| {
         segment.starts_with(|first: char| first.is_ascii_alphabetic())
             && segment
@@ -593,7 +597,7 @@ pub(crate) mod tests {
             assert!(error.contains(expected), "{metadata}: {error}");
             assert!(error.contains("`services`"), "{error}");
             assert!(
-                error.contains("the services are: live, live-video, live-screen"),
+                error.contains("the services are: live, live-video, live-screen, live-background"),
                 "{error}"
             );
         }

@@ -28,7 +28,11 @@ val iconResDir: File = providers.gradleProperty("morningstar.resDir")
 //         turned on. Adds the CAMERA permission (ADR 0039).
 //   live-screen: with `live`, sharing this device's screen. Adds the
 //         foreground-service permissions and two services (ADR 0039).
-val knownServices = setOf("live", "live-video", "live-screen")
+//   live-background: with `live`, a room joined with a notice goes on
+//         behind another app or a locked screen. Adds the foreground
+//         service of type microphone, its permissions and the permission
+//         to show its notification (ADR 0042).
+val knownServices = setOf("live", "live-video", "live-screen", "live-background")
 val services: Set<String> = providers.gradleProperty("morningstar.services")
     .getOrElse("")
     .split(',')
@@ -46,9 +50,12 @@ val services: Set<String> = providers.gradleProperty("morningstar.services")
 val liveRooms = "live" in services
 val liveVideo = "live-video" in services
 val liveScreen = "live-screen" in services
-if ((liveVideo || liveScreen) && !liveRooms) {
+val liveBackground = "live-background" in services
+// Both hold the microphone behind another app, with MorningstarLiveService.
+val liveHeld = liveScreen || liveBackground
+if ((liveVideo || liveScreen || liveBackground) && !liveRooms) {
     throw GradleException(
-        "morningstar.services names live-video or live-screen without live: " +
+        "morningstar.services names live-video, live-screen or live-background without live: " +
             "they are parts of the live room, and need it."
     )
 }
@@ -84,19 +91,45 @@ serviceManifest.writeText(buildString {
     // Sharing the screen needs a foreground service of type mediaProjection
     // (LiveKit's own), and the room that goes on behind another app needs
     // one of type microphone (MorningstarLiveService).
-    permission("FOREGROUND_SERVICE", !liveScreen)
+    // The same microphone service is what lets a room that was joined
+    // with a notice go on in the background (ADR 0042); its notification
+    // is asked of the user on Android 13 and later.
+    permission("FOREGROUND_SERVICE", !liveHeld)
     permission("FOREGROUND_SERVICE_MEDIA_PROJECTION", !liveScreen)
-    if (liveScreen) {
+    if (liveHeld) {
         permission("FOREGROUND_SERVICE_MICROPHONE", false)
+        permission("POST_NOTIFICATIONS", false)
+    }
+    if (liveRooms) {
+        // The screen goes dark at the ear while the sound is in the
+        // earpiece: a proximity wake lock. Granted at install.
+        permission("WAKE_LOCK", false)
+        // Up to Android 11 a Bluetooth headset is found through the
+        // BLUETOOTH permission LiveKit's audio library declares (granted
+        // at install; from Android 12 the platform's communication-device
+        // API is used and nothing is asked). Not a reason to hide the app
+        // from a device without Bluetooth.
+        appendLine(
+            """    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />"""
+        )
     }
     appendLine("    <application>")
-    if (liveScreen) {
+    if (liveBackground) {
+        // How MorningstarLive knows the app was built for it.
+        appendLine(
+            """        <meta-data android:name="dev.morningstar.live.background" android:value="true" />"""
+        )
+    }
+    if (liveHeld) {
+        // stopWithTask false: the service is told when the app is swiped
+        // away (onTaskRemoved) and leaves the room itself.
         appendLine(
             """        <service android:name="dev.morningstar.host.MorningstarLiveService" """ +
                 """android:exported="false" android:foregroundServiceType="microphone" """ +
-                """android:stopWithTask="true" />"""
+                """android:stopWithTask="false" />"""
         )
-    } else {
+    }
+    if (!liveScreen) {
         appendLine(
             """        <service android:name="io.livekit.android.room.track.screencapture.ScreenCaptureService" """ +
                 """tools:node="remove" />"""

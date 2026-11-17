@@ -45,10 +45,11 @@ pub use morningstar_runtime::{BarContent, CaretMove, SystemBars};
 // `Live*` types are the live room's (ADR 0038); `Video*` its pictures
 // (ADR 0039).
 pub use morningstar_runtime::{
-    AudioClip, AudioError, HostState, HttpError, HttpMethod, HttpRequest, HttpResponse, LiveData,
-    LiveDisconnect, LiveError, LiveEvent, LiveJoin, LiveParticipant, LiveVideoSource,
-    LiveVideoStream, MAX_LIVE_DATA_BYTES, Recording, ServiceCall, ServiceId, ServiceRequest,
-    ServiceResult, VideoFrame, VideoRotation, VideoTrack,
+    AudioClip, AudioError, HostState, HttpError, HttpMethod, HttpRequest, HttpResponse,
+    LiveAudioRoute, LiveAudioRoutes, LiveBackground, LiveData, LiveDisconnect, LiveError,
+    LiveEvent, LiveJoin, LiveParticipant, LiveVideoSource, LiveVideoStream, MAX_LIVE_DATA_BYTES,
+    Recording, ServiceCall, ServiceId, ServiceRequest, ServiceResult, VideoFrame, VideoRotation,
+    VideoTrack,
 };
 
 /// The declarative UI layer: widgets, layout, state and events.

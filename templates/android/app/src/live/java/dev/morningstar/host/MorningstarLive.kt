@@ -14,6 +14,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import android.view.WindowManager
 import com.twilio.audioswitch.AudioDevice
@@ -50,9 +51,12 @@ import livekit.org.webrtc.VideoSink
  * Besides sound a room carries data, and in an app that also declares
  * `live-video` pictures (the others' cameras and shared screens, and this
  * device's camera), and in one that declares `live-screen` this device's
- * screen (docs/architecture/0039-live-video-screen-and-data.md). Which of
- * the two an app declared is read from its own manifest, where the build
- * put or did not put the permissions they need.
+ * screen (docs/architecture/0039-live-video-screen-and-data.md). In one
+ * that declares `live-background` a room joined with a notice goes on
+ * while the app is not on screen, and every room reports and takes the
+ * audio route (docs/architecture/0042-live-rooms-in-the-background-and-audio-routes.md).
+ * Which of these an app declared is read from its own manifest, where the
+ * build put or did not put what they need.
  *
  * This is the only Kotlin in the host (with MorningstarLiveService beside
  * it), and it is Kotlin because LiveKit's
@@ -84,10 +88,22 @@ internal object MorningstarLive {
     /** requestPermissions request code for the camera. */
     private const val REQUEST_CAMERA = 0x4d54
 
+    /** requestPermissions request code for showing notifications (Android 13+). */
+    private const val REQUEST_NOTIFICATIONS = 0x4d57
+
+    /** The service's intent action for the notification's "hang up". */
+    internal const val ACTION_HANG_UP = "dev.morningstar.host.live.HANG_UP"
+
+    /** The manifest entry the build writes for an app with `live-background`. */
+    private const val META_BACKGROUND = "dev.morningstar.live.background"
+
     /** startActivityForResult request code for "share your screen?". */
     private const val REQUEST_SCREEN = 0x4d55
 
-    /** The notification shown while the screen is shared, and its channel. */
+    /**
+     * The notification shown while the screen is shared or a room goes on
+     * in the background, and its channel.
+     */
     internal const val NOTIFICATION_ID = 0x4d56
     private const val NOTIFICATION_CHANNEL = "morningstar_live"
 
@@ -105,6 +121,11 @@ internal object MorningstarLive {
         val reportSpeaking: Boolean,
         /** Whether the application wants this device's camera on. */
         var camera: Boolean,
+        /**
+         * The notice under which the room goes on while the app is not on
+         * screen, if the application asked for that (ADR 0042).
+         */
+        val notice: Notice?,
     ) {
         var room: Room? = null
         var job: Job? = null
@@ -126,7 +147,23 @@ internal object MorningstarLive {
 
         /** The camera was turned off because the app left the screen. */
         var cameraHidden = false
+
+        /**
+         * The room goes on while the app is not on screen: it has a notice,
+         * the app was built for it, and the microphone's foreground service
+         * was started for it while the app was in front.
+         */
+        var background = false
+
+        /** The audio routes as last reported (LIVE_AUDIO_ROUTES's code), or -1. */
+        var routes = -1
+
+        /** Told of every change of the audio routes, on a thread of the SDK's. */
+        var routeListener: ((List<AudioDevice>, AudioDevice?) -> Unit)? = null
     }
+
+    /** What the notification of a room in the background says. */
+    private class Notice(val title: String, val text: String, val hangUp: String)
 
     /**
      * One video that is being shown: the sink WebRTC hands its decoded
@@ -189,11 +226,24 @@ internal object MorningstarLive {
     /** What to do with the answer to the camera question that is on screen. */
     private var cameraAnswer: ((Boolean) -> Unit)? = null
 
+    /** What to do once "show notifications?" has been answered, either way. */
+    private var notificationsAnswer: (() -> Unit)? = null
+
+    /** Turns the screen off at the ear; null where the device cannot. */
+    private var proximity: PowerManager.WakeLock? = null
+
     /** The room that is joined or being joined: one at a time. */
     private var session: Session? = null
 
     /** Whether an activity is on screen. */
     private var onScreen = false
+
+    /**
+     * The application's context, kept from the first join: a room that goes
+     * on in the background may outlive the activity it was joined from, and
+     * its service must still be stopped when it ends.
+     */
+    private var appContext: Context? = null
 
     // ------------------------------------------------------------- commands
 
@@ -205,7 +255,7 @@ internal object MorningstarLive {
             when (command) {
                 MorningstarNative.SERVICE_LIVE_JOIN ->
                     join(
-                        Session(id, flag(0), flag(1), flag(2), flag(3)),
+                        Session(id, flag(0), flag(1), flag(2), flag(3), noticeOf(flag(4), data)),
                         first.orEmpty(),
                         second.orEmpty(),
                     )
@@ -220,6 +270,8 @@ internal object MorningstarLive {
                 MorningstarNative.SERVICE_LIVE_CAMERA -> setCamera(flag(0))
                 MorningstarNative.SERVICE_LIVE_SWITCH_CAMERA -> switchCamera()
                 MorningstarNative.SERVICE_LIVE_SCREEN_SHARE -> setScreenShare(flag(0))
+                MorningstarNative.SERVICE_LIVE_AUDIO_ROUTE ->
+                    setAudioRoute(if (data != null && data.isNotEmpty()) data[0].toInt() else 0)
             }
         }
     }
@@ -237,7 +289,23 @@ internal object MorningstarLive {
                     startCamera(current)
                 }
             }
+            holdScreen(current)
         }
+    }
+
+    /**
+     * The join's notice: the text after the five flags, three lines. None
+     * unless the application asked for the background.
+     */
+    private fun noticeOf(wanted: Boolean, data: ByteArray?): Notice? {
+        if (!wanted || data == null || data.size <= 5) {
+            return null
+        }
+        val lines = String(data, 5, data.size - 5, Charsets.UTF_8).split('\n')
+        val line = { index: Int, fallback: String ->
+            lines.getOrNull(index)?.takeIf { it.isNotBlank() } ?: fallback
+        }
+        return Notice(line(0, "Call in progress"), line(1, ""), line(2, "Hang up"))
     }
 
     /**
@@ -246,22 +314,33 @@ internal object MorningstarLive {
      * background app sooner or later and may freeze the process, and until
      * then the user would be heard from an app they cannot see.
      *
-     * The exception is a room in which this device's screen is shared
-     * (ADR 0039): showing another app is what sharing is for. That room
-     * goes on, held by two foreground services whose notification says so
-     * (LiveKit's, for the screen, and MorningstarLiveService, for the
-     * microphone), with the microphone as it was and the camera off until
-     * the app is back. While "share your screen?" is on screen nothing is
-     * decided: on some releases the question covers the app completely.
-     * Main thread.
+     * The exceptions are the rooms that have such a service and a
+     * notification that says so. One is a room in which this device's
+     * screen is shared (ADR 0039): showing another app is what sharing is
+     * for; it is held by LiveKit's service for the screen and
+     * MorningstarLiveService for the microphone. The other is a room the
+     * application joined with a notice, in an app built with
+     * `live-background` (ADR 0042), held by MorningstarLiveService from
+     * the moment it connects. Both go on with the microphone as it was and
+     * the camera off until the app is back. While "share your screen?" is
+     * on screen nothing is decided: on some releases the question covers
+     * the app completely. Main thread.
      */
     @JvmStatic
     fun activityStopped() {
         onScreen = false
+        releaseProximity()
         val current = session ?: return
         when {
             current.screen != null -> {
                 Log.i(TAG, "live: id=${current.id} goes on behind another app: the screen is shared")
+                if (current.camera && current.connected) {
+                    current.cameraHidden = true
+                    stopCamera(current)
+                }
+            }
+            current.background -> {
+                Log.i(TAG, "live: id=${current.id} goes on behind another app: it has a notice")
                 if (current.camera && current.connected) {
                     current.cameraHidden = true
                     stopCamera(current)
@@ -279,6 +358,17 @@ internal object MorningstarLive {
     /** Activity.onRequestPermissionsResult. Main thread. */
     @JvmStatic
     fun permissionResult(requestCode: Int, grantResults: IntArray) {
+        if (requestCode == REQUEST_NOTIFICATIONS) {
+            // Either answer: a foreground service runs without its
+            // notification being shown, and the system lists it anyway.
+            val shown = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            Log.i(TAG, "live: notifications " + if (shown) "allowed" else "not allowed")
+            notificationsAnswer?.let { answer ->
+                notificationsAnswer = null
+                answer()
+            }
+            return
+        }
         if (requestCode != REQUEST_CAMERA) {
             return
         }
@@ -323,6 +413,9 @@ internal object MorningstarLive {
         )
         session = joining
         val context = MorningstarActivity.current()?.applicationContext
+        if (context != null) {
+            appContext = context
+        }
         if (context == null || !onScreen) {
             // A join that arrives while the app is in the background (the
             // answer to a request made before it left) joins nothing.
@@ -343,7 +436,11 @@ internal object MorningstarLive {
                 main.post {
                     when {
                         joining.ended -> Unit
-                        granted -> connect(joining, context, url, token)
+                        granted -> afterNotifications(joining.notice != null && backgroundBuilt(context)) {
+                            if (!joining.ended) {
+                                connect(joining, context, url, token)
+                            }
+                        }
                         failure != null -> fail(joining, failure)
                         else -> {
                             Log.i(TAG, "live: id=${joining.id} not joined: microphone permission denied")
@@ -375,6 +472,15 @@ internal object MorningstarLive {
         // as the application asked.
         val audio = AudioSwitchHandler(context)
         audio.preferredDeviceList = preferredDevices(joining.speaker)
+        // Every change of what there is to hear through, and of what is
+        // in use (a headset connecting in the middle of a call), on a
+        // thread of the SDK's.
+        val listener: (List<AudioDevice>, AudioDevice?) -> Unit = { devices, selected ->
+            val code = routesCode(devices, selected)
+            main.post { routesChanged(joining, code) }
+        }
+        joining.routeListener = listener
+        audio.registerAudioDeviceChangeListener(listener)
         val room: Room
         try {
             room = LiveKit.create(
@@ -386,7 +492,23 @@ internal object MorningstarLive {
             return
         }
         joining.room = room
-        keepScreenOn(true)
+        callVolume(true)
+        // A room that is to go on behind another app is held from here, by
+        // a foreground service started while the app is in front: one that
+        // connects after the user has looked away is already allowed to.
+        if (joining.notice != null) {
+            if (backgroundBuilt(context)) {
+                joining.background = true
+                syncService(joining)
+            } else {
+                Log.w(
+                    TAG,
+                    "live: id=${joining.id} will end with the screen: the app does not declare" +
+                        " live-background (services = [\"live\", \"live-background\"] in its Cargo.toml)",
+                )
+            }
+        }
+        holdScreen(joining)
         joining.job = scope.launch {
             // Listening starts before connecting, so that nothing that
             // happens while the room connects is missed.
@@ -413,6 +535,8 @@ internal object MorningstarLive {
                         ", ${room.remoteParticipants.size} other(s) in the room",
                 )
                 emit(joining, MorningstarNative.LIVE_CONNECTED)
+                // Where the sound is, as soon as there is someone to tell.
+                routesChanged(joining, routesCode(audio.availableAudioDevices, audio.selectedAudioDevice))
                 // The audio device is switched on a thread of the SDK's:
                 // what it settled on is said a moment later.
                 main.postDelayed({
@@ -628,6 +752,7 @@ internal object MorningstarLive {
         val picture = Picture(nextPicture++, identity, source, local, mirrored)
         current.pictures[track] = picture
         track.addRenderer(picture)
+        holdScreen(current)
         Log.i(
             TAG,
             "live: id=${current.id} video ${picture.number} started (" +
@@ -645,6 +770,7 @@ internal object MorningstarLive {
             // The track is already gone with its room.
         }
         MorningstarNative.nativeVideoEnded(picture.number)
+        holdScreen(current)
         Log.i(TAG, "live: id=${current.id} video ${picture.number} stopped")
         emit(current, MorningstarNative.LIVE_VIDEO_STOPPED, first = picture.identity, code = picture.code())
     }
@@ -814,14 +940,21 @@ internal object MorningstarLive {
             mediaFailed(current, SOURCE_SCREEN, MorningstarNative.LIVE_ERROR_UNSUPPORTED)
             return
         }
-        Log.i(TAG, "live: id=${current.id} asking the user to share the screen")
         askingForScreen = current
-        try {
-            @Suppress("DEPRECATION")
-            activity.startActivityForResult(projection.createScreenCaptureIntent(), REQUEST_SCREEN)
-        } catch (failure: Exception) {
-            askingForScreen = null
-            mediaFailed(current, SOURCE_SCREEN, MorningstarNative.LIVE_ERROR_FAILED, describe(failure, ""))
+        // The notification that says the screen is shared must be allowed
+        // to show: asked first, once, and shared either way.
+        afterNotifications(true) {
+            if (current.ended || askingForScreen !== current) {
+                return@afterNotifications
+            }
+            Log.i(TAG, "live: id=${current.id} asking the user to share the screen")
+            try {
+                @Suppress("DEPRECATION")
+                activity.startActivityForResult(projection.createScreenCaptureIntent(), REQUEST_SCREEN)
+            } catch (failure: Exception) {
+                askingForScreen = null
+                mediaFailed(current, SOURCE_SCREEN, MorningstarNative.LIVE_ERROR_FAILED, describe(failure, ""))
+            }
         }
     }
 
@@ -833,18 +966,11 @@ internal object MorningstarLive {
             return
         }
         // The microphone's service first, while the app is in front: it is
-        // what lets the room be heard once another app is.
+        // what lets the room be heard once another app is. Its notification
+        // says the screen is shared from now on.
+        current.screen = 0
+        syncService(current)
         val notification = notification(context)
-        try {
-            val service = Intent(context, MorningstarLiveService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(service)
-            } else {
-                context.startService(service)
-            }
-        } catch (failure: Exception) {
-            Log.w(TAG, "live: id=${current.id} the microphone's service did not start (${failure.javaClass.simpleName})")
-        }
         scope.launch {
             try {
                 room.localParticipant.setScreenShareEnabled(
@@ -857,7 +983,7 @@ internal object MorningstarLive {
                         { main.post { stopScreenShare(current) } },
                     ),
                 )
-                if (current.ended) {
+                if (current.ended || current.screen == null) {
                     return@launch
                 }
                 // Reported with a track number, but no picture follows: the
@@ -875,7 +1001,8 @@ internal object MorningstarLive {
                 throw cancelled
             } catch (failure: Exception) {
                 Log.w(TAG, "live: id=${current.id} screen not shared (${failure.javaClass.simpleName})")
-                stopService(context)
+                current.screen = null
+                syncService(current)
                 mediaFailed(current, SOURCE_SCREEN, MorningstarNative.LIVE_ERROR_FAILED, describe(failure, ""))
                 main.postDelayed({ leaveIfHidden(current) }, AUDIO_SETTLE_MS)
             }
@@ -888,12 +1015,15 @@ internal object MorningstarLive {
         val room = current.room
         Log.i(TAG, "live: id=${current.id} screen no longer shared")
         if (room != null && !current.ended) {
-            emit(
-                current,
-                MorningstarNative.LIVE_VIDEO_STOPPED,
-                first = identityOf(room.localParticipant),
-                code = number * 4 + 2 + SOURCE_SCREEN,
-            )
+            // Zero: the sharing had not started yet, and was not reported.
+            if (number != 0) {
+                emit(
+                    current,
+                    MorningstarNative.LIVE_VIDEO_STOPPED,
+                    first = identityOf(room.localParticipant),
+                    code = number * 4 + 2 + SOURCE_SCREEN,
+                )
+            }
             scope.launch {
                 try {
                     room.localParticipant.setScreenShareEnabled(false)
@@ -906,33 +1036,143 @@ internal object MorningstarLive {
                 }
             }
         }
-        MorningstarActivity.current()?.applicationContext?.let { stopService(it) }
+        syncService(current)
         leaveIfHidden(current)
     }
 
     /**
      * The rule a shared screen suspended applies again: a room whose app
-     * is not on screen, and which no longer shares the screen, is left.
+     * is not on screen, which no longer shares the screen and has no
+     * notice to go on under, is left.
      */
     private fun leaveIfHidden(current: Session) {
-        if (!onScreen && !current.ended && current.screen == null) {
+        if (!onScreen && !current.ended && current.screen == null && !current.background) {
             Log.i(TAG, "live: id=${current.id} left: the app is not on screen and shares nothing")
             end(current, MorningstarNative.LIVE_DISCONNECTED, MorningstarNative.LIVE_END_HIDDEN)
         }
     }
 
-    private fun stopService(context: Context) {
-        try {
-            context.stopService(Intent(context, MorningstarLiveService::class.java))
-        } catch (failure: Exception) {
-            // It was not running.
+    /**
+     * Starts, refreshes or stops the microphone's foreground service so
+     * that it runs exactly while [current] has a reason to be heard behind
+     * another app: its screen is shared, or it goes on under a notice.
+     * Starting it again is how its notification is brought up to date.
+     */
+    private fun syncService(current: Session) {
+        val context = appContext ?: return
+        val service = Intent(context, MorningstarLiveService::class.java)
+        if (!current.ended && (current.screen != null || current.background)) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(service)
+                } else {
+                    context.startService(service)
+                }
+            } catch (failure: Exception) {
+                // Refused (the app is not in front, or the system says no):
+                // the room must not go on unheld.
+                Log.w(TAG, "live: id=${current.id} the microphone's service did not start (${failure.javaClass.simpleName})")
+                serviceFailed()
+            }
+        } else {
+            try {
+                context.stopService(service)
+            } catch (failure: Exception) {
+                // It was not running.
+            }
         }
     }
 
     /**
-     * What the system shows while the screen is shared, for both foreground
-     * services. It says what is happening in the app's own name and opens
-     * the app when touched.
+     * The microphone's foreground service could not run. A room that was
+     * counting on it to go on in the background no longer does: it ends
+     * with the screen like any other, at once if the app is already away.
+     * Main thread; also called by the service itself.
+     */
+    @JvmStatic
+    fun serviceFailed() {
+        val current = session ?: return
+        if (current.background) {
+            current.background = false
+            Log.w(TAG, "live: id=${current.id} will end with the screen: nothing holds it in the background")
+            holdScreen(current)
+            leaveIfHidden(current)
+        }
+    }
+
+    /** The notification's "hang up", or the service's intent for it. Main thread. */
+    @JvmStatic
+    fun hangUpFromNotification() {
+        val current = session
+        if (current == null) {
+            Log.i(TAG, "live: hang up from the notification (no room is joined)")
+            return
+        }
+        Log.i(TAG, "live: id=${current.id} ended from the notification")
+        end(current, MorningstarNative.LIVE_DISCONNECTED, MorningstarNative.LIVE_END_HUNG_UP)
+    }
+
+    /**
+     * The user swiped the app away from the recent apps: there is no screen
+     * to come back to, so the room is left rather than kept by a
+     * notification alone. Main thread, from the service.
+     */
+    @JvmStatic
+    fun taskRemoved() {
+        val current = session ?: return
+        Log.i(TAG, "live: id=${current.id} left: the app was closed from the recent apps")
+        end(current, MorningstarNative.LIVE_DISCONNECTED, MorningstarNative.LIVE_END_HIDDEN)
+    }
+
+    /** True while the service has a room to be running for. Main thread. */
+    @JvmStatic
+    fun wantsService(): Boolean = session?.let { !it.ended && (it.screen != null || it.background) } == true
+
+    /** Whether the app declared `live-background`. */
+    private fun backgroundBuilt(context: Context): Boolean =
+        try {
+            context.packageManager
+                .getApplicationInfo(context.packageName, PackageManager.GET_META_DATA)
+                .metaData
+                ?.getBoolean(META_BACKGROUND, false) == true
+        } catch (failure: Exception) {
+            false
+        }
+
+    /**
+     * Runs [then] once the user has been asked, if they need asking, to
+     * let this app show notifications (Android 13 and later; before that
+     * nobody is asked). [then] runs whatever the answer: the notification
+     * is how the user sees that the microphone is open, but a foreground
+     * service runs, and is listed by the system, without it. Not asked at
+     * all unless [needed].
+     */
+    private fun afterNotifications(needed: Boolean, then: () -> Unit) {
+        val activity = MorningstarActivity.current()
+        if (!needed || activity == null || Build.VERSION.SDK_INT < 33 ||
+            activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            then()
+            return
+        }
+        if (notificationsAnswer != null || cameraAnswer != null) {
+            // Another question is on screen; the system shows one at a
+            // time. This one is asked the next time it is needed.
+            then()
+            return
+        }
+        Log.i(TAG, "live: asking the user to allow notifications")
+        notificationsAnswer = then
+        activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+    }
+
+    /**
+     * What the system shows while a room is held behind another app, for
+     * both foreground services: that the screen is shared, in the app's
+     * own name, or the application's notice for a room that goes on in
+     * the background, with the action that ends it. It opens the app when
+     * touched.
      */
     internal fun notification(context: Context): Notification {
         val label = context.applicationInfo.loadLabel(context.packageManager)
@@ -954,13 +1194,35 @@ internal object MorningstarLive {
         } else {
             Notification.Builder(context)
         }
-        return builder
-            .setContentTitle(label)
-            .setContentText("Sharing your screen. The call's microphone stays as you left it.")
+        val current = session
+        val notice = current?.notice?.takeIf { current.background }
+        builder
             .setSmallIcon(android.R.drawable.stat_sys_phone_call)
             .setContentIntent(open)
+            .setCategory(Notification.CATEGORY_CALL)
             .setOngoing(true)
-            .build()
+        if (current?.screen != null || notice == null) {
+            builder
+                .setContentTitle(notice?.title ?: label)
+                .setContentText("Sharing your screen. The call's microphone stays as you left it.")
+        } else {
+            builder.setContentTitle(notice.title)
+            if (notice.text.isNotEmpty()) {
+                builder.setContentText(notice.text)
+            }
+        }
+        if (notice != null) {
+            val hangUp = PendingIntent.getService(
+                context,
+                1,
+                Intent(context, MorningstarLiveService::class.java).setAction(ACTION_HANG_UP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            builder.addAction(
+                Notification.Action.Builder(null as android.graphics.drawable.Icon?, notice.hangUp, hangUp).build(),
+            )
+        }
+        return builder.build()
     }
 
     // ------------------------------------------- microphone and loudspeaker
@@ -1014,6 +1276,69 @@ internal object MorningstarLive {
         }
     }
 
+    // ---------------------------------------------------------- audio routes
+
+    private fun routeOf(device: AudioDevice?): Int =
+        when (device) {
+            is AudioDevice.Earpiece -> MorningstarNative.LIVE_ROUTE_EARPIECE
+            is AudioDevice.Speakerphone -> MorningstarNative.LIVE_ROUTE_SPEAKER
+            is AudioDevice.WiredHeadset -> MorningstarNative.LIVE_ROUTE_WIRED
+            is AudioDevice.BluetoothHeadset -> MorningstarNative.LIVE_ROUTE_BLUETOOTH
+            null -> 0
+        }
+
+    /** LIVE_AUDIO_ROUTES's code: the route in use, and a bit per route there is. */
+    private fun routesCode(devices: List<AudioDevice>, selected: AudioDevice?): Int {
+        var code = routeOf(selected)
+        for (device in devices) {
+            code = code or (1 shl (3 + routeOf(device)))
+        }
+        return code
+    }
+
+    /** The routes may have changed: said once per change, never before LIVE_CONNECTED. */
+    private fun routesChanged(current: Session, code: Int) {
+        if (current.ended || !current.connected || current.routes == code) {
+            return
+        }
+        current.routes = code
+        Log.i(
+            TAG,
+            "live: id=${current.id} sound on ${routeName(code and 0xf)}, routes:" +
+                (1..4).filter { code and (1 shl (3 + it)) != 0 }.joinToString(",") { " " + routeName(it) },
+        )
+        emit(current, MorningstarNative.LIVE_AUDIO_ROUTES, code = code)
+        holdScreen(current)
+    }
+
+    /** A route by kind, never by a headset's own name (that is its owner's). */
+    private fun routeName(route: Int): String =
+        when (route) {
+            MorningstarNative.LIVE_ROUTE_EARPIECE -> "the earpiece"
+            MorningstarNative.LIVE_ROUTE_SPEAKER -> "the loudspeaker"
+            MorningstarNative.LIVE_ROUTE_WIRED -> "a wired headset"
+            MorningstarNative.LIVE_ROUTE_BLUETOOTH -> "a Bluetooth headset"
+            else -> "nothing yet"
+        }
+
+    /** The application chose where the sound goes. */
+    private fun setAudioRoute(route: Int) {
+        val current = session ?: return
+        val audio = current.room?.audioHandler as? AudioSwitchHandler
+        val device = audio?.availableAudioDevices?.firstOrNull { routeOf(it) == route }
+        if (audio == null || device == null) {
+            Log.i(TAG, "live: id=${current.id} sound not moved: this device has no ${routeName(route)} now")
+            return
+        }
+        // What is preferred from now on when the chosen one goes away.
+        if (route == MorningstarNative.LIVE_ROUTE_SPEAKER || route == MorningstarNative.LIVE_ROUTE_EARPIECE) {
+            current.speaker = route == MorningstarNative.LIVE_ROUTE_SPEAKER
+            audio.preferredDeviceList = preferredDevices(current.speaker)
+        }
+        audio.selectDevice(device)
+        Log.i(TAG, "live: id=${current.id} sound to ${routeName(route)}")
+    }
+
     private fun preferredDevices(speaker: Boolean): List<Class<out AudioDevice>> =
         if (speaker) {
             listOf(
@@ -1053,7 +1378,8 @@ internal object MorningstarLive {
         ending.ended = true
         if (session === ending) {
             session = null
-            keepScreenOn(false)
+            callVolume(false)
+            holdScreen(ending)
         }
         if (askingForScreen === ending) {
             askingForScreen = null
@@ -1069,10 +1395,13 @@ internal object MorningstarLive {
             MorningstarNative.nativeVideoEnded(picture.number)
         }
         ending.pictures.clear()
-        if (ending.screen != null) {
-            ending.screen = null
-            MorningstarActivity.current()?.applicationContext?.let { stopService(it) }
+        ending.screen = null
+        ending.background = false
+        syncService(ending)
+        ending.routeListener?.let { listener ->
+            (ending.room?.audioHandler as? AudioSwitchHandler)?.unregisterAudioDeviceChangeListener(listener)
         }
+        ending.routeListener = null
         ending.job?.cancel()
         ending.room?.let { room ->
             try {
@@ -1110,19 +1439,64 @@ internal object MorningstarLive {
 
     // -------------------------------------------------------------- helpers
 
-    /**
-     * While a room is joined the screen stays on (a room does not survive
-     * the app leaving the screen, and a screen that times out is that) and
-     * the volume keys set the call's volume.
-     */
-    private fun keepScreenOn(on: Boolean) {
+    /** While a room is joined the volume keys set the call's volume. */
+    private fun callVolume(on: Boolean) {
         val activity = MorningstarActivity.current() ?: return
-        if (on) {
+        activity.volumeControlStream =
+            if (on) AudioManager.STREAM_VOICE_CALL else AudioManager.USE_DEFAULT_STREAM_TYPE
+    }
+
+    /**
+     * What the screen does while [current] is the room: it stays on when a
+     * screen that times out would end the room (one that does not go on in
+     * the background) or hide a picture; and at the ear, with the sound in
+     * the earpiece and no picture to look at, it goes dark and deaf to
+     * touch, as a phone does. Called whenever one of those changes.
+     */
+    private fun holdScreen(current: Session) {
+        val activity = MorningstarActivity.current() ?: return
+        val live = session === current && !current.ended
+        val keepOn = live && (!current.background || current.pictures.isNotEmpty())
+        if (keepOn) {
             activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            activity.volumeControlStream = AudioManager.STREAM_VOICE_CALL
         } else {
             activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            activity.volumeControlStream = AudioManager.USE_DEFAULT_STREAM_TYPE
+        }
+        val atTheEar = live && onScreen && current.connected && current.pictures.isEmpty() &&
+            (current.routes and 0xf) == MorningstarNative.LIVE_ROUTE_EARPIECE
+        if (atTheEar) acquireProximity(activity) else releaseProximity()
+    }
+
+    private fun acquireProximity(context: Context) {
+        if (proximity?.isHeld == true) {
+            return
+        }
+        try {
+            val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+            if (!power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
+                return
+            }
+            val lock = proximity
+                ?: power.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "morningstar:live")
+                    .also { it.setReferenceCounted(false) }
+            proximity = lock
+            lock.acquire()
+            Log.i(TAG, "live: the screen turns off at the ear")
+        } catch (failure: Exception) {
+            // No WAKE_LOCK permission, or no sensor: the screen stays on.
+            Log.i(TAG, "live: no proximity sensor in use (${failure.javaClass.simpleName})")
+        }
+    }
+
+    private fun releaseProximity() {
+        val lock = proximity ?: return
+        if (lock.isHeld) {
+            try {
+                lock.release()
+                Log.i(TAG, "live: the screen no longer turns off at the ear")
+            } catch (failure: Exception) {
+                // Already released.
+            }
         }
     }
 

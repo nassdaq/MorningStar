@@ -23,6 +23,10 @@
 //! [`render_svg`] and the `morningstar-svg` binary render an SVG file to a
 //! PNG with the loader applications use (ADR 0027).
 //!
+//! [`create_app`] writes a new application from templates kept in this
+//! crate and adds it to the workspace; the `morningstar-new` binary is the
+//! command (ADR 0041).
+//!
 //! [`screenshot_semantics`] renders a screen as a screen reader finds it:
 //! every node it can land on outlined and numbered in reading order, with
 //! a legend of what each says and offers (ADR 0032).
@@ -35,6 +39,7 @@ mod image;
 mod json;
 mod png;
 mod reference;
+mod scaffold;
 mod semantics;
 mod svg;
 
@@ -53,6 +58,10 @@ pub use image::{Image, ImageError, Rect};
 pub use png::encode as encode_png;
 pub use reference::{
     ReferenceError, ReferenceOutcome, UPDATE_ENV, assert_matches_reference, check_reference,
+};
+pub use scaffold::{
+    CreatedApp, DEFAULT_APP_DIR, DEFAULT_SERVER_PORT, MAX_PACKAGE_LENGTH, NewApp, ScaffoldError,
+    add_workspace_member, create_app,
 };
 pub use semantics::screenshot_semantics;
 pub use svg::{SvgBackground, color_from_srgb, render_svg};

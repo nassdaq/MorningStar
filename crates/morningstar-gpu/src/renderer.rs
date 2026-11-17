@@ -20,6 +20,11 @@ pub enum NativeSurface {
     /// A `CAMetalLayer*`.
     #[cfg(target_vendor = "apple")]
     CoreAnimationLayer(NonNull<c_void>),
+    /// An `NSView*` of a window on the Mac: what the development preview
+    /// draws into (ADR 0040). A Metal layer is made for the view. Must be
+    /// handed over on the main thread.
+    #[cfg(target_os = "macos")]
+    AppKitView(NonNull<c_void>),
 }
 
 /// What happened when a frame was requested.
@@ -451,6 +456,16 @@ fn surface_target(native: NativeSurface) -> wgpu::SurfaceTargetUnsafe {
         #[cfg(target_vendor = "apple")]
         NativeSurface::CoreAnimationLayer(layer) => {
             wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(layer.as_ptr())
+        }
+        #[cfg(target_os = "macos")]
+        NativeSurface::AppKitView(view) => {
+            use wgpu::rwh::{
+                AppKitDisplayHandle, AppKitWindowHandle, RawDisplayHandle, RawWindowHandle,
+            };
+            wgpu::SurfaceTargetUnsafe::RawHandle {
+                raw_display_handle: Some(RawDisplayHandle::AppKit(AppKitDisplayHandle::new())),
+                raw_window_handle: RawWindowHandle::AppKit(AppKitWindowHandle::new(view)),
+            }
         }
     }
 }

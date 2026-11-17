@@ -1,0 +1,32 @@
+//! What the screens look like, kept as pictures in `tests/references/`.
+//!
+//! The first run writes the pictures: look at them, then commit them. From
+//! then on a screen that changes fails here, with the old and the new
+//! picture side by side next to the reference. After a change you meant:
+//!
+//!   MORNINGSTAR_UPDATE_REFERENCES=1 cargo test -p {{package}}
+
+mod support;
+
+use std::path::Path;
+
+use morningstar::ui::Ui;
+use morningstar_devtools::{Tolerance, assert_matches_reference, screenshot_frame};
+
+use {{crate}}::{Model, Screen};
+
+#[test]
+fn the_screens_look_as_they_did() {
+    for (screen, name) in [(Screen::Home, "home"), (Screen::Settings, "settings")] {
+        let mut ui = Ui::new(Model::on(screen));
+        let png = screenshot_frame(&mut ui, &support::phone(1.0)).expect("offscreen GPU");
+        let reference = format!("tests/references/{name}.png");
+        if !Path::new(&reference).exists() {
+            std::fs::create_dir_all("tests/references").expect("tests/references");
+            std::fs::write(&reference, &png).expect("the reference can be written");
+            eprintln!("wrote {reference}: look at it, then commit it");
+            continue;
+        }
+        assert_matches_reference(&png, &reference, Tolerance::DEFAULT);
+    }
+}

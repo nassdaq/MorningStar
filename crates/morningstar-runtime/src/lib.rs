@@ -22,10 +22,11 @@ pub use morningstar_core::{
 };
 pub use morningstar_core::{
     AudioClip, AudioError, DEFAULT_HTTP_TIMEOUT, HostState, HttpError, HttpMethod, HttpRequest,
-    HttpResponse, LiveData, LiveDisconnect, LiveError, LiveEvent, LiveJoin, LiveParticipant,
-    LiveVideoSource, LiveVideoStream, MAX_HTTP_RESPONSE_BYTES, MAX_LIVE_DATA_BYTES,
-    MAX_RECORDING_DURATION, MAX_VIDEO_DIMENSION, NO_INSTALL_ID, Recording, ServiceCall, ServiceId,
-    ServiceRequest, ServiceResult, VideoFrame, VideoRotation, VideoTrack,
+    HttpResponse, LiveAudioRoute, LiveAudioRoutes, LiveBackground, LiveData, LiveDisconnect,
+    LiveError, LiveEvent, LiveJoin, LiveParticipant, LiveVideoSource, LiveVideoStream,
+    MAX_HTTP_RESPONSE_BYTES, MAX_LIVE_DATA_BYTES, MAX_RECORDING_DURATION, MAX_VIDEO_DIMENSION,
+    NO_INSTALL_ID, Recording, ServiceCall, ServiceId, ServiceRequest, ServiceResult, VideoFrame,
+    VideoRotation, VideoTrack,
 };
 pub use morningstar_core::{
     BarContent, Capitalization, CaretMove, ImeAction, KeyboardType, SystemBars, TextEditState,

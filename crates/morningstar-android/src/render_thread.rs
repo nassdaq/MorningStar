@@ -468,8 +468,10 @@ const SERVICE_SET_CLIPBOARD: i32 = 7;
 const SERVICE_READ_CLIPBOARD: i32 = 8;
 const SERVICE_ANNOUNCE: i32 = 9;
 // The live room (ADR 0038). Join: first the address, second the ticket,
-// data three bytes (microphone live, loudspeaker, speaking reports; zero
-// is no). Microphone and speaker: data one byte.
+// data five bytes (microphone live, loudspeaker, speaking reports, camera,
+// goes on in the background; zero is no) and after them, for a room that
+// goes on in the background, its notice as UTF-8 (`LiveBackground::to_wire`,
+// ADR 0042). Microphone and speaker: data one byte.
 const SERVICE_LIVE_JOIN: i32 = 10;
 const SERVICE_LIVE_LEAVE: i32 = 11;
 const SERVICE_LIVE_MICROPHONE: i32 = 12;
@@ -478,6 +480,8 @@ const SERVICE_LIVE_DATA: i32 = 14;
 const SERVICE_LIVE_CAMERA: i32 = 15;
 const SERVICE_LIVE_SWITCH_CAMERA: i32 = 16;
 const SERVICE_LIVE_SCREEN_SHARE: i32 = 17;
+/// data: one byte, the route's number (`LiveAudioRoute::to_wire`).
+const SERVICE_LIVE_AUDIO_ROUTE: i32 = 18;
 
 /// How many times in a row the application may answer a request that
 /// could not be made with another request before the render thread moves
@@ -574,17 +578,19 @@ fn send_to_host(java: &Env, call: &ServiceCall) -> bool {
             if *assertive { "assertive" } else { "" },
             &[],
         ),
-        ServiceRequest::LiveJoin(join) => command(
-            SERVICE_LIVE_JOIN,
-            &join.url,
-            &join.token,
-            &[
+        ServiceRequest::LiveJoin(join) => {
+            let mut data = vec![
                 u8::from(join.microphone),
                 u8::from(join.speaker),
                 u8::from(join.report_speaking),
                 u8::from(join.camera),
-            ],
-        ),
+                u8::from(join.background.is_some()),
+            ];
+            if let Some(notice) = &join.background {
+                data.extend_from_slice(notice.to_wire().as_bytes());
+            }
+            command(SERVICE_LIVE_JOIN, &join.url, &join.token, &data)
+        }
         ServiceRequest::LiveLeave => command(SERVICE_LIVE_LEAVE, "", "", &[]),
         ServiceRequest::LiveMicrophone(live) => {
             command(SERVICE_LIVE_MICROPHONE, "", "", &[u8::from(*live)])
@@ -605,6 +611,9 @@ fn send_to_host(java: &Env, call: &ServiceCall) -> bool {
         ServiceRequest::LiveSwitchCamera => command(SERVICE_LIVE_SWITCH_CAMERA, "", "", &[]),
         ServiceRequest::LiveScreenShare(on) => {
             command(SERVICE_LIVE_SCREEN_SHARE, "", "", &[u8::from(*on)])
+        }
+        ServiceRequest::LiveAudioRoute(route) => {
+            command(SERVICE_LIVE_AUDIO_ROUTE, "", "", &[route.to_wire()])
         }
     }
 }
@@ -640,6 +649,11 @@ fn describe_request(request: &ServiceRequest) -> String {
                     ""
                 },
             ) + if join.camera { " camera on" } else { "" }
+                + if join.background.is_some() {
+                    " goes on in the background"
+                } else {
+                    ""
+                }
         }
         // Never what is said, nor under which topic.
         ServiceRequest::LiveData {
@@ -710,6 +724,11 @@ fn describe_result(result: &ServiceResult) -> String {
                 format!("live room: {source:?} not started: {error}")
             }
             LiveEvent::Data(data) => format!("live room: data {} bytes", data.payload.len()),
+            LiveEvent::AudioRoutes(routes) => format!(
+                "live room: sound on {:?}, {} route(s) to choose from",
+                routes.selected,
+                routes.available.len()
+            ),
         },
     }
 }

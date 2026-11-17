@@ -387,7 +387,9 @@ enum {
   // text2: the ticket, a secret: never log it; data: four bytes, each zero
   // for no: microphone live from the start, sound to the loudspeaker
   // rather than the earpiece, speaking reports wanted, the camera on from
-  // the start. One room at a time:
+  // the start; text3: empty, or, for a room that is to go on while the app
+  // is not on screen (ADR 0042), its notice as three lines ('\n'): title,
+  // text, and the name of the action that ends the room. One room at a time:
   // a join ends the room that is joined (MORNINGSTAR_LIVE_END_REPLACED). A
   // host that has no live rooms answers MORNINGSTAR_LIVE_FAILED with
   // MORNINGSTAR_LIVE_ERROR_UNSUPPORTED.
@@ -415,6 +417,9 @@ enum {
   // data: one byte, zero to stop sharing this device's screen. As for the
   // camera.
   MORNINGSTAR_SERVICE_LIVE_SCREEN_SHARE = 18,
+  // Not answered (ADR 0042). data: one byte, a MORNINGSTAR_LIVE_ROUTE_*:
+  // send the room's sound there. MORNINGSTAR_LIVE_AUDIO_ROUTES follows.
+  MORNINGSTAR_SERVICE_LIVE_AUDIO_ROUTE = 19,
 };
 
 // One request. Strings are NUL-terminated UTF-8 and never NULL (unused ones
@@ -524,6 +529,19 @@ enum {
   // on. code: a MORNINGSTAR_LIVE_ERROR_* times 2, plus 1 for the screen;
   // first: what failed, for MORNINGSTAR_LIVE_ERROR_FAILED.
   MORNINGSTAR_LIVE_MEDIA_FAILED = 10,
+  // Where the sound can go and where it goes (ADR 0042): once connected,
+  // and whenever either changes. code: the MORNINGSTAR_LIVE_ROUTE_* in
+  // use (0 for none yet), plus 16, 32, 64 and 128 for the earpiece, the
+  // loudspeaker, a wired headset and a Bluetooth headset when available.
+  MORNINGSTAR_LIVE_AUDIO_ROUTES = 11,
+};
+
+// A live room's audio routes.
+enum {
+  MORNINGSTAR_LIVE_ROUTE_EARPIECE = 1,
+  MORNINGSTAR_LIVE_ROUTE_SPEAKER = 2,
+  MORNINGSTAR_LIVE_ROUTE_WIRED = 3,
+  MORNINGSTAR_LIVE_ROUTE_BLUETOOTH = 4,
 };
 
 // morningstar_ios_live_event's code with MORNINGSTAR_LIVE_DISCONNECTED.
@@ -533,6 +551,9 @@ enum {
   MORNINGSTAR_LIVE_END_HIDDEN = 2,   // the app left the screen
   MORNINGSTAR_LIVE_END_ENDED = 3,    // closed or removed from the other side
   MORNINGSTAR_LIVE_END_LOST = 4,     // the connection could not be kept
+  // The user ended it from the system's own controls of a room that was
+  // going on in the background (ADR 0042).
+  MORNINGSTAR_LIVE_END_HUNG_UP = 5,
 };
 
 // morningstar_ios_live_event's code with MORNINGSTAR_LIVE_FAILED.

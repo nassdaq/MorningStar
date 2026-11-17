@@ -166,6 +166,29 @@ health check) tries to connect again, at most once every three seconds
 (`DATABASE_RETRY_MS`), runs the migration when it first succeeds, and
 carries on: nothing has to be restarted.
 
+## What must never stop it
+
+The server died once (2026-11-15, about 12:17 UTC) with nothing in its log
+but Node's version line; the log itself was lost before the cause could be
+read from it, so the cause is not known. What ends a Node process that way
+is an error nothing caught, and there were three ways one could arise
+here. All three are closed, and tested in `test/robust.test.js`:
+
+- **A database connection that fails while a query holds it.** The pool
+  listens to a connection only while it is idle; one that is checked out
+  and emits `error` with nobody listening is an uncaught exception. Every
+  connection now has a listener (`pool.on('connect')` in `src/db.js`); the
+  query fails through its own promise and the request gets its 503.
+- **A request handler that rejects.** `app.handle` answers its own errors,
+  and the HTTP server now catches it all the same: a 500, not an unhandled
+  rejection.
+- **Anything else** (`guardProcess` in `src/server.js`): an unhandled
+  rejection or an uncaught exception is logged, through the logger that
+  redacts secrets, and the process carries on. Node's advice is to exit
+  after an uncaught exception, because the program's state is unknown;
+  this server keeps its state in the database and handles each request on
+  its own, and a calling app whose server is gone is the worse failure.
+
 ## Tests
 
 ```sh

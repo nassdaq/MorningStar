@@ -1,0 +1,49 @@
+//! The app for someone who cannot see it (ADR 0032): every screen passes
+//! the framework's check (names, sizes, contrast), and the controls say
+//! what they are.
+
+mod support;
+
+use morningstar::HostState;
+use morningstar::ui::Role;
+
+use {{crate}}::{Model, Screen};
+
+use support::Device;
+
+fn reader(screen: Screen) -> Device {
+    let mut device = Device::new(Model::on(screen), &HostState::new());
+    // What a host does when TalkBack or VoiceOver is on.
+    device.ui.set_accessibility(true);
+    device.settle();
+    device
+}
+
+#[test]
+fn every_screen_passes_the_accessibility_check() {
+    for screen in [Screen::Home, Screen::Settings] {
+        let device = reader(screen);
+        let issues: Vec<String> = device
+            .ui
+            .accessibility_issues()
+            .iter()
+            .map(|issue| format!("{screen:?}: {issue}"))
+            .collect();
+        assert!(issues.is_empty(), "{issues:#?}");
+    }
+}
+
+#[test]
+fn the_controls_are_announced_as_what_they_are() {
+    let home = reader(Screen::Home);
+    assert!(home.ui.semantics().find(Role::Button, "Settings").is_some());
+
+    let settings = reader(Screen::Settings);
+    let tree = settings.ui.semantics();
+    assert!(tree.find(Role::Button, "Back").is_some());
+    assert!(tree.find(Role::Button, "Save").is_some());
+    assert!(
+        tree.find_by_label("Your name").is_some(),
+        "the field has a name"
+    );
+}

@@ -1,0 +1,51 @@
+// Settings, from the environment and then from `.env` beside package.json.
+// Nothing here has a secret as its default.
+
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+export const ENV_PATH = fileURLToPath(new URL('../.env', import.meta.url));
+
+/** `KEY=value` lines; `#` comments; optional quotes around the value. */
+export function parseEnv(text) {
+  const out = {};
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (!match) continue;
+    let value = match[2].trim();
+    const quote = value[0];
+    if ((quote === '"' || quote === "'") && value.endsWith(quote) && value.length > 1) {
+      value = value.slice(1, -1);
+    }
+    out[match[1]] = value;
+  }
+  return out;
+}
+
+function whole(value, fallback, name, min, max) {
+  if (value === undefined || value === '') return fallback;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) {
+    throw new Error(`${name} must be a whole number from ${min} to ${max}.`);
+  }
+  return number;
+}
+
+/** The settings, with the process environment taking precedence over the file. */
+export function loadConfig(env = process.env, file = undefined) {
+  let fromFile = file;
+  if (fromFile === undefined) {
+    try {
+      fromFile = parseEnv(readFileSync(ENV_PATH, 'utf8'));
+    } catch {
+      fromFile = {};
+    }
+  }
+  const get = (key) => env[key] ?? fromFile[key];
+  return {
+    host: get('HOST') || '127.0.0.1',
+    port: whole(get('PORT'), {{port}}, 'PORT', 0, 65535),
+    appToken: get('APP_TOKEN') || '',
+    rateLimitPerMinute: whole(get('RATE_LIMIT_PER_MINUTE'), 60, 'RATE_LIMIT_PER_MINUTE', 1, 100000),
+  };
+}

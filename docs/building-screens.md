@@ -731,6 +731,27 @@ assert_matches_reference(&png, "tests/references/settings.png", Tolerance::DEFAU
 // create or update: MORNINGSTAR_UPDATE_REFERENCES=1 cargo test -p my-app
 ```
 
+### Using the app while you write it: the preview
+
+The loop above shows one frame. To tap through the app, type into it, scroll it and watch it move, run it in a window on the Mac ([ADR 0040](architecture/0040-development-preview.md)):
+
+```sh
+tools/preview.sh my-app
+```
+
+- **It reloads.** Save a source file and the app is built again and started again in the same place on the screen, without taking the keyboard from your editor. If the build fails, the old window stays up, its title says so, and the compiler's errors are in the terminal.
+- **It starts over on each reload**, like an app that was closed. What it stored comes back (`out.store`, read at `setup`): an app that stores which screen it is on returns there. `--fresh`, or Cmd+Shift+R in the window, forgets everything: a first launch.
+- **The mouse is a finger**, the wheel or two fingers on the trackpad scroll, typing goes to the focused field, Escape is the system's back. F1 lists the keys.
+- **Its server works**: HTTP requests are really made, so start the app's server (`node src/server.js` in its `server/`) and the app talks to it at the same `127.0.0.1` address it uses on a phone through `adb reverse`. Recording, playback and live rooms are answered `Unsupported`; the terminal says so the first time.
+- **The window is a phone**: 390 x 844 dp with a status bar's and a gesture bar's insets. `--size 360x800`, `--insets 0`, `--scale 2.8125` (a Galaxy A27's pixels per dp) and `--keyboard 300` (an imitation of the soft keyboard's height while a field is focused) change that; F4 turns the insets off and on, F3 "reduce motion".
+- **Cmd+S saves the screen** as a PNG under `target/preview/my-app/`: the same pixels `screenshot_frame` gives, so `morningstar-diff` compares it with a design. From a script, a screen a few taps in is one command:
+
+  ```sh
+  tools/preview.sh my-app --tap 195,471 --wait 800 --tap 60,300 --screenshot-after 4000 out/detail.png
+  ```
+
+It is not a phone. The GPU is the Mac's, the keyboard is a hardware one, there is one finger, and what only a phone decides (the soft keyboard, the system bars, sound, frame times) is still unverified until the app has run on one. Tests stay the specification: the preview is for your eyes and hands, and what you find with it goes into a test.
+
 ## Accessibility
 
 A Morningstar screen is described to TalkBack and VoiceOver as a tree of nodes derived from its widgets ([ADR 0032](architecture/0032-accessibility.md)). Most of it needs nothing from you:
