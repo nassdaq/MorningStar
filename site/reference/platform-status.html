@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Platform status · Morningstar</title>
+<meta name="description" content="What has actually been run, and where. &quot;Verified in tests&quot; means on the development machine; it is not a claim about a phone. The full table, with the evidence for every row, is kept with the decision records; this page is its summary.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni" href="application.html">Application</a><a class="ni" href="effects.html">Effects</a><a class="ni" href="ui.html">Ui and testing</a><a class="ni" href="navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="tools.html">Tools and scripts</a><a class="ni" href="services.html">Opt-in services</a><p class="nh">Project</p><a class="ni" href="architecture.html">Architecture</a><a class="ni" href="../architecture/index.html">Decision records</a><a class="ni on" href="platform-status.html" aria-current="page">Platform status</a><a class="ni" href="performance.html">Performance</a><a class="ni" href="troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><span>Project</span><span aria-hidden="true">/</span><span class="here">Platform status</span></div>
+<article>
+<h1>Platform status</h1><p class="lead">What has actually been run, and where. "Verified in tests" means on the development machine; it is not a claim about a phone. The full table, with the evidence for every row, is kept with the <a href="../architecture/index.html#verification-status">decision records</a>; this page is its summary.</p><h2 id="android"><a class="anchor" href="#android">Android</a></h2><p>Run on <strong>one phone</strong>: a Galaxy A27, Android 16, Vulkan on an Adreno 710, 120 Hz.</p><div class="table"><table><thead><tr><th>Seen on that phone</th><th>How</th></tr></thead><tbody><tr><td>A frame is presented</td><td>First device session</td></tr><tr><td>Scale, insets, edge-to-edge and idling: one frame drawn in six idle seconds</td><td>From the log</td></tr><tr><td>The full shader (borders, gradients, shadows, clips, images, text) on Vulkan</td><td>By eye, against the desktop render</td></tr><tr><td>Text renders and matches the desktop render</td><td>By eye</td></tr><tr><td>Touch reaches the app</td><td>Taps changed the tally</td></tr><tr><td>The surface survives going to the background and back</td><td>Same session</td></tr><tr><td>Text input with the system keyboard: focus, keyboard type, Next and Done, keyboard avoidance</td><td>From the owner's own typing, by log</td></tr><tr><td>FundiDesk launches</td><td>From the log only; the screen was not inspected</td></tr></tbody></table></div><div class="table"><table><thead><tr><th>Not yet seen on a phone</th><th>State</th></tr></thead><tbody><tr><td>Text selection, the selection menu and the clipboard</td><td>Pass their tests on the development machine</td></tr><tr><td>System bar icon colours, and reduce motion</td><td>Pass their tests on the development machine</td></tr><tr><td>TalkBack reading and operating an app</td><td>The tree and the host's mirror are written and tested on the development machine</td></tr><tr><td>HTTP, storage, recording and playback</td><td>The Android side compiles; the two halves of the interface were compared</td></tr><tr><td>Live rooms: sound, cameras, screen sharing, data, audio routes, calls in the background</td><td>Pass their tests on the development machine; the Android side compiles and packages. Apps have been installed, but no room has been confirmed working on a phone</td></tr><tr><td>Android versions other than 16, and other GPUs</td><td>Never run. The host is built for API 24 and later</td></tr></tbody></table></div><h2 id="ios"><a class="anchor" href="#ios">iOS</a></h2><p><strong>Never compiled.</strong> The shared code type-checks for <code>aarch64-apple-ios</code>. The Swift host, its services, the generated icon and build settings have not been through Xcode, so nothing has run on an iPhone or a simulator.</p><div class="table"><table><thead><tr><th>Service</th><th>iOS</th></tr></thead><tbody><tr><td>HTTP, storage, clipboard, recording, playback</td><td>Written in <code>HostServices.swift</code>; unverified</td></tr><tr><td>Live rooms</td><td>Answers <code>Unsupported</code></td></tr></tbody></table></div><h2 id="the-development-machine"><a class="anchor" href="#the-development-machine">The development machine</a></h2><div class="table"><table><thead><tr><th>What</th><th>State</th></tr></thead><tbody><tr><td>The shared code builds and passes its tests</td><td>Verified on macOS</td></tr><tr><td>The renderer's pixel tests</td><td>Verified on macOS with Metal only</td></tr><tr><td>The live preview</td><td>Runs on macOS; driven by script, not yet by hand</td></tr><tr><td>CI on Linux</td><td>Formatting, lints, the tests that need no GPU, the Android lints and the servers' tests passed on their first run</td></tr><tr><td>CI on a hosted Mac (every test, on a GPU)</td><td>Started by hand only; has not run</td></tr></tbody></table></div><h2 id="how-this-page-stays-honest"><a class="anchor" href="#how-this-page-stays-honest">How this page stays honest</a></h2><p>The rule in <code>AGENTS.md</code> is to state what was and was not verified on a real device, and the verification table is updated with each change. When this summary and that table disagree, the table is right.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="../architecture/index.html"><span>Previous</span>Decision records</a><a class="next" href="performance.html"><span>Next</span>Performance</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/reference/platform-status.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#android">Android</a><a class="ti" href="#ios">iOS</a><a class="ti" href="#the-development-machine">The development machine</a><a class="ti" href="#how-this-page-stays-honest">How this page stays honest</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

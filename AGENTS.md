@@ -98,6 +98,8 @@ It must have:
 | `examples/atlas` | Ten screens from a third design, an AI assistant: radial gradients, blur, inner shadows, a bottom sheet, a sideways chip row. With its server (`server/`, DeepSeek and optional voice) the chat is real; without it, scripted. Tested against its references. Start with its `SCREENS.md`. |
 | `examples/barua-talk` | Five screens from a fourth design, rooms, chat and calls: photographs beside the drawing, a blurred backdrop, an arched bar. With its server (`server/`, the Barua Talk API) rooms, messages, in-app calls and phone calls are real and carry sound, both cameras and a shared screen through a live room that goes on behind another app (ADRs 0038, 0039 and 0042); without it, scripted from the design's own people. Tested against its references. Start with its `SCREENS.md`. |
 | `docs/architecture` | Architecture Decision Records. Read before changing a subsystem. |
+| `docs`, `site` | The documentation: Markdown in `docs/` (pages listed in `docs/site.json`), built into the static site `site/` by `tools/build-docs.py` (ADR 0044). `site/**/*.html` and `site/assets/search-index.js` are output: never edit them. `site/assets` (stylesheet, script, logo, fonts) and `site/shots` (screenshots, written by `tools/docs-screenshots.sh`) are sources. |
+| `examples/docs-snippets` | The documentation's code samples, as a crate, so that they compile. Not an app. A page includes a region marked `// docs:begin name` ... `// docs:end name`. |
 | `benchmarks` | Benchmark method and reports. `benchmarks/host` (`morningstar-bench`) times every designed screen on this machine with no phone: a regression baseline, not a device measurement. |
 | `.github/workflows` | Continuous integration (ADR 0043): lint and GPU-free tests on Linux, every test on macOS for `main`. No secrets. |
 
@@ -121,6 +123,8 @@ cargo run -p fundidesk --example screenshot -- out/ 07 --diff --phone   # one Fu
 tools/build-ios.sh                     # XCFramework, icon and names for the example (MORNINGSTAR_APP; needs full Xcode)
 cargo run -q -p morningstar-devtools --bin morningstar-icon -- callready --preview out/icon.png   # the app's launcher icon in every form; look at it
 cargo run -p callready --example icon  # redraw an app's source icon (assets/icon.png) from its own art
+python3 tools/build-docs.py            # rebuild the documentation site (site/) from docs/; --check fails if it is stale or a link is broken
+tools/docs-screenshots.sh [app ...]    # re-render the site's screenshots (site/shots) and the tools' help texts; then rebuild the site
 ```
 
 ### Building a screen from a design
@@ -143,3 +147,4 @@ Read `docs/building-screens.md` and `docs/design-to-code.md`, imitate `examples/
 - A phone connected over adb belongs to a person who may be using it. Never call `adb shell input`, monkey or `screencap` directly. The only permitted route is `tools/adb-guarded.sh`, which checks the foreground app immediately before each command, and even then only when the owner has agreed and is not using the app: a guarded tap has still landed while the owner was mid-typing. Prefer proving behaviour from logs.
 - Disk space on the main development machine is tight: prefer `-p` builds, avoid release and cross builds you do not need.
 - State what was and was not verified on a real device. `docs/architecture/README.md` tracks verification status.
+- The documentation says only what the repository does. After changing a guide, a doc comment of a public method, a tool's help or a sample in `examples/docs-snippets`, run `python3 tools/build-docs.py` and commit `site/` with the change. A new code sample in a page goes into `examples/docs-snippets` and is included from there, never typed into the Markdown. After changing how an example's screen looks, run `tools/docs-screenshots.sh <app>`.

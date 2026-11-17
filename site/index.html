@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Morningstar documentation</title>
+<meta name="description" content="Morningstar is a Rust framework for building Android and iOS apps from one codebase. You describe each screen as a function of your app&#x27;s state; Morningstar lays it out and draws it itself on the GPU. There is no web view, and none of the platform&#x27;s own widgets.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="index.html"><img src="assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="index.html" aria-current="true">Guide</a><a class="tl" href="widgets/index.html">Widgets</a><a class="tl" href="reference/application.html">Reference</a><a class="tl" href="examples/index.html">Examples</a></nav>
+<a class="cta" href="getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="index.html" aria-current="true">Guide</a><a class="tl" href="widgets/index.html">Widgets</a><a class="tl" href="reference/application.html">Reference</a><a class="tl" href="examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni on" href="index.html" aria-current="page">Overview</a><a class="ni" href="guide/what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="guide/rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni" href="guide/installation.html">Installation</a><a class="ni" href="getting-started.html">Your first app</a><a class="ni" href="guide/project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="guide/application-model.html">The application model</a><a class="ni" href="guide/layout.html">Layout</a><a class="ni" href="guide/text-and-pictures.html">Text, fonts and pictures</a><a class="ni" href="guide/theming-and-motion.html">Themes and motion</a><a class="ni" href="guide/text-input.html">Text input</a><a class="ni" href="guide/navigation.html">Navigation and time</a><a class="ni" href="guide/effects.html">Effects and services</a><a class="ni" href="guide/live-rooms.html">Live rooms</a><a class="ni" href="guide/accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni" href="building-screens.html">Building screens</a><a class="ni" href="design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="guide/testing.html">Testing</a><a class="ni" href="guide/android.html">Build for Android</a><a class="ni" href="guide/ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Introduction</span><span aria-hidden="true">/</span><span class="here">Overview</span></div>
+<article>
+<h1>Morningstar documentation</h1><p class="lead">Morningstar is a Rust framework for building Android and iOS apps from one codebase. You describe each screen as a function of your app's state; Morningstar lays it out and draws it itself on the GPU. There is no web view, and none of the platform's own widgets.</p><div class="code titled"><div class="code-head"><span>src/lib.rs</span></div><pre><code><span class="k">use</span> morningstar::ui::prelude::*;
+
+<span class="c">/// The application's state.</span>
+<span class="k">#[derive(Default)]</span>
+<span class="k">pub</span> <span class="k">struct</span> <span class="t">Counter</span> {
+    <span class="k">pub</span> count: u32,
+}
+
+<span class="c">/// What can happen to it.</span>
+<span class="k">#[derive(Clone)]</span>
+<span class="k">pub</span> <span class="k">enum</span> <span class="t">Message</span> {
+    <span class="t">Tapped</span>,
+}
+
+<span class="k">impl</span> <span class="t">Application</span> <span class="k">for</span> <span class="t">Counter</span> {
+    <span class="k">type</span> <span class="t">Message</span> = <span class="t">Message</span>;
+
+    <span class="c">// What the screen looks like, as a function of the state.</span>
+    <span class="k">fn</span> <span class="f">view</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
+        <span class="t">SafeArea</span>::<span class="f">new</span>(
+            <span class="k">col!</span>[
+                <span class="f">text</span>(<span class="k">format!</span>(<span class="s">"Tapped {} times"</span>, <span class="k">self</span>.count)).<span class="f">title</span>(),
+                <span class="t">Button</span>::<span class="f">new</span>(<span class="s">"Tap me"</span>).<span class="f">on_press</span>(<span class="t">Message</span>::<span class="t">Tapped</span>).<span class="f">fill_width</span>(),
+            ]
+            .<span class="f">gap</span>(<span class="s">16.0</span>)
+            .<span class="f">padding</span>(<span class="s">24.0</span>)
+            .<span class="f">fill_width</span>(),
+        )
+        .<span class="f">into</span>()
+    }
+
+    <span class="c">// The only place the state changes.</span>
+    <span class="k">fn</span> <span class="f">update</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, message: <span class="t">Message</span>) {
+        <span class="k">match</span> message {
+            <span class="t">Message</span>::<span class="t">Tapped</span> =&gt; <span class="k">self</span>.count += <span class="s">1</span>,
+        }
+    }
+}</code></pre></div><p>That is a whole application. <code>view</code> says what the screen looks like for the current state, a tap delivers a <code>Message</code>, and <code>update</code> is the only place the state changes. One more line makes the crate an app the phone can start:</p><div class="code"><pre><code><span class="c">// The one line that makes the crate an app: the hosts call into it.</span>
+morningstar::<span class="k">app!</span>(<span class="t">Ui</span>::<span class="f">new</span>(<span class="t">Counter</span>::<span class="f">default</span>()));</code></pre></div><h2 id="start-here"><a class="anchor" href="#start-here">Start here</a></h2><p>New to the framework? These four pages take you from an empty folder to an app running on your phone.</p><div class="cards"><a class="card" href="guide/installation.html"><span class="card-title">Installation</span><span class="card-text">What a machine needs to build an app, test it and put it on an Android phone.</span></a><a class="card" href="getting-started.html"><span class="card-title">Your first app</span><span class="card-text">One command writes an app that builds and passes its tests. Then change it.</span></a><a class="card" href="guide/application-model.html"><span class="card-title">The application model</span><span class="card-text">State, messages, <code>view</code>, <code>update</code>, and how work that takes time comes back as a message.</span></a><a class="card" href="widgets/index.html"><span class="card-title">Widget gallery</span><span class="card-text">Every widget with its methods, read from the source, and a sample that compiles.</span></a></div><h2 id="what-apps-built-with-it-look-like"><a class="anchor" href="#what-apps-built-with-it-look-like">What apps built with it look like</a></h2><p>Every picture in these pages is one frame through the real renderer, produced with no phone by the app's own screenshot program. Four of the example apps follow a design, and each is held to its design's pictures by tests.</p><div class="shots"><figure class="phone"><div class="phone-frame"><img src="shots/fundidesk-07-dashboard.jpg" alt="Screenshot: FundiDesk: the dashboard" loading="lazy"></div><figcaption>FundiDesk: the dashboard</figcaption></figure><figure class="phone"><div class="phone-frame"><img src="shots/callready-02-home.jpg" alt="Screenshot: CallReady: the home screen" loading="lazy"></div><figcaption>CallReady: the home screen</figcaption></figure><figure class="phone"><div class="phone-frame"><img src="shots/atlas-04-chat.jpg" alt="Screenshot: Atlas: the chat" loading="lazy"></div><figcaption>Atlas: the chat</figcaption></figure><figure class="phone"><div class="phone-frame"><img src="shots/barua-talk-04-video-call.jpg" alt="Screenshot: Barua Talk: a video call" loading="lazy"></div><figcaption>Barua Talk: a video call</figcaption></figure></div><p>The <a href="examples/index.html">examples</a> say what each app shows and how to run it.</p><div class="note"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg><div><p><strong>Where the project stands.</strong> Android works: apps have been installed and used on one phone. The iOS host is written but has never been compiled, and several services answer "unsupported" there. <a href="reference/platform-status.html">Platform status</a> lists what has been seen on a device and what has not.</p></div></div><h2 id="supported-platforms"><a class="anchor" href="#supported-platforms">Supported platforms</a></h2><div class="table"><table><thead><tr><th>Platform</th><th>State</th></tr></thead><tbody><tr><td>Android</td><td>Builds for API 24 (Android 7.0) and later. Run on one phone so far: a Galaxy A27 on Android 16</td></tr><tr><td>iOS</td><td>Shared code type-checks for iOS; the Swift host has never been built or run</td></tr><tr><td>Development machine</td><td>A Mac: the tests draw on its GPU, and the <a href="reference/tools.html#the-live-preview">live preview</a> opens a window on it</td></tr><tr><td>Rust</td><td>Stable, 1.87 or newer</td></tr></tbody></table></div><h2 id="getting-help"><a class="anchor" href="#getting-help">Getting help</a></h2><p>The repository is the reference. <code>AGENTS.md</code> at its root holds the rules every change follows, each subsystem's decision is recorded under <a href="architecture/index.html">decision records</a>, and <a href="reference/troubleshooting.html">troubleshooting</a> collects the problems that have actually come up.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><span></span><a class="next" href="guide/what-it-is.html"><span>Next</span>What Morningstar is, and is not</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/index.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#start-here">Start here</a><a class="ti" href="#what-apps-built-with-it-look-like">What apps built with it look like</a><a class="ti" href="#supported-platforms">Supported platforms</a><a class="ti" href="#getting-help">Getting help</a></aside>
+</div>
+<script>window.MS_ROOT = ".";</script>
+<script src="assets/site.js" defer></script>
+</body>
+</html>

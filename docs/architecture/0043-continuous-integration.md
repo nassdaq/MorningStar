@@ -1,6 +1,6 @@
 # 0043 — Continuous integration: what runs where, and what it costs
 
-Status: Accepted (2026-11-17). **The workflow has never run.** It was written from the actions' and runner images' own documentation as read on that day and checked to parse; everything about its behaviour on a runner is unverified until its first run, and is listed below.
+Status: Accepted (2026-11-17). **First run on 2026-11-17: the three Linux jobs passed** (format, lint and the tests without a GPU; the Android lint; the three servers' tests). The macOS `gpu` job has never run: it was made manual-only before the first push, so whether the pixel tests pass on a hosted Mac's GPU, and what that costs, is still unknown.
 
 ## Context
 
@@ -15,7 +15,7 @@ One workflow, `.github/workflows/ci.yml`, four jobs.
 | `rust` | Linux | every push to `main`, every pull request | `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; the tests of `morningstar-core`, `-layout` and `-text` |
 | `android` | Linux | the same | `cargo ndk -t arm64-v8a clippy` of the seven example apps, with the runner image's own NDK. The Rust half only: no Gradle, no APK |
 | `servers` | Linux, one per server | the same | `npm ci && npm test` for Atlas, CallReady and Barua Talk. No `.env` exists, so the tests against a real database, model or Talk API skip themselves; the rest run on in-memory fakes |
-| `gpu` | macOS (Apple silicon) | pushes to `main`, and by hand | `cargo test --workspace`: every test, the renderer's pixel tests and the examples' fidelity tests included |
+| `gpu` | macOS (Apple silicon) | by hand only (changed before the first push: ten times a Linux minute's price) | `cargo test --workspace`: every test, the renderer's pixel tests and the examples' fidelity tests included |
 
 **Why the tests are split.** The pixel tests are the specification of the renderer and have only ever been verified on Metal. A Linux runner has no GPU; a software Vulkan could be installed, but whether its pixels match the references is unknown, and a job that fails for the rasteriser's reasons teaches nobody anything. So Linux runs only the crates whose tests draw nothing (types, layout, text shaping and rasterising on the CPU), and everything that builds a renderer runs where it is known to pass. A macOS minute costs about ten times a Linux one, so that job does not run for pull requests.
 

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Examples · Morningstar</title>
+<meta name="description" content="The repository&#x27;s own apps. Each one exists to show something, and each is tested on the development machine. The pictures are frames rendered by the app&#x27;s own screenshot program, with no phone.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl on" href="index.html" aria-current="true">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Examples">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl on" href="index.html" aria-current="true">Examples</a></div>
+<p class="nh">Apps</p><a class="ni on" href="index.html" aria-current="page">All examples</a><a class="ni" href="starter.html">Starter</a><a class="ni" href="showcase.html">Showcase</a><a class="ni" href="fundidesk.html">FundiDesk</a><a class="ni" href="callready.html">CallReady</a><a class="ni" href="atlas.html">Atlas</a><a class="ni" href="barua-talk.html">Barua Talk</a><p class="nh">Small programs</p><a class="ni" href="services-check.html">services-check</a><a class="ni" href="hello-gpu.html">hello-gpu</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Examples</span><span aria-hidden="true">/</span><span>Apps</span><span aria-hidden="true">/</span><span class="here">All examples</span></div>
+<article>
+<h1>Examples</h1><p class="lead">The repository's own apps. Each one exists to show something, and each is tested on the development machine. The pictures are frames rendered by the app's own screenshot program, with no phone.</p><div class="table"><table><thead><tr><th>App</th><th>Shows</th><th>Screens</th><th>Server</th></tr></thead><tbody><tr><td><a href="starter.html">Starter</a></td><td>What <code>morningstar-new</code> writes: the smallest complete app</td><td>2</td><td>Optional</td></tr><tr><td><a href="showcase.html">Showcase</a></td><td>Realistic screens written with the UI layer alone</td><td>3</td><td>No</td></tr><tr><td><a href="fundidesk.html">FundiDesk</a></td><td>A whole design reproduced: twelve screens held to their pictures</td><td>12</td><td>No</td></tr><tr><td><a href="callready.html">CallReady</a></td><td>Illustrated screens: turned elements, vector pictures, text effects</td><td>13</td><td>Yes, port 8787</td></tr><tr><td><a href="atlas.html">Atlas</a></td><td>An AI assistant: glows, blur, a bottom sheet, a real chat</td><td>10</td><td>Yes, port 8788</td></tr><tr><td><a href="barua-talk.html">Barua Talk</a></td><td>Rooms, chat and calls with sound and pictures in a live room</td><td>5 designed, more of its own</td><td>Yes, port 8789</td></tr><tr><td><a href="services-check.html">services-check</a></td><td>One button per platform service: a smoke test for a phone</td><td>1</td><td>No</td></tr><tr><td><a href="hello-gpu.html">hello-gpu</a></td><td>The low-level API: painting and hit-testing by hand</td><td>1</td><td>No</td></tr></tbody></table></div><h2 id="running-any-of-them"><a class="anchor" href="#running-any-of-them">Running any of them</a></h2><div class="code"><pre><code><span class="f">cargo</span> test -p atlas                                  <span class="c"> # its tests</span>
+<span class="f">cargo</span> run -p atlas --example screenshot -- out/      <span class="c"> # its screens as PNG files</span>
+<span class="f">tools/preview.sh</span> atlas                               <span class="c"> # live in a window on a Mac</span>
+MORNINGSTAR_APP=atlas MORNINGSTAR_ABIS=arm64-v8a <span class="f">tools/build-android.sh</span> --install</code></pre></div><p>The apps with a server also run without it: they fall back to a scripted version of themselves, which is what the tests and the screenshots use.</p><h2 id="which-to-read-first"><a class="anchor" href="#which-to-read-first">Which to read first</a></h2><p>Read <strong>FundiDesk</strong> to see how a design becomes screens: its <code>SCREENS.md</code> is the method. Read <strong>Starter</strong> for the shape of a new app, and <strong>Barua Talk</strong> for an app with a server, effects and a live room.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><span></span><a class="next" href="starter.html"><span>Next</span>Starter</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/examples/index.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#running-any-of-them">Running any of them</a><a class="ti" href="#which-to-read-first">Which to read first</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

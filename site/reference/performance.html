@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Performance · Morningstar</title>
+<meta name="description" content="The project&#x27;s rule is that nothing is claimed about performance without a measurement. This page states what has been measured and nothing else.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni" href="application.html">Application</a><a class="ni" href="effects.html">Effects</a><a class="ni" href="ui.html">Ui and testing</a><a class="ni" href="navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="tools.html">Tools and scripts</a><a class="ni" href="services.html">Opt-in services</a><p class="nh">Project</p><a class="ni" href="architecture.html">Architecture</a><a class="ni" href="../architecture/index.html">Decision records</a><a class="ni" href="platform-status.html">Platform status</a><a class="ni on" href="performance.html" aria-current="page">Performance</a><a class="ni" href="troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><span>Project</span><span aria-hidden="true">/</span><span class="here">Performance</span></div>
+<article>
+<h1>Performance</h1><p class="lead">The project's rule is that nothing is claimed about performance without a measurement. This page states what has been measured and nothing else.</p><h2 id="on-the-development-machine"><a class="anchor" href="#on-the-development-machine">On the development machine</a></h2><p>A baseline for noticing regressions. <strong>It is not a device measurement and says nothing about a phone.</strong></p><div class="table"><table><thead><tr><th></th><th></th></tr></thead><tbody><tr><td>Machine</td><td>Apple M4, 10 cores, 16 GB, macOS, Metal through wgpu 30</td></tr><tr><td>Build</td><td><code>--release</code>, rustc 1.92.0</td></tr><tr><td>Frame</td><td>1080 x 2340 px at 2.8125 px per dp, the size of a Galaxy A27's screen</td></tr><tr><td>Screens</td><td>32 screens of the example apps, 120 frames each, three runs</td></tr><tr><td>Date</td><td>2026-11-17</td></tr></tbody></table></div><div class="table"><table><thead><tr><th>Measure</th><th>Run 1</th><th>Run 2</th><th>Run 3</th></tr></thead><tbody><tr><td>Building a frame, median screen (ms)</td><td>0.038</td><td>0.034</td><td>0.036</td></tr><tr><td>Building a frame, slowest screen (ms)</td><td>0.080</td><td>0.083</td><td>0.086</td></tr><tr><td>Drawing and reading back, median screen (ms)</td><td>4.68</td><td>4.89</td><td>6.08</td></tr><tr><td>An empty frame, drawn and read back (ms)</td><td>1.81</td><td>1.87</td><td>1.77</td></tr><tr><td>First frame of a screen, median (ms)</td><td>8.43</td><td>7.43</td><td>8.57</td></tr></tbody></table></div><p>What can be read from it:</p><ul><li><strong>Building a frame</strong> (<code>view</code>, layout, text and painting into the display list, CPU only) took under a tenth of a millisecond for every screen in every run.</li><li><strong>Drawing</strong> includes copying the pixels back from the GPU, which a phone never does, and an empty frame accounts for about 1.8 ms of it. The machine was not quiet: two other builds were running, and the same screen measured 2.0 and 3.7 ms in different runs. Do not rank screens by these numbers.</li><li><strong>Every screen is one render pass.</strong> Screens without pictures are one draw call; screens with photographs are more.</li><li><strong>Video</strong>: the cost of uploading and converting a 720p frame was not resolved by this run.</li></ul><p>The report, with every screen, is <code>benchmarks/reports/2026-11-17-host-baseline.md</code>. Run it again with:</p><div class="code"><pre><code><span class="f">cargo</span> run --release -p morningstar-bench -- --markdown</code></pre></div><h2 id="on-a-phone"><a class="anchor" href="#on-a-phone">On a phone</a></h2><p>One early session on a Galaxy A27 (2026-11-11) recorded that a frame is presented at the display's 120 Hz and that an idle screen draws nothing: one frame in six seconds. It is in <code>benchmarks/reports/2026-11-11-galaxy-a27.md</code>.</p><p><strong>Not measured on any phone:</strong> frame time under scrolling or animation, memory, GPU load, battery, the cost of a video frame, and start-up time. The method for measuring is <code>benchmarks/android/measure.sh</code> and <code>benchmarks/README.md</code>.</p><h2 id="what-the-design-does-about-it"><a class="anchor" href="#what-the-design-does-about-it">What the design does about it</a></h2><p>These are properties of the design, not measurements:</p><ul><li>Frames are produced on demand; an idle app draws nothing.</li><li>Text shaping is cached for as long as the same text keeps being shown.</li><li>The layout tree, hit regions and display list are reused and stop allocating once they reach their working size.</li><li>A video keeps only its latest frame.</li></ul>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="platform-status.html"><span>Previous</span>Platform status</a><a class="next" href="troubleshooting.html"><span>Next</span>Troubleshooting</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/reference/performance.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#on-the-development-machine">On the development machine</a><a class="ti" href="#on-a-phone">On a phone</a><a class="ti" href="#what-the-design-does-about-it">What the design does about it</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

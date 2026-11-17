@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture · Morningstar</title>
+<meta name="description" content="Morningstar is a workspace of small crates with a one-way dependency direction. An app depends on one of them.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni" href="application.html">Application</a><a class="ni" href="effects.html">Effects</a><a class="ni" href="ui.html">Ui and testing</a><a class="ni" href="navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="tools.html">Tools and scripts</a><a class="ni" href="services.html">Opt-in services</a><p class="nh">Project</p><a class="ni on" href="architecture.html" aria-current="page">Architecture</a><a class="ni" href="../architecture/index.html">Decision records</a><a class="ni" href="platform-status.html">Platform status</a><a class="ni" href="performance.html">Performance</a><a class="ni" href="troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><span>Project</span><span aria-hidden="true">/</span><span class="here">Architecture</span></div>
+<article>
+<h1>Architecture</h1><p class="lead">Morningstar is a workspace of small crates with a one-way dependency direction. An app depends on one of them.</p><h2 id="the-crates"><a class="anchor" href="#the-crates">The crates</a></h2><div class="table"><table><thead><tr><th>Crate</th><th>Owns</th></tr></thead><tbody><tr><td><code>morningstar</code></td><td>The public API. The only crate an app depends on</td></tr><tr><td><code>morningstar-core</code></td><td>Types with no dependencies: colours, geometry, the display list, the data of platform services, a video's frames</td></tr><tr><td><code>morningstar-layout</code></td><td>The layout engine: fixed, hug and fill boxes to rectangles. Depends only on core</td></tr><tr><td><code>morningstar-text</code></td><td>Fonts, shaping, the layout cache, the glyph atlas, vector icons, SVG. The only crate that uses <code>cosmic-text</code> and <code>zeno</code></td></tr><tr><td><code>morningstar-gpu</code></td><td>The renderer. The only crate that uses <code>wgpu</code>; no <code>wgpu</code> type appears in its public API</td></tr><tr><td><code>morningstar-runtime</code></td><td>The engine: lifecycle in, frames out, service requests out and answers in. The one object a host drives</td></tr><tr><td><code>morningstar-ui</code></td><td>Widgets, state and messages, themes, effects and their test driver. Apps use it as <code>morningstar::ui</code></td></tr><tr><td><code>morningstar-android</code></td><td>JNI entry points, the Rust-to-Java upcalls and the render thread. Empty off Android</td></tr><tr><td><code>morningstar-ios</code></td><td>The C interface for the UIKit host. Empty off iOS</td></tr></tbody></table></div><h2 id="the-direction"><a class="anchor" href="#the-direction">The direction</a></h2><div class="code"><pre><code>core  &lt;-  gpu, text, layout  &lt;-  runtime  &lt;-  ui  &lt;-  android | ios  &lt;-  morningstar  &lt;-  your app</code></pre></div><p><code>core</code>, <code>gpu</code>, <code>text</code> and <code>runtime</code> never depend on a platform crate and contain no platform-specific code beyond the handle of the surface they draw on. That is why the whole of an app can be built, drawn and tested on a development machine.</p><h2 id="the-hosts"><a class="anchor" href="#the-hosts">The hosts</a></h2><p><code>templates/android</code> and <code>templates/ios</code> are native projects with no application logic. They create the surface, forward input, and implement the platform services. The Java or Swift side and its Rust counterpart are two halves of one interface and change together; an app library and a host from different sides of such a change must never be combined.</p><h2 id="an-app-at-run-time"><a class="anchor" href="#an-app-at-run-time">An app, at run time</a></h2><ol><li>The host starts and loads the app's native library.</li><li><code>morningstar::app!</code> hands the host an engine holding the app's <code>Ui</code>.</li><li>The host forwards lifecycle, the surface, touches and the keyboard.</li><li>The engine produces a frame when one is needed, and nothing otherwise.</li><li>Requests for platform services go out to the host as data; answers come back and become messages.</li></ol><p><a href="../guide/rendering.html">How rendering works</a> follows one frame through the crates.</p><h2 id="tools-around-it"><a class="anchor" href="#tools-around-it">Tools around it</a></h2><div class="table"><table><thead><tr><th>Path</th><th>Owns</th></tr></thead><tbody><tr><td><code>tools/morningstar-devtools</code></td><td>Screenshots without a device, the design comparison, the icon generator, the SVG renderer, the new-app generator</td></tr><tr><td><code>tools/morningstar-preview</code></td><td>The development host for a Mac</td></tr><tr><td><code>benchmarks/host</code></td><td>The host benchmark</td></tr><tr><td><code>examples/docs-snippets</code></td><td>The code samples of these pages</td></tr></tbody></table></div><h2 id="decisions"><a class="anchor" href="#decisions">Decisions</a></h2><p>Every architectural decision is recorded: what was decided, why, and what it costs. An accepted record is not edited to change its decision; a new record supersedes it. The <a href="../architecture/index.html">decision records</a> page lists all of them, and tracks what has been verified and where.</p><p>The ones to read first:</p><ul><li><a href="../architecture/0001-crate-boundaries.html">0001: crate boundaries</a></li><li><a href="../architecture/0003-platform-hosts.html">0003: thin native hosts</a></li><li><a href="../architecture/0013-ui-layer.html">0013: the declarative UI layer</a></li><li><a href="../architecture/0019-effects-and-platform-services.html">0019: effects and platform services</a></li><li><a href="../architecture/0012-scale-insets-and-demand-rendering.html">0012: scale, insets and demand-driven rendering</a></li></ul>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="services.html"><span>Previous</span>Opt-in services</a><a class="next" href="../architecture/index.html"><span>Next</span>Decision records</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/reference/architecture.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#the-crates">The crates</a><a class="ti" href="#the-direction">The direction</a><a class="ti" href="#the-hosts">The hosts</a><a class="ti" href="#an-app-at-run-time">An app, at run time</a><a class="ti" href="#tools-around-it">Tools around it</a><a class="ti" href="#decisions">Decisions</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

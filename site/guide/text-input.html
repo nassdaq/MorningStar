@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Text input · Morningstar</title>
+<meta name="description" content="TextInput is an editable text. The application owns the string: the widget shows the value it is given and delivers each new value as a message, which update stores.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni" href="installation.html">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni" href="project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni" href="text-and-pictures.html">Text, fonts and pictures</a><a class="ni" href="theming-and-motion.html">Themes and motion</a><a class="ni on" href="text-input.html" aria-current="page">Text input</a><a class="ni" href="navigation.html">Navigation and time</a><a class="ni" href="effects.html">Effects and services</a><a class="ni" href="live-rooms.html">Live rooms</a><a class="ni" href="accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="testing.html">Testing</a><a class="ni" href="android.html">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Core concepts</span><span aria-hidden="true">/</span><span class="here">Text input</span></div>
+<article>
+<h1>Text input</h1><p class="lead"><code>TextInput</code> is an editable text. The application owns the string: the widget shows the value it is given and delivers each new value as a message, which <code>update</code> stores.</p><h2 id="a-field"><a class="anchor" href="#a-field">A field</a></h2><p>Like <code>Text</code>, an input has no frame of its own. The box around it is the field.</p><div class="code"><pre><code><span class="k">fn</span> <span class="f">phone_field</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
+    <span class="c">// The input is only its text. The box around it is the field:</span>
+    <span class="c">// its height, padding, border, and its look while focused.</span>
+    <span class="k">row!</span>[
+        <span class="t">TextInput</span>::<span class="f">new</span>(<span class="k">self</span>.phone.<span class="f">clone</span>())
+            .<span class="f">placeholder</span>(<span class="s">"0712 345 678"</span>)
+            .<span class="f">keyboard</span>(<span class="t">KeyboardType</span>::<span class="t">Phone</span>)
+            .<span class="f">action</span>(<span class="t">ImeAction</span>::<span class="t">Next</span>)
+            .<span class="f">max_length</span>(<span class="s">13</span>)
+            <span class="c">// The application owns the string: every change arrives</span>
+            <span class="c">// as a message, and `update` stores it.</span>
+            .<span class="f">on_input</span>(<span class="t">Message</span>::<span class="t">Phone</span>)
+            .<span class="f">semantic_label</span>(<span class="s">"Phone number"</span>)
+            <span class="c">// Focus stays with the field when the screen changes.</span>
+            .<span class="f">id</span>(<span class="s">"phone"</span>)
+            .<span class="f">fill_width</span>(),
+    ]
+    .<span class="f">height</span>(<span class="s">52.0</span>)
+    .<span class="f">cross_align</span>(<span class="t">CrossAlign</span>::<span class="t">Center</span>)
+    .<span class="f">padding_xy</span>(<span class="s">16.0</span>, <span class="s">0.0</span>)
+    .<span class="f">radius</span>(<span class="s">12.0</span>)
+    .<span class="f">border</span>(<span class="s">1.0</span>, <span class="t">ThemeColor</span>::<span class="t">Divider</span>)
+    .<span class="f">focused_border</span>(<span class="s">2.0</span>, <span class="t">ThemeColor</span>::<span class="t">Primary</span>)
+    <span class="c">// A tap anywhere in the box focuses the input inside it.</span>
+    .<span class="f">input_frame</span>()
+    .<span class="f">fill_width</span>()
+    .<span class="f">into</span>()
+}</code></pre></div><ul><li><code>.input_frame()</code> makes a tap anywhere in the box focus the input.</li><li><code>.focused_border(..)</code> and <code>.focused_background(..)</code> are the box's look while the input has focus.</li><li><code>.id(..)</code> keeps focus with the field when the screen changes around it. An input that leaves the tree loses focus, and the keyboard goes away.</li></ul><h2 id="the-keyboard"><a class="anchor" href="#the-keyboard">The keyboard</a></h2><div class="code"><pre><code><span class="k">fn</span> <span class="f">password_field</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
+    <span class="k">row!</span>[
+        <span class="t">TextInput</span>::<span class="f">new</span>(<span class="k">self</span>.password.<span class="f">clone</span>())
+            .<span class="f">placeholder</span>(<span class="s">"Password"</span>)
+            .<span class="f">secure</span>(<span class="k">true</span>)
+            .<span class="f">no_autocorrect</span>()
+            .<span class="f">action</span>(<span class="t">ImeAction</span>::<span class="t">Done</span>)
+            .<span class="f">on_input</span>(<span class="t">Message</span>::<span class="t">Password</span>)
+            <span class="c">// The keyboard's action key.</span>
+            .<span class="f">on_submit</span>(<span class="t">Message</span>::<span class="t">Submit</span>)
+            .<span class="f">semantic_label</span>(<span class="s">"Password"</span>)
+            .<span class="f">id</span>(<span class="s">"password"</span>)
+            .<span class="f">fill_width</span>(),
+    ]
+    .<span class="f">height</span>(<span class="s">52.0</span>)
+    .<span class="f">cross_align</span>(<span class="t">CrossAlign</span>::<span class="t">Center</span>)
+    .<span class="f">padding_xy</span>(<span class="s">16.0</span>, <span class="s">0.0</span>)
+    .<span class="f">radius</span>(<span class="s">12.0</span>)
+    .<span class="f">border</span>(<span class="s">1.0</span>, <span class="t">ThemeColor</span>::<span class="t">Divider</span>)
+    .<span class="f">focused_border</span>(<span class="s">2.0</span>, <span class="t">ThemeColor</span>::<span class="t">Primary</span>)
+    .<span class="f">input_frame</span>()
+    .<span class="f">fill_width</span>()
+    .<span class="f">into</span>()
+}</code></pre></div><div class="table"><table><thead><tr><th>Method</th><th>Effect</th></tr></thead><tbody><tr><td><code>.keyboard(KeyboardType::..)</code></td><td>Which keyboard is shown: <code>Text</code>, <code>Number</code>, <code>Decimal</code>, <code>Phone</code> or <code>Email</code></td></tr><tr><td><code>.action(ImeAction::..)</code></td><td>The action key: <code>Done</code>, <code>Next</code>, <code>Go</code>, <code>Search</code> or <code>Send</code></td></tr><tr><td><code>.on_submit(message)</code></td><td>What the action key sends</td></tr><tr><td><code>.capitalization(..)</code></td><td>What the keyboard capitalises by itself: nothing, sentences, words or every character</td></tr><tr><td><code>.no_autocorrect()</code></td><td>Turns correction and suggestions off</td></tr><tr><td><code>.secure(true)</code></td><td>A password: characters are shown as bullets</td></tr><tr><td><code>.max_length(n)</code>, <code>.digits_only()</code></td><td>What the value may hold</td></tr><tr><td><code>.multiline()</code>, <code>.max_lines(n)</code></td><td>Several lines; bounded, the field scrolls inside itself</td></tr><tr><td><code>.auto_advance()</code></td><td>For a row of one-character code boxes</td></tr></tbody></table></div><p>While the keyboard is up, boxes that pad for the bottom safe area pad for the keyboard instead, and the focused field is kept in view.</p><h2 id="selection-and-the-clipboard"><a class="anchor" href="#selection-and-the-clipboard">Selection and the clipboard</a></h2><p>A field behaves as a native one does. A double tap or a long press selects a word and brings up two handles and a small menu (Cut, Copy, Paste, Select all), drawn by the framework. A hardware keyboard's arrows and shortcuts work, and the clipboard is the platform's. None of this reaches the application, which still sees only the new string. <a href="../architecture/0025-text-selection-and-clipboard.html">ADR 0025</a>.</p><p>The app can also use the clipboard itself, as an effect: <code>out.set_clipboard(text)</code> and <code>out.clipboard(on_text)</code>.</p><h2 id="what-has-been-seen-on-a-phone"><a class="anchor" href="#what-has-been-seen-on-a-phone">What has been seen on a phone</a></h2><p>Typing on Android has been verified on one phone, with the system keyboard: focus, the keyboard's type, Next and Done, and keyboard avoidance. Selection, the menu and the clipboard pass their tests on the development machine and have not yet been tried on a device.</p><h2 id="more"><a class="anchor" href="#more">More</a></h2><p>Every method is under <a href="../widgets/text-input.html">TextInput</a>. <a href="../building-screens.html#a-form">Building screens</a> has a complete form with validation.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="theming-and-motion.html"><span>Previous</span>Themes and motion</a><a class="next" href="navigation.html"><span>Next</span>Navigation and time</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/text-input.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#a-field">A field</a><a class="ti" href="#the-keyboard">The keyboard</a><a class="ti" href="#selection-and-the-clipboard">Selection and the clipboard</a><a class="ti" href="#what-has-been-seen-on-a-phone">What has been seen on a phone</a><a class="ti" href="#more">More</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

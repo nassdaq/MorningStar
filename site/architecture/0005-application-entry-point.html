@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0005 — Application entry point · Morningstar</title>
+<meta name="description" content="Status: Accepted (2026-11-11)">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni" href="../reference/application.html">Application</a><a class="ni" href="../reference/effects.html">Effects</a><a class="ni" href="../reference/ui.html">Ui and testing</a><a class="ni" href="../reference/navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="../reference/theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="../reference/tools.html">Tools and scripts</a><a class="ni" href="../reference/services.html">Opt-in services</a><p class="nh">Project</p><a class="ni" href="../reference/architecture.html">Architecture</a><a class="ni on" href="index.html">Decision records</a><a class="ni" href="../reference/platform-status.html">Platform status</a><a class="ni" href="../reference/performance.html">Performance</a><a class="ni" href="../reference/troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><a href="index.html">Decision records</a><span aria-hidden="true">/</span><span class="here">0005 — Application entry point</span></div>
+<article>
+<h1>0005 — Application entry point</h1><p class="lead">Status: Accepted (2026-11-11)</p><h2 id="context"><a class="anchor" href="#context">Context</a></h2><p>On both platforms the operating system starts the native host, not Rust's <code>main</code>. The host must end up running the developer's application type, and the developer should write one line to make that happen, with no platform <code>cfg</code>.</p><h2 id="decision"><a class="anchor" href="#decision">Decision</a></h2><p>The <strong>application crate is the native library</strong>: a <code>cdylib</code> on Android (<code>libmy_app.so</code>) and a <code>staticlib</code> on iOS. It depends only on <code>morningstar</code>.</p><p><code>morningstar::app!(expr)</code> expands to an exported Rust function, <code>__morningstar_create_app() -&gt; Box&lt;dyn App&gt;</code>. The platform crates declare that symbol as <code>extern "Rust"</code> and call it once when the host starts. The platform crates' own entry points (<code>Java_…</code>, <code>morningstar_ios_*</code>) are <code>#[no_mangle]</code> and are carried into the application library because <code>morningstar</code> re-exports the platform crate for the current target.</p><div class="code"><pre><code><span class="k">use</span> morningstar::prelude::*;
+
+<span class="k">struct</span> <span class="t">HelloGpu</span>;
+<span class="k">impl</span> <span class="t">App</span> <span class="k">for</span> <span class="t">HelloGpu</span> {
+    <span class="k">fn</span> <span class="f">frame</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, info: &amp;<span class="t">FrameInfo</span>, frame: &amp;<span class="k">mut</span> <span class="t">Frame</span>) { <span class="c">/* paint frame.list */</span> }
+    <span class="k">fn</span> <span class="f">pointer</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, event: &amp;<span class="t">PointerEvent</span>) { <span class="c">/* optional */</span> }
+}
+
+morningstar::<span class="k">app!</span>(<span class="t">HelloGpu</span>);</code></pre></div><h2 id="consequences"><a class="anchor" href="#consequences">Consequences</a></h2><ul><li>One source builds for both platforms; verified by symbol inspection of both artifacts.</li><li>Forgetting <code>app!</code> is a link error, not a runtime failure. Using it twice is a duplicate-symbol error.</li><li>The roadmap's <code>fn main() { Morningstar::new().run::&lt;Counter&gt;() }</code> is not how mobile apps start. A <code>main</code>-style entry can be offered later for a desktop development host; on mobile it would be decoration.</li><li><code>extern "Rust"</code> has no stable ABI, which is fine here: the app and the framework are always compiled together by the same compiler.</li><li><strong>The <code>App</code> trait is a low-level interface.</strong> The app paints a display list by hand and receives raw pointer events. The declarative UI engine (ADR 0006) will be built on top of it, as an <code>App</code> implementation supplied by Morningstar.</li></ul>
+</article>
+
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/architecture/0005-application-entry-point.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#context">Context</a><a class="ti" href="#decision">Decision</a><a class="ti" href="#consequences">Consequences</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

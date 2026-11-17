@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0034 — Blur of a box's background, evaluated per pixel: a solid box as its shadow, a radial gradient by quadrature; no blur pass · Morningstar</title>
+<meta name="description" content="Status: Accepted (2026-11-13). Verified on the development host only (macOS, Metal, offscreen). Nothing here has run on a device and nothing here has been timed.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni" href="../reference/application.html">Application</a><a class="ni" href="../reference/effects.html">Effects</a><a class="ni" href="../reference/ui.html">Ui and testing</a><a class="ni" href="../reference/navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="../reference/theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="../reference/tools.html">Tools and scripts</a><a class="ni" href="../reference/services.html">Opt-in services</a><p class="nh">Project</p><a class="ni" href="../reference/architecture.html">Architecture</a><a class="ni on" href="index.html">Decision records</a><a class="ni" href="../reference/platform-status.html">Platform status</a><a class="ni" href="../reference/performance.html">Performance</a><a class="ni" href="../reference/troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><a href="index.html">Decision records</a><span aria-hidden="true">/</span><span class="here">0034 — Blur of a box's background, evaluated per pixel: a solid box as its shadow, a radial gradient by quadrature; no blur pass</span></div>
+<article>
+<h1>0034 — Blur of a box's background, evaluated per pixel: a solid box as its shadow, a radial gradient by quadrature; no blur pass</h1><p class="lead">Status: Accepted (2026-11-13). Verified on the development host only (macOS, Metal, offscreen). Nothing here has run on a device and nothing here has been timed.</p><p>Extends <a href="0011-renderer-vocabulary.html">0011</a> (shadows as an analytic blur) and <a href="0033-radial-gradients.html">0033</a>. It adds no render pass and changes no decision of theirs.</p><h2 id="context"><a class="anchor" href="#context">Context</a></h2><p>CSS <code>filter: blur(Npx)</code> blurs whatever an element paints with a Gaussian of standard deviation N. The general way to do that is a post-process: draw the element into an offscreen target, blur it in two passes, composite. The Atlas design uses the filter five times, always on the same thing: an ellipse under the orb filled with <code>radial-gradient(ellipse, rgba(214,92,190,0.5), rgba(214,92,190,0) 70%)</code>, blurred by a twentieth of the orb's size. What is blurred is one box's background, known in closed form.</p><h2 id="decision"><a class="anchor" href="#decision">Decision</a></h2><p><strong><code>Container::blur(sigma)</code> blurs the box's background only, in the quad's own fragment shader, with no offscreen pass.</strong> What it means depends on the background:</p><ul><li><strong>A solid colour.</strong> A blurred rounded rectangle is exactly what a shadow is. The UI layer draws <code>Shadow { blur: 2 * sigma, offset 0 }</code> in the box's colour in place of the fill (a blur radius is two standard deviations, <a href="0011-renderer-vocabulary.html">0011</a>). Exact along x, a 6-point quadrature along y, as shadows have always been.</li><li><strong>A radial gradient.</strong> <code>fill_radial_gradient_rect(.., blur)</code> passes the sigma on the instance. The fragment stage evaluates the <em>unblurred</em> picture (the segment's colour times the rounded box's coverage) at 6 x 6 points around the pixel and sums them with Gauss-Hermite weights: nodes at <code>sqrt(2) * sigma * x_i</code>, which integrate a Gaussian times a polynomial of degree 11 exactly. The quad grows by three sigma, as a shadow's does. The segments of a multi-stop gradient each integrate their own band, and the bands sum to the whole.</li><li><strong>A linear gradient, a border, the children.</strong> Not blurred. A blur of arbitrary content is not available; it would be the post-process pass, on the layer targets of <a href="0028-group-opacity-layers.html">0028</a>, and is left until a design needs it.</li></ul><p><strong>How exact the quadrature is.</strong> The integrand is not a polynomial: a gradient has a kink at its centre and at each stop, and a box has an edge. Measured against a brute-force convolution, for the design's glow (an ellipse 141 x 42 dp fading to nothing at its edge, sigma 9 dp, peak alpha 0.31 after blurring) the largest error is 0.011 in alpha with 6 points a side, 0.007 with 8 and 0.016 with 4: about 1% of the picture's strength, under two 8-bit levels for this colour over this background. Six was chosen: 36 evaluations of a square root and a mix per pixel of a quad that small. <strong>The error grows where the gradient does not fade out inside its box</strong>: a blurred gradient with a visible hard edge is a step under the quadrature and can ripple by several percent. For that case, a solid box (exact) or the post-process pass are the right tools; the doc comment on <code>Container::blur</code> says so.</p><p><strong>Why not the pass now.</strong> It needs a second pipeline, intermediate targets and a kernel of some hundred taps at these sigmas on a phone, for every frame the orb moves; and the only content the design blurs has a closed form. The decision is per use, as <a href="0011-renderer-vocabulary.html">0011</a> decided for shadows.</p><p><strong>An ellipse is drawn as a pill.</strong> <code>border-radius: 50%</code> on a box that is not square is an ellipse, which the rounded-box distance cannot draw. The design's blurred ellipse and its highlight both carry gradients that reach zero at 99% of the way to the ellipse's edge, so the box's own shape never shows and a pill (which contains the ellipse) is the same picture. A box whose elliptical <em>edge</em> shows is still a vector picture (<a href="0017-transforms-and-vector-pictures.html">0017</a>).</p><h2 id="verification"><a class="anchor" href="#verification">Verification</a></h2><p><code>a_blurred_glow_matches_a_gaussian_blur_of_the_gradient</code> in <code>crates/morningstar-gpu/tests/radial.rs</code> compares the glow in miniature with a brute-force Gaussian blur of the gradient: every sampled pixel within 4 of 255. <code>crates/morningstar-ui/tests/decor.rs</code> holds what the UI layer emits for a blurred solid box and a blurred gradient. On Atlas the glow under the orb shows on five of ten screens, each within its fidelity limit.</p>
+</article>
+
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/architecture/0034-blur-of-a-box-background.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#context">Context</a><a class="ti" href="#decision">Decision</a><a class="ti" href="#verification">Verification</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

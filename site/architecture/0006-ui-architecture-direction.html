@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0006 — UI architecture direction · Morningstar</title>
+<meta name="description" content="Status: Proposed. Implemented so far: the display list with two operations (filled, optionally rounded rectangle; glyph), its GPU renderer, text (ADR 0009), and raw pointer input. Everything else records intent so Phase 2 and 3 work pulls in one direction.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni" href="../reference/application.html">Application</a><a class="ni" href="../reference/effects.html">Effects</a><a class="ni" href="../reference/ui.html">Ui and testing</a><a class="ni" href="../reference/navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="../reference/theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="../reference/tools.html">Tools and scripts</a><a class="ni" href="../reference/services.html">Opt-in services</a><p class="nh">Project</p><a class="ni" href="../reference/architecture.html">Architecture</a><a class="ni on" href="index.html">Decision records</a><a class="ni" href="../reference/platform-status.html">Platform status</a><a class="ni" href="../reference/performance.html">Performance</a><a class="ni" href="../reference/troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><a href="index.html">Decision records</a><span aria-hidden="true">/</span><span class="here">0006 — UI architecture direction</span></div>
+<article>
+<h1>0006 — UI architecture direction</h1><p class="lead">Status: Proposed. Implemented so far: the display list with two operations (filled, optionally rounded rectangle; glyph), its GPU renderer, text (ADR 0009), and raw pointer input. Everything else records intent so Phase 2 and 3 work pulls in one direction.</p><h2 id="direction"><a class="anchor" href="#direction">Direction</a></h2><div class="code"><pre><code>declarative description -&gt; retained widget tree -&gt; layout -&gt; display list -&gt; GPU
+        (app code)          (reconciliation)                  (renderer input)</code></pre></div><ul><li><strong>The display list is the contract between UI and rendering</strong>, and is the first thing to build (Phase 2). It is a flat, ordered list of draw operations (rect, rounded rect, image, glyph run, clip, transform). <code>Frame</code> (ADR 0005) grows from a clear colour into a display list. The renderer can then be developed and benchmarked with hand-written display lists, before any widget exists.</li><li><strong>Retained tree, declarative API.</strong> The developer describes UI as a function of state; Morningstar keeps a retained tree and reconciles, so a state change costs work proportional to what changed.</li><li><strong>Dirty tracking at three levels</strong>: which widgets rebuild, which subtrees re-lay-out, which screen regions redraw. This is also what makes true idle rendering possible (ADR 0004).</li><li><strong>Accessibility is a parallel output of the same tree</strong>, not an afterthought: a semantic tree that the platform hosts expose to TalkBack and VoiceOver.</li><li><strong>Text is its own subsystem</strong> with a Morningstar-owned API. Shaping, bidi, fallback and line breaking are too large to write from scratch; evaluate <code>cosmic-text</code>, or <code>rustybuzz</code> + <code>swash</code> directly, behind that API. Arabic and Swahili are first-class test cases.</li><li><strong>Native stays native</strong> where the OS does it better: text input goes through the platform IME, and pickers, permission prompts and share sheets are system UI.</li></ul><h2 id="decisions-deliberately-not-made-yet"><a class="anchor" href="#decisions-deliberately-not-made-yet">Decisions deliberately not made yet</a></h2><ul><li>The state model (signals, an Elm-style update loop, or immediate-mode closures). The roadmap's illustrative <code>State&lt;T&gt;</code> snippet has a button callback that borrows <code>&amp;self</code> from <code>build</code>, which a stored callback cannot do; the real design has to resolve ownership first.</li><li>Layout algorithm: single-pass box constraints, or flexbox via an existing crate.</li><li>Batching and text atlas strategy. These need measurements on real devices.</li></ul><h2 id="acceptance-criterion-for-phase-2"><a class="anchor" href="#acceptance-criterion-for-phase-2">Acceptance criterion for Phase 2</a></h2><p>A hand-written display list with rectangles, an image and a line of text renders identically (by pixel comparison of offscreen output) on Metal and Vulkan, with frame statistics recorded on at least one low-end Android device.</p>
+</article>
+
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/architecture/0006-ui-architecture-direction.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#direction">Direction</a><a class="ti" href="#decisions-deliberately-not-made-yet">Decisions deliberately not made yet</a><a class="ti" href="#acceptance-criterion-for-phase-2">Acceptance criterion for Phase 2</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

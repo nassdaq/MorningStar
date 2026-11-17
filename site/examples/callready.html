@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CallReady · Morningstar</title>
+<meta name="description" content="Practice for call-centre work: the app plays an angry customer and scores how the call was handled. Five screens are reproduced from a heavily illustrated design, and more are the app&#x27;s own, added so that every control leads somewhere.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl on" href="index.html" aria-current="true">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Examples">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl on" href="index.html" aria-current="true">Examples</a></div>
+<p class="nh">Apps</p><a class="ni" href="index.html">All examples</a><a class="ni" href="starter.html">Starter</a><a class="ni" href="showcase.html">Showcase</a><a class="ni" href="fundidesk.html">FundiDesk</a><a class="ni on" href="callready.html" aria-current="page">CallReady</a><a class="ni" href="atlas.html">Atlas</a><a class="ni" href="barua-talk.html">Barua Talk</a><p class="nh">Small programs</p><a class="ni" href="services-check.html">services-check</a><a class="ni" href="hello-gpu.html">hello-gpu</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Examples</span><span aria-hidden="true">/</span><span>Apps</span><span aria-hidden="true">/</span><span class="here">CallReady</span></div>
+<article>
+<h1>CallReady</h1><p class="lead">Practice for call-centre work: the app plays an angry customer and scores how the call was handled. Five screens are reproduced from a heavily illustrated design, and more are the app's own, added so that every control leads somewhere.</p><div class="shots"><figure class="phone"><div class="phone-frame"><img src="../shots/callready-01-welcome.jpg" alt="Screenshot: Welcome" loading="lazy"></div><figcaption>Welcome</figcaption></figure><figure class="phone"><div class="phone-frame"><img src="../shots/callready-02-home.jpg" alt="Screenshot: Home" loading="lazy"></div><figcaption>Home</figcaption></figure><figure class="phone"><div class="phone-frame"><img src="../shots/callready-03-live-call.jpg" alt="Screenshot: A live call" loading="lazy"></div><figcaption>A live call</figcaption></figure><figure class="phone"><div class="phone-frame"><img src="../shots/callready-04-call-report.jpg" alt="Screenshot: The call report" loading="lazy"></div><figcaption>The call report</figcaption></figure></div><h2 id="what-it-shows"><a class="anchor" href="#what-it-shows">What it shows</a></h2><ul><li><strong>Turned elements</strong>: tiles and text drawn through a transform, with text that stays sharp.</li><li><strong>Multi-colour vector pictures</strong> and illustrations loaded from SVG files.</li><li><strong>Text effects</strong>: hard shadows, outlined digits, italic, numbers that line up.</li><li><strong>A launcher icon of its own</strong>, drawn from the app's art by <code>cargo run -p callready --example icon</code>.</li><li><strong>Recording and playback</strong> through effects, with a server that plays the caller.</li></ul><h2 id="run-it"><a class="anchor" href="#run-it">Run it</a></h2><div class="code"><pre><code><span class="f">cargo</span> test -p callready
+<span class="f">cargo</span> run -p callready --example screenshot -- out/ --diff
+<span class="f">tools/preview.sh</span> callready</code></pre></div><p>Without its server it is a scripted app. With it, the call is real:</p><div class="code"><pre><code><span class="f">cd</span> examples/callready/server
+<span class="f">cp</span> .env.example .env       <span class="c"> # then fill in the keys; .env is never committed</span>
+<span class="f">npm</span> start                  <span class="c"> # 127.0.0.1:8787</span></code></pre></div><p>The server needs a PostgreSQL database and a DeepSeek key, and optionally an ElevenLabs key for voice; without the voice key calls run in text. Node 22 or newer.</p><p><code>examples/callready/SCREENS.md</code> lists every screen and control.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="fundidesk.html"><span>Previous</span>FundiDesk</a><a class="next" href="atlas.html"><span>Next</span>Atlas</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/examples/callready.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#what-it-shows">What it shows</a><a class="ti" href="#run-it">Run it</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

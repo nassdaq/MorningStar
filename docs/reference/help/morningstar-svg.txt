@@ -1,0 +1,21 @@
+Renders an SVG file to a PNG as a Morningstar app would draw it.
+
+Usage: morningstar-svg <file.svg> <out.png> [options]
+
+Options:
+  --size <W>[x<H>]       the image's size in pixels; one number is a square. The
+                         picture is fitted and centred, as in an app
+  --scale <S>            pixels per unit of the file's own size (default 1; a
+                         phone is 2 to 3). Ignored with --size
+  --background <B>       what is behind the picture: none (default; the PNG is
+                         transparent), checker, or a colour as #RRGGBB
+  --color <#RRGGBB>      the colour of `currentColor` (default black)
+  --lenient              leave out what the loader does not support instead of
+                         refusing the file, and list it. For a first look only:
+                         an app should load a file that needs no leniency
+  -h, --help             print this help
+
+Prints the file's size, whether it is single-ink (an icon that takes any colour
+from one mask, see Icon::svg), and what was written.
+Exit status: 0 done, 1 the file is outside the supported subset (the message
+says what and where: file:line:column), 2 usage or file error.

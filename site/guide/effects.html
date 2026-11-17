@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Effects and services · Morningstar</title>
+<meta name="description" content="An application never does I/O itself. Work that takes time is asked for from effects as data, the host carries it out with the platform&#x27;s own stack, and the result comes back as a message. This is what lets a test drive a whole app with no device: the test answers in the host&#x27;s place.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni" href="installation.html">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni" href="project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni" href="text-and-pictures.html">Text, fonts and pictures</a><a class="ni" href="theming-and-motion.html">Themes and motion</a><a class="ni" href="text-input.html">Text input</a><a class="ni" href="navigation.html">Navigation and time</a><a class="ni on" href="effects.html" aria-current="page">Effects and services</a><a class="ni" href="live-rooms.html">Live rooms</a><a class="ni" href="accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="testing.html">Testing</a><a class="ni" href="android.html">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Core concepts</span><span aria-hidden="true">/</span><span class="here">Effects and services</span></div>
+<article>
+<h1>Effects and services</h1><p class="lead">An application never does I/O itself. Work that takes time is asked for from <code>effects</code> as data, the host carries it out with the platform's own stack, and the result comes back as a message. This is what lets a test drive a whole app with no device: the test answers in the host's place.</p><h2 id="the-pattern"><a class="anchor" href="#the-pattern">The pattern</a></h2><p><code>update</code> decides what should start and records it. <code>effects</code>, which is called after every <code>update</code>, queues the requests. Each request names the message its answer becomes.</p><div class="code"><pre><code><span class="k">#[derive(Clone, Debug)]</span>
+<span class="k">pub</span> <span class="k">enum</span> <span class="t">Message</span> {
+    <span class="t">Refresh</span>,
+    <span class="t">Loaded</span>(<span class="t">Result</span>&lt;<span class="t">HttpResponse</span>, <span class="t">HttpError</span>&gt;),
+    <span class="t">Copy</span>,
+}
+
+<span class="c">/// Work `update` has decided on and `effects` has not started yet.</span>
+<span class="k">enum</span> <span class="t">Start</span> {
+    <span class="t">Fetch</span>,
+    <span class="t">Remember</span>(<span class="t">String</span>),
+    <span class="t">Copy</span>(<span class="t">String</span>),
+}
+
+<span class="k">#[derive(Default)]</span>
+<span class="k">pub</span> <span class="k">struct</span> <span class="t">Orders</span> {
+    start: <span class="t">Vec</span>&lt;<span class="t">Start</span>&gt;,
+    <span class="k">pub</span> loading: bool,
+    <span class="k">pub</span> status: <span class="t">String</span>,
+    <span class="k">pub</span> install_id: <span class="t">String</span>,
+}</code></pre></div><div class="code"><pre><code><span class="c">// `update` returns at once: it records what should be started.</span>
+<span class="k">fn</span> <span class="f">update</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, message: <span class="t">Message</span>) {
+    <span class="k">match</span> message {
+        <span class="t">Message</span>::<span class="t">Refresh</span> =&gt; {
+            <span class="k">self</span>.loading = <span class="k">true</span>;
+            <span class="k">self</span>.start.<span class="f">push</span>(<span class="t">Start</span>::<span class="t">Fetch</span>);
+        }
+        <span class="t">Message</span>::<span class="t">Loaded</span>(result) =&gt; {
+            <span class="k">self</span>.loading = <span class="k">false</span>;
+            <span class="k">self</span>.status = <span class="k">match</span> result {
+                <span class="t">Ok</span>(response) <span class="k">if</span> response.<span class="f">is_success</span>() =&gt; {
+                    <span class="k">let</span> body = response.<span class="f">text</span>().<span class="f">unwrap_or_default</span>().<span class="f">to_owned</span>();
+                    <span class="k">self</span>.start.<span class="f">push</span>(<span class="t">Start</span>::<span class="t">Remember</span>(body.<span class="f">clone</span>()));
+                    body
+                }
+                <span class="t">Ok</span>(response) =&gt; <span class="k">format!</span>(<span class="s">"The server answered {}."</span>, response.status),
+                <span class="t">Err</span>(<span class="t">HttpError</span>::<span class="t">Offline</span>) =&gt; <span class="s">"No connection."</span>.<span class="f">to_owned</span>(),
+                <span class="t">Err</span>(error) =&gt; <span class="k">format!</span>(<span class="s">"No answer: {error}."</span>),
+            };
+        }
+        <span class="t">Message</span>::<span class="t">Copy</span> =&gt; <span class="k">self</span>.start.<span class="f">push</span>(<span class="t">Start</span>::<span class="t">Copy</span>(<span class="k">self</span>.status.<span class="f">clone</span>())),
+    }
+}
+
+<span class="c">// Called after every `update`: requests leave as data, and each</span>
+<span class="c">// answer comes back as a message.</span>
+<span class="k">fn</span> <span class="f">effects</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, out: &amp;<span class="k">mut</span> <span class="t">Effects</span>&lt;<span class="t">Message</span>&gt;) {
+    <span class="k">for</span> start <span class="k">in</span> <span class="k">self</span>.start.<span class="f">drain</span>(..) {
+        <span class="k">match</span> start {
+            <span class="t">Start</span>::<span class="t">Fetch</span> =&gt; out.<span class="f">http</span>(
+                <span class="t">HttpRequest</span>::<span class="f">get</span>(<span class="k">format!</span>(<span class="s">"{SERVER}/v1/orders/latest"</span>))
+                    .<span class="f">header</span>(<span class="s">"X-Device-Id"</span>, <span class="k">self</span>.install_id.<span class="f">clone</span>())
+                    .<span class="f">timeout</span>(<span class="t">Duration</span>::<span class="f">from_secs</span>(<span class="s">10</span>)),
+                <span class="t">Message</span>::<span class="t">Loaded</span>,
+            ),
+            <span class="c">// Kept on the phone; there at the next `setup`.</span>
+            <span class="t">Start</span>::<span class="t">Remember</span>(order) =&gt; out.<span class="f">store</span>(<span class="t">LAST_ORDER</span>, order),
+            <span class="t">Start</span>::<span class="t">Copy</span>(text) =&gt; out.<span class="f">set_clipboard</span>(text),
+        }
+    }
+}</code></pre></div><h2 id="what-there-is"><a class="anchor" href="#what-there-is">What there is</a></h2><div class="table"><table><thead><tr><th>Service</th><th>Ask with</th><th>Answer</th></tr></thead><tbody><tr><td>HTTP</td><td><code>out.http(request, on_result)</code></td><td><code>Result&lt;HttpResponse, HttpError&gt;</code></td></tr><tr><td>A value kept on the phone</td><td><code>out.store(key, value)</code>, <code>out.remove(key)</code></td><td>None. Read back at the next <code>setup</code>, or with <code>out.load(key, on_loaded)</code></td></tr><tr><td>The clipboard</td><td><code>out.set_clipboard(text)</code>, <code>out.clipboard(on_text)</code></td><td><code>Option&lt;String&gt;</code></td></tr><tr><td>Recording</td><td><code>out.start_recording(on_result)</code>, <code>out.stop_recording(on_result)</code></td><td><code>Result&lt;(), AudioError&gt;</code>, then <code>Result&lt;Recording, AudioError&gt;</code></td></tr><tr><td>Playback</td><td><code>out.play(clip, on_finished)</code>, <code>out.stop_playback()</code></td><td><code>Result&lt;(), AudioError&gt;</code> when it ends</td></tr><tr><td>A screen reader announcement</td><td><code>out.announce(text)</code></td><td>None</td></tr><tr><td>Moving a scroll view</td><td><code>out.scroll(ScrollTo::..)</code></td><td>None</td></tr><tr><td>A live room</td><td><code>out.join_live(join, on_event)</code> and its controls</td><td>One message per event. See <a href="live-rooms.html">Live rooms</a></td></tr></tbody></table></div><p>Every method is in the <a href="../reference/effects.html">Effects reference</a>.</p><h2 id="http"><a class="anchor" href="#http">HTTP</a></h2><p>A request is built from a method and a URL, with headers, a body and a timeout. The response has a status, headers and a body, read as text with <code>response.text()</code>.</p><ul><li>Requests run on the platform's own HTTP stack with the platform's certificates.</li><li>Plain <code>http://</code> is refused by the hosts except to the development machine: <code>localhost</code>, <code>127.0.0.1</code> and <code>10.0.2.2</code>.</li><li>A response larger than 10 MB is an error.</li></ul><div class="table"><table class="api"><thead><tr><th>Variant</th><th>Meaning</th></tr></thead><tbody><tr><td><code>Offline</code></td><td>The server could not be reached: no network, the name did not resolve, or the connection was refused or dropped.</td></tr><tr><td><code>Timeout</code></td><td>The exchange took longer than the request's timeout.</td></tr><tr><td><code>InvalidUrl</code></td><td>The URL is not an absolute <code>http</code> or <code>https</code> URL.</td></tr><tr><td><code>TooLarge</code></td><td>The response body is larger than <code>MAX_HTTP_RESPONSE_BYTES</code>.</td></tr><tr><td><code>Unsupported</code></td><td>Nothing can make requests here: there is no host (a test without a driver, a screenshot tool) or the host is older than this library.</td></tr><tr><td><code>Failed</code></td><td>Anything else, described by the platform: a TLS failure, a cleartext request the platform's policy forbids.</td></tr></tbody></table></div><p>There is no JSON library in the framework. The examples read the few fields they need with a small reader of their own (<code>src/json.rs</code> in a generated app).</p><h2 id="values-kept-on-the-phone"><a class="anchor" href="#values-kept-on-the-phone">Values kept on the phone</a></h2><p><code>out.store(key, value)</code> keeps a string under a key in the app's private storage. Stored values are handed to <code>setup</code> before the first frame, with no request and no waiting, which is the usual way to read them:</p><div class="code"><pre><code><span class="k">fn</span> <span class="f">setup</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, setup: &amp;<span class="k">mut</span> <span class="t">Setup</span>&lt;'_&gt;) {
+    <span class="c">// Known before the first frame, with no request and no waiting:</span>
+    <span class="c">// this installation's id, and the values stored on earlier runs.</span>
+    <span class="k">self</span>.install_id = setup.<span class="f">install_id</span>().<span class="f">to_owned</span>();
+    <span class="k">self</span>.status = <span class="k">match</span> setup.<span class="f">stored</span>(<span class="t">LAST_ORDER</span>) {
+        <span class="t">Some</span>(order) =&gt; <span class="k">format!</span>(<span class="s">"Last time: {order}"</span>),
+        <span class="t">None</span> =&gt; <span class="s">"Nothing yet."</span>.<span class="f">to_owned</span>(),
+    };
+}</code></pre></div><p><code>setup.install_id()</code> is an id made once per installation. The examples send it to their servers as <code>X-Device-Id</code> to tell one phone from another without an account.</p><h2 id="recording-and-playback"><a class="anchor" href="#recording-and-playback">Recording and playback</a></h2><p><code>start_recording</code> asks for the microphone the first time and answers when it is running, or with <code>AudioError::PermissionDenied</code>. A recording stops by itself after 60 seconds and when the app leaves the screen. <code>stop_recording</code> hands over what was recorded as a <code>Recording</code>, which becomes an <code>AudioClip</code> to send to a server or play back.</p><div class="table"><table class="api"><thead><tr><th>Variant</th><th>Meaning</th></tr></thead><tbody><tr><td><code>PermissionDenied</code></td><td>The user has not allowed the microphone.</td></tr><tr><td><code>Busy</code></td><td>A recording is already running (for "start"), or the microphone or the audio output is held by something that would not give it up.</td></tr><tr><td><code>Unsupported</code></td><td>Nothing can record or play here: there is no host (a test without a driver, a screenshot tool), the host is older than this library, or the device has no microphone.</td></tr><tr><td><code>NotRecording</code></td><td>"Stop recording" with no recording to stop.</td></tr><tr><td><code>Interrupted</code></td><td>Playback ended before the clip did: the application stopped it, started another clip, went to the background, or lost the audio output to a phone call.</td></tr><tr><td><code>Failed</code></td><td>Anything else, described by the platform.</td></tr></tbody></table></div><h2 id="where-services-work"><a class="anchor" href="#where-services-work">Where services work</a></h2><div class="table"><table><thead><tr><th>Service</th><th>Android</th><th>iOS</th><th>Preview on a Mac</th><th>A test</th></tr></thead><tbody><tr><td>HTTP, storage, clipboard</td><td>Yes</td><td>Written, never compiled</td><td>Yes</td><td>Answered by the test</td></tr><tr><td>Recording and playback</td><td>Yes</td><td>Written, never compiled</td><td>Answers <code>Unsupported</code></td><td>Answered by the test</td></tr><tr><td>Live rooms</td><td>Yes, for apps that opt in</td><td>Answers <code>Unsupported</code></td><td>Answers <code>Unsupported</code></td><td>Events sent by the test</td></tr></tbody></table></div><p>"Yes" for Android means the code is there and the app builds with it. What has actually been observed on a phone is in <a href="../reference/platform-status.html">Platform status</a>. Where nothing can do the work at all (a screenshot program, <code>Ui::new</code> in a test) every request answers <code>Unsupported</code> at once, so an app never waits for ever.</p><p>The design is <a href="../architecture/0019-effects-and-platform-services.html">ADR 0019</a>.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="navigation.html"><span>Previous</span>Navigation and time</a><a class="next" href="live-rooms.html"><span>Next</span>Live rooms</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/effects.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#the-pattern">The pattern</a><a class="ti" href="#what-there-is">What there is</a><a class="ti" href="#http">HTTP</a><a class="ti" href="#values-kept-on-the-phone">Values kept on the phone</a><a class="ti" href="#recording-and-playback">Recording and playback</a><a class="ti" href="#where-services-work">Where services work</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

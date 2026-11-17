@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0003 — Platform integration: thin native hosts · Morningstar</title>
+<meta name="description" content="Status: Accepted (2026-11-11). iOS half is unverified on a device.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni" href="../reference/application.html">Application</a><a class="ni" href="../reference/effects.html">Effects</a><a class="ni" href="../reference/ui.html">Ui and testing</a><a class="ni" href="../reference/navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="../reference/theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="../reference/tools.html">Tools and scripts</a><a class="ni" href="../reference/services.html">Opt-in services</a><p class="nh">Project</p><a class="ni" href="../reference/architecture.html">Architecture</a><a class="ni on" href="index.html">Decision records</a><a class="ni" href="../reference/platform-status.html">Platform status</a><a class="ni" href="../reference/performance.html">Performance</a><a class="ni" href="../reference/troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><a href="index.html">Decision records</a><span aria-hidden="true">/</span><span class="here">0003 — Platform integration: thin native hosts</span></div>
+<article>
+<h1>0003 — Platform integration: thin native hosts</h1><p class="lead">Status: Accepted (2026-11-11). iOS half is unverified on a device.</p><h2 id="context"><a class="anchor" href="#context">Context</a></h2><p>There are three ways to get a Rust renderer onto a phone screen:</p><ol><li>Let a windowing framework (winit, or Android's <code>NativeActivity</code>/<code>GameActivity</code>) own the application.</li><li>Drive everything from Rust through bindings (JNI calls into the Android framework; <code>objc2</code> for UIKit).</li><li>A small native host that owns the platform view and forwards callbacks to Rust.</li></ol><p>A mobile app is more than a surface. It needs the soft keyboard and IME composition, accessibility services, system dialogs, permission prompts, and correct lifecycle behaviour. On Android most of these are reachable only through a real <code>Activity</code> and <code>View</code>; <code>NativeActivity</code> makes text input and accessibility notably hard. The wgpu documentation makes the same distinction between taking over an application and integrating into one.</p><h2 id="decision"><a class="anchor" href="#decision">Decision</a></h2><p>Option 3. Each platform has a host project under <code>templates/</code> that contains no application logic and is identical for every app.</p><p><strong>Android</strong> — <code>MorningstarActivity</code> (Java, ~80 lines) owns a <code>SurfaceView</code> and forwards <code>onStart</code>/<code>onStop</code> and the three <code>SurfaceHolder.Callback</code> methods, plus touch events, to seven <code>static native</code> methods. The Rust side obtains an <code>ANativeWindow</code> from the <code>Surface</code>. The app's library name comes from manifest metadata, so the host needs no per-app code.</p><p><strong>iOS</strong> — a <code>UIView</code> backed by a <code>CAMetalLayer</code>, a <code>CADisplayLink</code>, and a scene delegate, forwarding to eight C functions declared in <code>morningstar_ios.h</code>.</p><p>(Counts in this record are from when it was written; scale, insets and redraw requests were added later, see ADR 0012.)</p><p>Both interfaces deliberately carry the same information: created(handle, size), resized(size), destroyed, visible(bool), and (iOS only) frame.</p><p>Details that are decisions, not accidents:</p><ul><li><strong>Java, not Kotlin, for the Android host.</strong> It needs no language plugin or runtime, and it is generated code nobody edits.</li><li><strong>No JNI or NDK binding crate.</strong> The Android host needs four C functions; they are declared by hand in <code>sys.rs</code>, which is the crate's whole unsafe FFI surface.</li><li><strong>Visibility drives rendering, not focus.</strong> <code>onStart</code>/<code>onStop</code> rather than <code>onResume</code>/<code>onPause</code>, because a paused activity in multi-window mode is still on screen.</li><li><strong>Rotation does not recreate the activity</strong> (<code>configChanges</code>); it arrives as a surface resize.</li><li><strong><code>surfaceDestroyed</code> blocks</strong> until the render thread has released the surface, as Android requires.</li><li><strong>The scene lifecycle is used on iOS</strong>, since Apple is moving away from the app-delegate-only lifecycle.</li></ul><h2 id="consequences"><a class="anchor" href="#consequences">Consequences</a></h2><ul><li>A small amount of Java and Swift exists and must be kept in step with its Rust counterpart. The pairs are named in <code>AGENTS.md</code>.</li><li>Application developers still write no Kotlin or Swift.</li><li>The host is the natural place to add an <code>InputConnection</code>, an accessibility node provider and their iOS equivalents later, which is the reason for choosing it.</li><li>Using <code>objc2</code> to remove the Swift host remains possible later; nothing here prevents it.</li></ul>
+</article>
+
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/architecture/0003-platform-hosts.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#context">Context</a><a class="ti" href="#decision">Decision</a><a class="ti" href="#consequences">Consequences</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

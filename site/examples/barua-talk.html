@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barua Talk · Morningstar</title>
+<meta name="description" content="Rooms, chat and calls, reproduced from a design of five pages and made to work with a server. It is the app that uses live rooms: sound, both cameras and a shared screen.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl on" href="index.html" aria-current="true">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Examples">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl on" href="index.html" aria-current="true">Examples</a></div>
+<p class="nh">Apps</p><a class="ni" href="index.html">All examples</a><a class="ni" href="starter.html">Starter</a><a class="ni" href="showcase.html">Showcase</a><a class="ni" href="fundidesk.html">FundiDesk</a><a class="ni" href="callready.html">CallReady</a><a class="ni" href="atlas.html">Atlas</a><a class="ni on" href="barua-talk.html" aria-current="page">Barua Talk</a><p class="nh">Small programs</p><a class="ni" href="services-check.html">services-check</a><a class="ni" href="hello-gpu.html">hello-gpu</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Examples</span><span aria-hidden="true">/</span><span>Apps</span><span aria-hidden="true">/</span><span class="here">Barua Talk</span></div>
+<article>
+<h1>Barua Talk</h1><p class="lead">Rooms, chat and calls, reproduced from a design of five pages and made to work with a server. It is the app that uses live rooms: sound, both cameras and a shared screen.</p><div class="shots"><figure class="phone"><div class="phone-frame"><img src="../shots/barua-talk-01-home.jpg" alt="Screenshot: Home" loading="lazy"></div><figcaption>Home</figcaption></figure><figure class="phone"><div class="phone-frame"><img src="../shots/barua-talk-02-room.jpg" alt="Screenshot: A room" loading="lazy"></div><figcaption>A room</figcaption></figure><figure class="phone"><div class="phone-frame"><img src="../shots/barua-talk-03-incoming.jpg" alt="Screenshot: An incoming call" loading="lazy"></div><figcaption>An incoming call</figcaption></figure><figure class="phone"><div class="phone-frame"><img src="../shots/barua-talk-04-video-call.jpg" alt="Screenshot: A video call" loading="lazy"></div><figcaption>A video call</figcaption></figure></div><h2 id="what-it-shows"><a class="anchor" href="#what-it-shows">What it shows</a></h2><ul><li><strong>Photographs beside the drawing</strong>, a blurred backdrop behind an incoming call, and an arched bar.</li><li><strong>A live room</strong>: an answered call, a joined room and a dialled phone call join with the ticket the server gives. Mute, the loudspeaker, the camera and screen sharing act on the real connection.</li><li><strong>Honest status</strong>: the call screen says in words how the sound stands, including why there is none.</li><li><strong>Chat</strong>: in rooms, and between two people.</li><li><strong>All four opt-in services</strong>: <code>live</code>, <code>live-video</code>, <code>live-screen</code> and <code>live-background</code>.</li><li><strong>A browser test client</strong>: the server serves a page at <code>/console</code> that speaks the same contract as the app, so a call can be made between a browser tab and a phone.</li></ul><p>Beyond the five designed screens it has its own: a welcome screen, a dial pad, a new-room screen, people, notifications, and a screen about the server.</p><h2 id="fidelity"><a class="anchor" href="#fidelity">Fidelity</a></h2><p>Each designed screen is held to its picture:</p><div class="table"><table><thead><tr><th>Screen</th><th>Measured difference</th><th>Limit</th></tr></thead><tbody><tr><td>Home</td><td>0.0847%</td><td>0.10%</td></tr><tr><td>Room</td><td>0.6900%</td><td>0.70%</td></tr><tr><td>Incoming call</td><td>0.0154%</td><td>0.05%</td></tr><tr><td>Video call</td><td>0.2860%</td><td>0.30%</td></tr><tr><td>Phone call</td><td>0.0499%</td><td>0.05%</td></tr></tbody></table></div><h2 id="run-it"><a class="anchor" href="#run-it">Run it</a></h2><div class="code"><pre><code><span class="f">cargo</span> test -p barua-talk
+<span class="f">cargo</span> run -p barua-talk --example screenshot -- out/ 04 --diff --phone
+<span class="f">tools/preview.sh</span> barua-talk
+MORNINGSTAR_APP=barua-talk MORNINGSTAR_ABIS=arm64-v8a <span class="f">tools/build-android.sh</span> --install</code></pre></div><p>With its server:</p><div class="code"><pre><code><span class="f">cd</span> examples/barua-talk/server
+<span class="f">cp</span> .env.example .env       <span class="c"> # then fill in the keys; .env is never committed</span>
+<span class="f">npm</span> start                  <span class="c"> # 127.0.0.1:8789, and the test client at /console</span>
+<span class="f">adb</span> reverse tcp:8789 tcp:8789</code></pre></div><p>The server needs a PostgreSQL database and a Barua Talk API key. Phone calls cost money upstream and stay off unless the server is told otherwise. Node 22 or newer. <code>server/API.md</code> is the contract between the app and the server.</p><h2 id="what-has-been-verified"><a class="anchor" href="#what-has-been-verified">What has been verified</a></h2><p>The app passes its tests on the development machine, and its server's tests pass against the real Barua Talk API for rooms, tickets, chat and in-app calls. The app has been installed on a phone. <strong>No call has been confirmed working on a phone yet</strong>: sound and pictures through a real room are unverified, and the live preview on a Mac answers live rooms with <code>Unsupported</code>.</p><p><code>examples/barua-talk/SCREENS.md</code> has the step-by-step test for a phone, with the log line that proves each step.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="atlas.html"><span>Previous</span>Atlas</a><a class="next" href="services-check.html"><span>Next</span>services-check</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/examples/barua-talk.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#what-it-shows">What it shows</a><a class="ti" href="#fidelity">Fidelity</a><a class="ti" href="#run-it">Run it</a><a class="ti" href="#what-has-been-verified">What has been verified</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

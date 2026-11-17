@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Testing · Morningstar</title>
+<meta name="description" content="An app is tested on the development machine, with no phone and no server. That is possible because the app never does I/O: it asks for work as data, and a test can look at the request and answer it.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni" href="installation.html">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni" href="project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni" href="text-and-pictures.html">Text, fonts and pictures</a><a class="ni" href="theming-and-motion.html">Themes and motion</a><a class="ni" href="text-input.html">Text input</a><a class="ni" href="navigation.html">Navigation and time</a><a class="ni" href="effects.html">Effects and services</a><a class="ni" href="live-rooms.html">Live rooms</a><a class="ni" href="accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni on" href="testing.html" aria-current="page">Testing</a><a class="ni" href="android.html">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Ship</span><span aria-hidden="true">/</span><span class="here">Testing</span></div>
+<article>
+<h1>Testing</h1><p class="lead">An app is tested on the development machine, with no phone and no server. That is possible because the app never does I/O: it asks for work as data, and a test can look at the request and answer it.</p><h2 id="the-kinds-of-test"><a class="anchor" href="#the-kinds-of-test">The kinds of test</a></h2><div class="table"><table><thead><tr><th>Test</th><th>Shows</th><th>Where</th></tr></thead><tbody><tr><td>A journey</td><td>That tapping, typing and answers lead to the right state and screen</td><td><code>tests/e2e.rs</code></td></tr><tr><td>An accessibility check</td><td>That no screen has a control without a label, a small target or low contrast</td><td><code>tests/accessibility.rs</code></td></tr><tr><td>A picture of each screen</td><td>That a screen still looks as it did when you last accepted it</td><td><code>tests/screens.rs</code></td></tr><tr><td>A fidelity test</td><td>That a screen matches the design's picture to within a measured limit</td><td><code>tests/fidelity.rs</code> in the designed examples</td></tr><tr><td>Pixel tests of the renderer</td><td>That each drawing operation produces the right pixels on a real GPU</td><td><code>crates/morningstar-gpu/tests</code></td></tr></tbody></table></div><div class="code"><pre><code><span class="f">cargo</span> test -p my-app         <span class="c"> # one app</span>
+<span class="f">cargo</span> test --workspace       <span class="c"> # everything, including the tests that draw on the GPU</span></code></pre></div><h2 id="answering-in-the-phones-place"><a class="anchor" href="#answering-in-the-phones-place">Answering in the phone's place</a></h2><p><code>Ui::testing(app)</code> holds every request the app makes instead of sending it. The test reads it and answers.</p><div class="code"><pre><code><span class="k">#[test]</span>
+<span class="k">fn</span> <span class="f">the_server_is_asked_once_and_its_answer_is_kept</span>() {
+    <span class="c">// `Ui::testing` holds every request instead of sending it.</span>
+    <span class="k">let</span> <span class="k">mut</span> ui = <span class="t">Ui</span>::<span class="f">testing</span>(<span class="t">Orders</span>::<span class="f">default</span>());
+    ui.<span class="f">send</span>(<span class="t">Message</span>::<span class="t">Refresh</span>);
+    <span class="k">assert!</span>(ui.<span class="f">app</span>().loading);
+
+    <span class="c">// What the app asked for, as data.</span>
+    <span class="k">let</span> pending = ui.<span class="f">pending_effects</span>();
+    <span class="k">assert_eq!</span>(pending.<span class="f">len</span>(), <span class="s">1</span>);
+    <span class="k">let</span> <span class="t">ServiceRequest</span>::<span class="t">Http</span>(request) = &amp;pending[<span class="s">0</span>].request <span class="k">else</span> {
+        <span class="k">panic!</span>(<span class="s">"expected a request"</span>);
+    };
+    <span class="k">assert_eq!</span>(request.url, <span class="k">format!</span>(<span class="s">"{SERVER}/v1/orders/latest"</span>));
+
+    <span class="c">// The test is the server: "it replies this".</span>
+    <span class="k">assert!</span>(ui.<span class="f">answer_http</span>(<span class="t">Ok</span>(<span class="t">HttpResponse</span>::<span class="f">new</span>(<span class="s">200</span>).<span class="f">with_body</span>(<span class="s">"Order 1042"</span>))));
+    <span class="k">assert!</span>(!ui.<span class="f">app</span>().loading);
+    <span class="k">assert_eq!</span>(ui.<span class="f">app</span>().status, <span class="s">"Order 1042"</span>);
+    <span class="k">assert_eq!</span>(
+        ui.<span class="f">stored</span>(<span class="t">LAST_ORDER</span>),
+        <span class="t">Some</span>(<span class="s">"Order 1042"</span>),
+        <span class="s">"kept on the phone"</span>
+    );
+}
+
+<span class="k">#[test]</span>
+<span class="k">fn</span> <span class="f">no_connection_is_a_sentence_not_a_crash</span>() {
+    <span class="k">let</span> <span class="k">mut</span> ui = <span class="t">Ui</span>::<span class="f">testing</span>(<span class="t">Orders</span>::<span class="f">default</span>());
+    ui.<span class="f">send</span>(<span class="t">Message</span>::<span class="t">Refresh</span>);
+    <span class="k">assert!</span>(ui.<span class="f">answer_http</span>(<span class="t">Err</span>(<span class="t">HttpError</span>::<span class="t">Offline</span>)));
+    <span class="k">assert_eq!</span>(ui.<span class="f">app</span>().status, <span class="s">"No connection."</span>);
+    <span class="k">assert_eq!</span>(ui.<span class="f">stored</span>(<span class="t">LAST_ORDER</span>), <span class="t">None</span>);
+}</code></pre></div><p>Stored values and the install id are given as the phone would have them:</p><div class="code"><pre><code><span class="k">#[test]</span>
+<span class="k">fn</span> <span class="f">a_value_stored_on_an_earlier_run_is_there_at_setup</span>() {
+    <span class="c">// The phone as the app finds it: an install id and stored values.</span>
+    <span class="k">let</span> host = <span class="t">HostState</span>::<span class="f">new</span>().<span class="f">with_stored</span>(<span class="t">LAST_ORDER</span>, <span class="s">"Order 1041"</span>);
+    <span class="k">let</span> <span class="k">mut</span> ui = <span class="t">Ui</span>::<span class="f">testing</span>(<span class="t">Orders</span>::<span class="f">default</span>());
+    <span class="k">let</span> _frame = morningstar::<span class="t">Frame</span>::<span class="f">for_app_with_host</span>(&amp;<span class="k">mut</span> ui, &amp;host);
+    <span class="k">assert_eq!</span>(ui.<span class="f">app</span>().status, <span class="s">"Last time: Order 1041"</span>);
+}</code></pre></div><div class="table"><table><thead><tr><th>To play</th><th>Use</th></tr></thead><tbody><tr><td>The server</td><td><code>ui.pending_effects()</code> to read the request, <code>ui.answer_http(..)</code> to reply</td></tr><tr><td>The microphone and the speaker</td><td><code>ui.answer_recording_started(..)</code>, <code>ui.answer_recording(..)</code>, <code>ui.answer_playback(..)</code></td></tr><tr><td>A live room</td><td><code>ui.live_room()</code> to see what was joined, <code>ui.live_event(..)</code> to send an event</td></tr><tr><td>Storage</td><td><code>HostState::new().with_stored(key, value)</code> before, <code>ui.stored(key)</code> after</td></tr><tr><td>The system's Back</td><td><code>ui.back()</code></td></tr><tr><td>The user's "reduce motion" setting</td><td><code>ui.set_reduce_motion(true)</code></td></tr></tbody></table></div><h2 id="a-finger-and-a-keyboard"><a class="anchor" href="#a-finger-and-a-keyboard">A finger and a keyboard</a></h2><p>A journey taps where a widget was laid out and types through the same interface the keyboard uses. A generated app has a small <code>Device</code> in <code>tests/support/mod.rs</code> that does both:</p><div class="code"><pre><code><span class="k">let</span> <span class="k">mut</span> device = <span class="t">Device</span>::<span class="f">fresh</span>();
+device.<span class="f">tap</span>(<span class="s">"open-settings"</span>);          <span class="c">// the widget with .id("open-settings")</span>
+device.<span class="f">tap</span>(<span class="s">"name"</span>);
+device.<span class="f">type_text</span>(<span class="s">"Ada"</span>);
+device.<span class="f">tap</span>(<span class="s">"save"</span>);
+<span class="k">assert_eq!</span>(device.<span class="f">app</span>().name, <span class="s">"Ada"</span>);</code></pre></div><p>Tapping by id sends real pointer events to where the widget was laid out, so layout and hit testing are part of every journey. <code>ui.rect_of(id)</code> is where a widget was laid out, <code>ui.visible_rect_of(id)</code> the part that shows, and <code>ui.overflows()</code> lists boxes whose children do not fit.</p><h2 id="pictures"><a class="anchor" href="#pictures">Pictures</a></h2><p><code>tests/screens.rs</code> renders each screen and compares it with a reference picture in <code>tests/references/</code>. The first run writes the references; look at them and commit them. When a visual change is one you meant, accept it:</p><div class="code"><pre><code>MORNINGSTAR_UPDATE_REFERENCES=1 <span class="f">cargo</span> test -p my-app</code></pre></div><p>A passing test does not show that a screen looks right, only that it has not changed. After changing anything visual, render it and look:</p><div class="code"><pre><code><span class="f">cargo</span> run -p my-app --example screenshot -- out/</code></pre></div><h2 id="holding-a-screen-to-its-design"><a class="anchor" href="#holding-a-screen-to-its-design">Holding a screen to its design</a></h2><p>The designed examples compare every screen with the design's own picture and fail if more than a measured share of pixels differs. Barua Talk's limits, with what was measured:</p><div class="table"><table><thead><tr><th>Screen</th><th>Measured difference</th><th>Limit</th></tr></thead><tbody><tr><td>Home</td><td>0.0847%</td><td>0.10%</td></tr><tr><td>Room</td><td>0.6900%</td><td>0.70%</td></tr><tr><td>Incoming call</td><td>0.0154%</td><td>0.05%</td></tr><tr><td>Video call</td><td>0.2860%</td><td>0.30%</td></tr><tr><td>Phone call</td><td>0.0499%</td><td>0.05%</td></tr></tbody></table></div><p><a href="../design-to-code.html">Design to code</a> is the method, and <code>morningstar-diff</code> the tool.</p><h2 id="in-ci"><a class="anchor" href="#in-ci">In CI</a></h2><p>The workflow in <code>.github/workflows/ci.yml</code> runs formatting, lints, the tests that need no GPU, the Android lints and the servers' tests on every push. The job that runs every test on a GPU is started by hand. <a href="../architecture/0043-continuous-integration.html">ADR 0043</a>.</p><p>The API a test uses is in the <a href="../reference/ui.html">Ui reference</a>.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="../design-to-code.html"><span>Previous</span>Design to code</a><a class="next" href="android.html"><span>Next</span>Build for Android</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/testing.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#the-kinds-of-test">The kinds of test</a><a class="ti" href="#answering-in-the-phones-place">Answering in the phone's place</a><a class="ti" href="#a-finger-and-a-keyboard">A finger and a keyboard</a><a class="ti" href="#pictures">Pictures</a><a class="ti" href="#holding-a-screen-to-its-design">Holding a screen to its design</a><a class="ti" href="#in-ci">In CI</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

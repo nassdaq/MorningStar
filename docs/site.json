@@ -1,0 +1,114 @@
+{
+  "sections": [
+    {
+      "id": "guide",
+      "title": "Guide",
+      "groups": [
+        {"title": "Introduction", "pages": [
+          {"src": "docs/index.md", "title": "Overview"},
+          "docs/guide/what-it-is.md",
+          "docs/guide/rendering.md"
+        ]},
+        {"title": "Get started", "pages": [
+          "docs/guide/installation.md",
+          {"src": "docs/getting-started.md", "title": "Your first app"},
+          "docs/guide/project-layout.md"
+        ]},
+        {"title": "Core concepts", "pages": [
+          "docs/guide/application-model.md",
+          "docs/guide/layout.md",
+          "docs/guide/text-and-pictures.md",
+          "docs/guide/theming-and-motion.md",
+          "docs/guide/text-input.md",
+          "docs/guide/navigation.md",
+          "docs/guide/effects.md",
+          "docs/guide/live-rooms.md",
+          "docs/guide/accessibility.md"
+        ]},
+        {"title": "From a design", "pages": [
+          {"src": "docs/building-screens.md", "title": "Building screens"},
+          {"src": "docs/design-to-code.md", "title": "Design to code"}
+        ]},
+        {"title": "Ship", "pages": [
+          "docs/guide/testing.md",
+          "docs/guide/android.md",
+          "docs/guide/ios.md"
+        ]}
+      ]
+    },
+    {
+      "id": "widgets",
+      "title": "Widgets",
+      "groups": [
+        {"title": "Overview", "pages": [
+          {"src": "docs/widgets/index.md", "title": "Widget gallery"},
+          "docs/widgets/modifiers.md"
+        ]},
+        {"title": "Layout", "pages": [
+          "docs/widgets/container.md",
+          "docs/widgets/column-row.md",
+          "docs/widgets/stack.md",
+          "docs/widgets/scroll-view.md",
+          "docs/widgets/safe-area-spacer.md"
+        ]},
+        {"title": "Content", "pages": [
+          "docs/widgets/text.md",
+          "docs/widgets/text-input.md",
+          "docs/widgets/button.md",
+          "docs/widgets/divider.md",
+          "docs/widgets/picture.md",
+          "docs/widgets/icon.md",
+          "docs/widgets/live-video.md"
+        ]},
+        {"title": "Paint", "pages": [
+          "docs/widgets/paint.md"
+        ]}
+      ]
+    },
+    {
+      "id": "reference",
+      "title": "Reference",
+      "groups": [
+        {"title": "API", "pages": [
+          "docs/reference/application.md",
+          "docs/reference/effects.md",
+          "docs/reference/ui.md",
+          "docs/reference/navigator.md",
+          "docs/reference/theme.md"
+        ]},
+        {"title": "Tools", "pages": [
+          "docs/reference/tools.md",
+          "docs/reference/services.md"
+        ]},
+        {"title": "Project", "pages": [
+          "docs/reference/architecture.md",
+          {"src": "docs/architecture/README.md", "title": "Decision records"},
+          "docs/reference/platform-status.md",
+          "docs/reference/performance.md",
+          "docs/reference/troubleshooting.md"
+        ]}
+      ],
+      "also": ["docs/architecture/\\d{4}-.*\\.md"],
+      "also_parent": "docs/architecture/README.md"
+    },
+    {
+      "id": "examples",
+      "title": "Examples",
+      "groups": [
+        {"title": "Apps", "pages": [
+          {"src": "docs/examples/index.md", "title": "All examples"},
+          "docs/examples/starter.md",
+          "docs/examples/showcase.md",
+          "docs/examples/fundidesk.md",
+          "docs/examples/callready.md",
+          "docs/examples/atlas.md",
+          "docs/examples/barua-talk.md"
+        ]},
+        {"title": "Small programs", "pages": [
+          "docs/examples/services-check.md",
+          "docs/examples/hello-gpu.md"
+        ]}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FundiDesk · Morningstar</title>
+<meta name="description" content="A repair shop&#x27;s app: twelve screens reproduced from a real design, each tested against the design&#x27;s own picture. It is the model to imitate when building from a design.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl on" href="index.html" aria-current="true">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Examples">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl on" href="index.html" aria-current="true">Examples</a></div>
+<p class="nh">Apps</p><a class="ni" href="index.html">All examples</a><a class="ni" href="starter.html">Starter</a><a class="ni" href="showcase.html">Showcase</a><a class="ni on" href="fundidesk.html" aria-current="page">FundiDesk</a><a class="ni" href="callready.html">CallReady</a><a class="ni" href="atlas.html">Atlas</a><a class="ni" href="barua-talk.html">Barua Talk</a><p class="nh">Small programs</p><a class="ni" href="services-check.html">services-check</a><a class="ni" href="hello-gpu.html">hello-gpu</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Examples</span><span aria-hidden="true">/</span><span>Apps</span><span aria-hidden="true">/</span><span class="here">FundiDesk</span></div>
+<article>
+<h1>FundiDesk</h1><p class="lead">A repair shop's app: twelve screens reproduced from a real design, each tested against the design's own picture. It is <strong>the model to imitate</strong> when building from a design.</p><div class="shots"><figure class="phone"><div class="phone-frame"><img src="../shots/fundidesk-03-login.jpg" alt="Screenshot: Log in" loading="lazy"></div><figcaption>Log in</figcaption></figure><figure class="phone"><div class="phone-frame"><img src="../shots/fundidesk-07-dashboard.jpg" alt="Screenshot: Dashboard" loading="lazy"></div><figcaption>Dashboard</figcaption></figure><figure class="phone"><div class="phone-frame"><img src="../shots/fundidesk-08-repairs-list.jpg" alt="Screenshot: Repairs" loading="lazy"></div><figcaption>Repairs</figcaption></figure><figure class="phone"><div class="phone-frame"><img src="../shots/fundidesk-10-repair-details.jpg" alt="Screenshot: Repair details" loading="lazy"></div><figcaption>Repair details</figcaption></figure></div><h2 id="what-it-shows"><a class="anchor" href="#what-it-shows">What it shows</a></h2><ul><li><strong>The loop from a picture to code.</strong> Render, compare with <code>morningstar-diff</code>, read the report, change one thing, repeat.</li><li><strong>A design's tokens in one place</strong>: <code>src/theme.rs</code> holds every colour, <code>src/icons.rs</code> every icon, <code>src/components.rs</code> every piece that occurs more than once.</li><li><strong>One file per screen</strong>, so screens can be built in parallel.</li><li><strong>Real forms</strong>: its text fields are working inputs.</li><li><strong>A limit per screen</strong> in <code>tests/fidelity.rs</code>: the largest share of pixels that may differ from the design, set from what was measured.</li></ul><h2 id="the-screens"><a class="anchor" href="#the-screens">The screens</a></h2><p>Splash, onboarding, log in, create account, verification, shop setup, dashboard, repairs list, new repair, repair details, record payment and tracking.</p><h2 id="run-it"><a class="anchor" href="#run-it">Run it</a></h2><div class="code"><pre><code><span class="f">cargo</span> test -p fundidesk
+<span class="f">cargo</span> run -p fundidesk --example screenshot -- out/ 07 --diff --phone  <span class="c"> # one screen against its design</span>
+<span class="f">tools/preview.sh</span> fundidesk
+MORNINGSTAR_APP=fundidesk MORNINGSTAR_ABIS=arm64-v8a <span class="f">tools/build-android.sh</span> --install</code></pre></div><p>Start with <code>examples/fundidesk/SCREENS.md</code> in the repository: it is the method, written for whoever builds the next screen.</p><h2 id="what-has-been-verified"><a class="anchor" href="#what-has-been-verified">What has been verified</a></h2><p>It launched on a Galaxy A27 (first frame drawn, then idle, from the log). Typing into its fields was verified there with the system keyboard.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="showcase.html"><span>Previous</span>Showcase</a><a class="next" href="callready.html"><span>Next</span>CallReady</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/examples/fundidesk.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#what-it-shows">What it shows</a><a class="ti" href="#the-screens">The screens</a><a class="ti" href="#run-it">Run it</a><a class="ti" href="#what-has-been-verified">What has been verified</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

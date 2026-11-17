@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0009 — Text · Morningstar</title>
+<meta name="description" content="Status: Accepted (2026-11-11). Verified on macOS/Metal and on one Android device (Vulkan).">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni" href="../reference/application.html">Application</a><a class="ni" href="../reference/effects.html">Effects</a><a class="ni" href="../reference/ui.html">Ui and testing</a><a class="ni" href="../reference/navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="../reference/theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="../reference/tools.html">Tools and scripts</a><a class="ni" href="../reference/services.html">Opt-in services</a><p class="nh">Project</p><a class="ni" href="../reference/architecture.html">Architecture</a><a class="ni on" href="index.html">Decision records</a><a class="ni" href="../reference/platform-status.html">Platform status</a><a class="ni" href="../reference/performance.html">Performance</a><a class="ni" href="../reference/troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><a href="index.html">Decision records</a><span aria-hidden="true">/</span><span class="here">0009 — Text</span></div>
+<article>
+<h1>0009 — Text</h1><p class="lead">Status: Accepted (2026-11-11). Verified on macOS/Metal and on one Android device (Vulkan).</p><h2 id="context"><a class="anchor" href="#context">Context</a></h2><p>Text is the largest single piece of a UI framework and the one most often underestimated. Correct text needs shaping (kerning, ligatures, the joined forms of Arabic), bidirectional layout, line breaking, and fallback across fonts. Writing these from scratch is years of work and not where Morningstar's value lies.</p><h2 id="decision"><a class="anchor" href="#decision">Decision</a></h2><p><strong>A Morningstar-owned text crate, <code>morningstar-text</code>, with <code>cosmic-text</code> doing shaping, bidi, line breaking, fallback and rasterisation behind it.</strong> No <code>cosmic-text</code> type appears in the crate's public API (<code>TextContext</code>, <code>TextStyle</code>, <code>TextAlign</code>, <code>TextWeight</code>).</p><p><strong>Glyphs are display-list operations.</strong> <code>DrawOp::Glyph { rect, atlas, color }</code> refers to a region of one single-channel coverage atlas. The same shader and the same instanced draw call render rectangles and glyphs, so text and shapes interleave in paint order at no extra cost. The atlas travels with the frame as an <code>AtlasView</code> (plain data defined in <code>morningstar-core</code>), which keeps the GPU crate independent of the text crate.</p><p><strong>Immediate-mode API, retained work.</strong> An app calls <code>frame.draw_text(...)</code> every frame. Shaping is cached per (text, size, weight, alignment, width) and reused while that text keeps being drawn; a paragraph that stops being drawn is dropped at the next frame. Glyph images are rasterised once and kept in the atlas.</p><p><strong>The app supplies its fonts</strong> (<code>App::setup</code> → <code>Setup::add_font</code>), normally with <code>include_bytes!</code>. The framework bundles none. System fonts are opt-in as a fallback. Reasons: identical rendering on both platforms and in screenshots, no startup scan of the system font directory, and no dependence on what a given device has installed.</p><p><strong>The atlas</strong> is 1024 texels wide, shelf-packed, and grows downwards from 512 to at most 2048 rows. When full it is rebuilt from what is on screen at the next frame; glyphs that did not fit are skipped for that one frame rather than corrupting ones already emitted.</p><p><strong>Glyph origins snap to whole pixels</strong>; horizontal sub-pixel positioning within a line comes from the shaper's sub-pixel bins.</p><h2 id="verified"><a class="anchor" href="#verified">Verified</a></h2><ul><li>Latin and Arabic layout, wrapping, alignment, weights, caching and eviction: 13 tests in <code>crates/morningstar-text/tests/layout.rs</code>, using Noto Sans and Noto Sans Arabic.</li><li>Arabic letters take joined forms (joined text measures narrower than the same letters separated by zero-width non-joiners) and right-to-left paragraphs align to the right.</li><li>Glyph quads sample exactly their atlas region with no bleed, and keep paint order with rectangles: pixel tests in <code>crates/morningstar-gpu/tests/offscreen.rs</code>.</li><li>The example screen was inspected by eye on Metal and on a Galaxy A27; the two match.</li></ul><h2 id="known-limitations"><a class="anchor" href="#known-limitations">Known limitations</a></h2><ul><li><strong>No colour glyphs.</strong> Emoji are skipped. Needs an RGBA atlas or a second texture.</li><li><strong>One style per call.</strong> No mixed bold/regular or mixed colours within a paragraph.</li><li><strong>One font family.</strong> Every call uses the fonts added in <code>setup</code>, matched by weight; there is no way to name a family yet.</li><li><strong>Sizes are in physical pixels</strong>, like everything else until the hosts pass a scale factor.</li><li><strong>Whole-atlas upload</strong> whenever a new glyph appears (0.5 to 2 MB). On the device, frame-interval p95 rose from about 8.8 ms to about 11 ms while the count was changing; this is the suspected cause, not yet confirmed. Uploading only the changed rows is the fix.</li><li><strong>Blending is in linear space</strong>, which makes light text on dark backgrounds look slightly heavier, and dark on light slightly thinner, than native text. Common remedies (gamma-adjusted coverage) are not applied.</li><li><strong>No selection, cursor or hit-testing API</strong>, and no text input.</li><li><strong>Binary size.</strong> The Android arm64 library grew from 5.76 MB to 9.53 MB, of which about 1.5 MB is the three embedded font files in the example.</li></ul>
+</article>
+
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/architecture/0009-text.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#context">Context</a><a class="ti" href="#decision">Decision</a><a class="ti" href="#verified">Verified</a><a class="ti" href="#known-limitations">Known limitations</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

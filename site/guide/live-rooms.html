@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live rooms · Morningstar</title>
+<meta name="description" content="A live room carries sound, pictures and small data messages between the people in it. On Android it is LiveKit&#x27;s client, behind the same effects interface as every other service. The app&#x27;s server hands out a ticket (an address and a token); the app joins with it.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni" href="installation.html">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni" href="project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni" href="text-and-pictures.html">Text, fonts and pictures</a><a class="ni" href="theming-and-motion.html">Themes and motion</a><a class="ni" href="text-input.html">Text input</a><a class="ni" href="navigation.html">Navigation and time</a><a class="ni" href="effects.html">Effects and services</a><a class="ni on" href="live-rooms.html" aria-current="page">Live rooms</a><a class="ni" href="accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="testing.html">Testing</a><a class="ni" href="android.html">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Core concepts</span><span aria-hidden="true">/</span><span class="here">Live rooms</span></div>
+<article>
+<h1>Live rooms</h1><p class="lead">A live room carries sound, pictures and small data messages between the people in it. On Android it is LiveKit's client, behind the same effects interface as every other service. The app's server hands out a ticket (an address and a token); the app joins with it.</p><p>Live rooms are <strong>opt-in per app</strong>, because LiveKit and WebRTC add about 20 MB to an APK. An app that does not ask for them carries none of the code. See <a href="../reference/services.html">Opt-in services</a>.</p><div class="code"><pre><code><span class="t">[package.metadata.morningstar]</span>
+<span class="f">services</span> = [<span class="s">&quot;live&quot;</span>, <span class="s">&quot;live-video&quot;</span>]</code></pre></div><h2 id="joining-and-following-the-room"><a class="anchor" href="#joining-and-following-the-room">Joining, and following the room</a></h2><p>A join is answered more than once: one message per event until a final one. <code>Disconnected</code> and <code>Failed</code> are final.</p><div class="code"><pre><code><span class="k">fn</span> <span class="f">update</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, message: <span class="t">Message</span>) {
+    <span class="k">match</span> message {
+        <span class="t">Message</span>::<span class="t">Ticket</span> { url, token } =&gt; <span class="k">self</span>.start.<span class="f">push</span>(<span class="t">Start</span>::<span class="t">Join</span> { url, token }),
+        <span class="t">Message</span>::<span class="t">Mute</span>(muted) =&gt; {
+            <span class="k">self</span>.muted = muted;
+            <span class="k">self</span>.start.<span class="f">push</span>(<span class="t">Start</span>::<span class="t">Microphone</span>(!muted));
+        }
+        <span class="t">Message</span>::<span class="t">HangUp</span> =&gt; <span class="k">self</span>.start.<span class="f">push</span>(<span class="t">Start</span>::<span class="t">Leave</span>),
+        <span class="c">// One message per event, until a final one.</span>
+        <span class="t">Message</span>::<span class="t">Live</span>(event) =&gt; <span class="k">match</span> event {
+            <span class="t">LiveEvent</span>::<span class="t">Connected</span> =&gt; {
+                <span class="k">self</span>.connected = <span class="k">true</span>;
+                <span class="k">self</span>.status = <span class="s">"Sound is live."</span>.<span class="f">to_owned</span>();
+            }
+            <span class="t">LiveEvent</span>::<span class="t">VideoStarted</span>(stream) <span class="k">if</span> !stream.local =&gt; {
+                <span class="k">self</span>.picture = <span class="t">Some</span>(stream.track);
+            }
+            <span class="t">LiveEvent</span>::<span class="t">VideoStopped</span>(stream) <span class="k">if</span> <span class="t">Some</span>(stream.track) == <span class="k">self</span>.picture =&gt; {
+                <span class="k">self</span>.picture = <span class="t">None</span>;
+            }
+            <span class="t">LiveEvent</span>::<span class="t">Reconnecting</span> =&gt; <span class="k">self</span>.status = <span class="s">"Reconnecting..."</span>.<span class="f">to_owned</span>(),
+            <span class="t">LiveEvent</span>::<span class="t">Reconnected</span> =&gt; <span class="k">self</span>.status = <span class="s">"Sound is live."</span>.<span class="f">to_owned</span>(),
+            <span class="c">// Final: the room is over, whoever ended it.</span>
+            <span class="t">LiveEvent</span>::<span class="t">Disconnected</span>(_) =&gt; {
+                <span class="k">self</span>.connected = <span class="k">false</span>;
+                <span class="k">self</span>.picture = <span class="t">None</span>;
+                <span class="k">self</span>.status = <span class="s">"The call ended."</span>.<span class="f">to_owned</span>();
+            }
+            <span class="c">// Final: it never started, or could not go on.</span>
+            <span class="t">LiveEvent</span>::<span class="t">Failed</span>(<span class="t">LiveError</span>::<span class="t">PermissionDenied</span>) =&gt; {
+                <span class="k">self</span>.status = <span class="s">"The microphone is not allowed."</span>.<span class="f">to_owned</span>();
+            }
+            <span class="t">LiveEvent</span>::<span class="t">Failed</span>(error) =&gt; <span class="k">self</span>.status = <span class="k">format!</span>(<span class="s">"No sound: {error}."</span>),
+            _ =&gt; {}
+        },
+    }
+}
+
+<span class="k">fn</span> <span class="f">effects</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, out: &amp;<span class="k">mut</span> <span class="t">Effects</span>&lt;<span class="t">Message</span>&gt;) {
+    <span class="k">for</span> start <span class="k">in</span> <span class="k">self</span>.start.<span class="f">drain</span>(..) {
+        <span class="k">match</span> start {
+            <span class="c">// The ticket comes from the app's server, never from the</span>
+            <span class="c">// app: a server holds the key that mints it.</span>
+            <span class="t">Start</span>::<span class="t">Join</span> { url, token } =&gt; out.<span class="f">join_live</span>(
+                <span class="t">LiveJoin</span>::<span class="f">new</span>(url, token).<span class="f">microphone</span>(<span class="k">true</span>).<span class="f">camera</span>(<span class="k">true</span>),
+                <span class="t">Message</span>::<span class="t">Live</span>,
+            ),
+            <span class="t">Start</span>::<span class="t">Microphone</span>(live) =&gt; out.<span class="f">set_live_microphone</span>(live),
+            <span class="t">Start</span>::<span class="t">Leave</span> =&gt; out.<span class="f">leave_live</span>(),
+        }
+    }
+}</code></pre></div><div class="table"><table class="api"><thead><tr><th>Variant</th><th>Meaning</th></tr></thead><tbody><tr><td><code>Connected</code></td><td>The room is joined: sound from the others plays, and the microphone is heard by them unless the room was joined muted.</td></tr><tr><td><code>ParticipantJoined</code></td><td>Someone is in the room: they were there already, or have come in.</td></tr><tr><td><code>ParticipantLeft</code></td><td>Someone left. Their <code>identity</code>.</td></tr><tr><td><code>Speaking</code></td><td>Who is speaking now, loudest first, by identity (this device's own person included, under the identity of its ticket); empty when nobody is.</td></tr><tr><td><code>Reconnecting</code></td><td>The connection dropped and is being made again; nothing is heard meanwhile.</td></tr><tr><td><code>Reconnected</code></td><td>The connection is back.</td></tr><tr><td><code>VideoStarted</code></td><td>A video has started: someone's camera or shared screen, this device's own included.</td></tr><tr><td><code>VideoStopped</code></td><td>That video is over: its owner turned it off, or left.</td></tr><tr><td><code>MediaFailed</code></td><td>This device's camera or screen could not be turned on: the user refused it (<code>LiveError::PermissionDenied</code>), the app was built without it (<code>LiveError::Unsupported</code>), or it failed.</td></tr><tr><td><code>Data</code></td><td>Someone sent a message to the room.</td></tr><tr><td><code>AudioRoutes</code></td><td>Where the sound can go and where it goes now (ADR 0042): sent once the room is connected and again whenever either changes, a headset connecting in the middle of a call included.</td></tr><tr><td><code>Disconnected</code></td><td>The room is over for this device, for the reason given.</td></tr><tr><td><code>Failed</code></td><td>The room could not be joined, or broke.</td></tr></tbody></table></div><p>One room at a time. Joining a second room leaves the first, which ends with <code>Disconnected(Replaced)</code>.</p><h2 id="pictures"><a class="anchor" href="#pictures">Pictures</a></h2><p>A camera or a shared screen arrives as a <code>VideoStarted</code> event with a <code>VideoTrack</code>. The app draws the track with <code>LiveVideo</code>; the frames themselves never pass through the application.</p><div class="code"><pre><code><span class="k">fn</span> <span class="f">view</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
+    <span class="k">let</span> picture: <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; = <span class="k">match</span> <span class="k">self</span>.picture {
+        <span class="c">// Frames never pass through the application: it draws the</span>
+        <span class="c">// track, and the host fills it in.</span>
+        <span class="t">Some</span>(track) =&gt; <span class="t">LiveVideo</span>::<span class="f">new</span>(track).<span class="f">fit</span>(<span class="t">ImageFit</span>::<span class="t">Cover</span>).<span class="f">fill</span>().<span class="f">into</span>(),
+        <span class="t">None</span> =&gt; <span class="t">Container</span>::<span class="f">empty</span>()
+            .<span class="f">background</span>(<span class="t">ThemeColor</span>::<span class="t">Surface</span>)
+            .<span class="f">fill</span>()
+            .<span class="f">into</span>(),
+    };
+    <span class="k">stack!</span>[
+        picture,
+        <span class="k">col!</span>[
+            <span class="f">text</span>(<span class="k">self</span>.status.<span class="f">clone</span>()).<span class="f">color</span>(<span class="t">ThemeColor</span>::<span class="t">OnPrimary</span>),
+            <span class="t">Button</span>::<span class="f">new</span>(<span class="k">if</span> <span class="k">self</span>.muted { <span class="s">"Unmute"</span> } <span class="k">else</span> { <span class="s">"Mute"</span> })
+                .<span class="f">secondary</span>()
+                .<span class="f">on_press</span>(<span class="t">Message</span>::<span class="t">Mute</span>(!<span class="k">self</span>.muted)),
+            <span class="t">Button</span>::<span class="f">new</span>(<span class="s">"Hang up"</span>)
+                .<span class="f">destructive</span>()
+                .<span class="f">on_press</span>(<span class="t">Message</span>::<span class="t">HangUp</span>),
+        ]
+        .<span class="f">gap</span>(<span class="s">12.0</span>)
+        .<span class="f">padding</span>(<span class="s">20.0</span>)
+        .<span class="f">place</span>(<span class="t">Alignment</span>::<span class="t">BOTTOM_CENTER</span>),
+    ]
+    .<span class="f">fill</span>()
+    .<span class="f">into</span>()
+}</code></pre></div><p><code>LiveVideo</code> draws nothing until a frame exists, so whatever is stacked underneath is the placeholder. Camera pictures need the <code>live-video</code> service; sharing this phone's screen needs <code>live-screen</code>.</p><h2 id="controls"><a class="anchor" href="#controls">Controls</a></h2><div class="table"><table><thead><tr><th>Method</th><th>Effect</th></tr></thead><tbody><tr><td><code>out.set_live_microphone(bool)</code></td><td>Mute and unmute</td></tr><tr><td><code>out.set_live_speaker(bool)</code></td><td>Loudspeaker on or off</td></tr><tr><td><code>out.set_live_audio_route(route)</code></td><td>Choose the earpiece, the loudspeaker, a wired headset or a Bluetooth one. Routes are reported by <code>LiveEvent::AudioRoutes</code></td></tr><tr><td><code>out.set_live_camera(bool)</code>, <code>out.switch_live_camera()</code></td><td>The camera, and front or back</td></tr><tr><td><code>out.set_live_screen_share(bool)</code></td><td>Share this phone's screen. Android asks the user first</td></tr><tr><td><code>out.send_live_data(topic, payload, reliable)</code></td><td>A small message to everyone in the room, at most 15,000 bytes</td></tr><tr><td><code>out.leave_live()</code></td><td>Leave</td></tr></tbody></table></div><h2 id="when-a-room-ends"><a class="anchor" href="#when-a-room-ends">When a room ends</a></h2><p>A live room holds the microphone open, so nothing may leave one connected by accident.</p><div class="table"><table class="api"><thead><tr><th>Variant</th><th>Meaning</th></tr></thead><tbody><tr><td><code>Left</code></td><td>The application left it.</td></tr><tr><td><code>Replaced</code></td><td>The application joined another room: there is one at a time.</td></tr><tr><td><code>Hidden</code></td><td>The app left the screen.</td></tr><tr><td><code>HungUp</code></td><td>The user ended it from the notification of a room that was going on in the background (ADR 0042).</td></tr><tr><td><code>Ended</code></td><td>The other side ended it: the room was closed, this person was removed, or the same ticket joined from somewhere else.</td></tr><tr><td><code>Lost</code></td><td>The connection was lost and could not be made again.</td></tr></tbody></table></div><p>By default a room is left when the app leaves the screen: Home, another app, or the screen locking. Two things change that:</p><ul><li><strong>A shared screen.</strong> A room in which this phone's screen is being shared continues behind other apps, since sharing is pointless otherwise. The user agreed in a system dialog and a notification shows it.</li><li><strong><code>live-background</code>.</strong> An app that declares this service and joins with <code>LiveJoin::background(LiveBackground::new(title, text))</code> keeps the call going behind another app or with the screen locked, with an ongoing notification that has a Hang up action.</li></ul><h2 id="what-has-been-verified"><a class="anchor" href="#what-has-been-verified">What has been verified</a></h2><p>Everything on this page passes its tests on the development machine, and the Android side compiles and packages. <strong>None of it has been confirmed on a phone yet</strong>: no sound has been heard and no picture seen through a real room. The iOS host answers every join with <code>Unsupported</code>.</p><p>The decisions, with every case a room ends in, are <a href="../architecture/0038-live-rooms.html">ADR 0038</a>, <a href="../architecture/0039-live-video-screen-and-data.html">ADR 0039</a> and <a href="../architecture/0042-live-rooms-in-the-background-and-audio-routes.html">ADR 0042</a>. The <a href="../examples/barua-talk.html">Barua Talk example</a> is the app that uses all of it.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="effects.html"><span>Previous</span>Effects and services</a><a class="next" href="accessibility.html"><span>Next</span>Accessibility</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/live-rooms.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#joining-and-following-the-room">Joining, and following the room</a><a class="ti" href="#pictures">Pictures</a><a class="ti" href="#controls">Controls</a><a class="ti" href="#when-a-room-ends">When a room ends</a><a class="ti" href="#what-has-been-verified">What has been verified</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

@@ -63,6 +63,11 @@ jobs:
       # in its tests and runs in the `gpu` job.
       - name: Tests that need no GPU
         run: cargo test --locked -p morningstar-core -p morningstar-layout -p morningstar-text
+      # The documentation site is committed output (ADR 0044): it must be
+      # what docs/ gives, and every link in it must lead somewhere. Its code
+      # samples (examples/docs-snippets) were compiled by the lint above.
+      - name: Documentation site is up to date
+        run: python3 tools/build-docs.py --check
 
   android:
     name: Android code type-checks and lints

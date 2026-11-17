@@ -1,0 +1,16 @@
+[package]
+name = "docs-snippets"
+description = "The code samples of the documentation site, kept as a crate so that they compile."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Not an app: nothing here is installed on a phone. The documentation's
+# pages (docs/) pull the regions marked `// docs:begin name` ... `// docs:end
+# name` out of these files (tools/build-docs.py), so a sample that stops
+# compiling fails `cargo clippy --workspace` instead of misleading a reader.
+
+[dependencies]
+morningstar.workspace = true

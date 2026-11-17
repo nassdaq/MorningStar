@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0001 — Crate boundaries · Morningstar</title>
+<meta name="description" content="Status: Accepted (2026-11-11)">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni" href="../reference/application.html">Application</a><a class="ni" href="../reference/effects.html">Effects</a><a class="ni" href="../reference/ui.html">Ui and testing</a><a class="ni" href="../reference/navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="../reference/theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="../reference/tools.html">Tools and scripts</a><a class="ni" href="../reference/services.html">Opt-in services</a><p class="nh">Project</p><a class="ni" href="../reference/architecture.html">Architecture</a><a class="ni on" href="index.html">Decision records</a><a class="ni" href="../reference/platform-status.html">Platform status</a><a class="ni" href="../reference/performance.html">Performance</a><a class="ni" href="../reference/troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><a href="index.html">Decision records</a><span aria-hidden="true">/</span><span class="here">0001 — Crate boundaries</span></div>
+<article>
+<h1>0001 — Crate boundaries</h1><p class="lead">Status: Accepted (2026-11-11)</p><h2 id="context"><a class="anchor" href="#context">Context</a></h2><p>The roadmap sketches fourteen crates. Splitting that finely before the subsystems exist would fix boundaries we cannot yet justify, and the roadmap itself says to start with a handful.</p><h2 id="decision"><a class="anchor" href="#decision">Decision</a></h2><p>Start with a handful of crates and one rule about direction:</p><div class="code"><pre><code>core  &lt;-  gpu, text  &lt;-  runtime  &lt;-  android | ios  &lt;-  morningstar  &lt;-  application</code></pre></div><p>(<code>morningstar-text</code> was added later; see ADR 0009. <code>gpu</code> and <code>text</code> do not depend on each other: they meet through plain data types in <code>core</code>.)</p><ul><li><code>morningstar-core</code>: no dependencies. Colour, lifecycle state machine, frame statistics.</li><li><code>morningstar-gpu</code>: the only user of <code>wgpu</code>. Device, surface, frame submission.</li><li><code>morningstar-runtime</code>: <code>Engine</code>, the single object a platform host drives, and the <code>App</code> trait.</li><li><code>morningstar-android</code>, <code>morningstar-ios</code>: translate native callbacks into <code>Engine</code> calls. Each is empty when compiled for any other target.</li><li><code>morningstar</code>: the public API. Re-exports and links the right platform crate.</li></ul><p><code>core</code>, <code>gpu</code> and <code>runtime</code> contain no platform logic. The single exception is the <code>NativeSurface</code> enum in <code>gpu</code>, whose variants are <code>cfg</code>-gated because a native handle is inherently platform-typed.</p><p>A new crate is split out when a subsystem has (a) a public interface that other crates consume and (b) tests that run without its neighbours. Expected next: <code>morningstar-renderer</code> (display list) in Phase 2, then <code>-layout</code>, <code>-text</code>, <code>-ui</code>.</p><h2 id="consequences"><a class="anchor" href="#consequences">Consequences</a></h2><ul><li>The shared crates build and test on a development host with no mobile toolchain.</li><li>Platform crates cannot be unit-tested on the host; they are kept small enough to review by reading (Android: ~360 lines, iOS: ~190).</li><li><code>runtime</code> currently depends on <code>gpu</code> directly. When the display list arrives, <code>runtime</code> should depend on the renderer's interface, not on the GPU backend.</li></ul>
+</article>
+
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/architecture/0001-crate-boundaries.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#context">Context</a><a class="ti" href="#decision">Decision</a><a class="ti" href="#consequences">Consequences</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accessibility · Morningstar</title>
+<meta name="description" content="When TalkBack or VoiceOver is running, each frame is also described as a tree of semantic nodes derived from its widgets, and the host mirrors that tree to the platform. While no assistive technology asks for it, none of this is built.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni" href="installation.html">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni" href="project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni" href="text-and-pictures.html">Text, fonts and pictures</a><a class="ni" href="theming-and-motion.html">Themes and motion</a><a class="ni" href="text-input.html">Text input</a><a class="ni" href="navigation.html">Navigation and time</a><a class="ni" href="effects.html">Effects and services</a><a class="ni" href="live-rooms.html">Live rooms</a><a class="ni on" href="accessibility.html" aria-current="page">Accessibility</a><p class="nh">From a design</p><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="testing.html">Testing</a><a class="ni" href="android.html">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Core concepts</span><span aria-hidden="true">/</span><span class="here">Accessibility</span></div>
+<article>
+<h1>Accessibility</h1><p class="lead">When TalkBack or VoiceOver is running, each frame is also described as a tree of semantic nodes derived from its widgets, and the host mirrors that tree to the platform. While no assistive technology asks for it, none of this is built.</p><h2 id="what-you-get-without-doing-anything"><a class="anchor" href="#what-you-get-without-doing-anything">What you get without doing anything</a></h2><ul><li>A <code>Text</code> is text.</li><li>A <code>Button</code> is a button with its label.</li><li>A <code>TextInput</code> is an edit box with its placeholder as the hint. A secure field's value is bullets, never its characters.</li><li>A <code>ScrollView</code> is a list.</li><li>Any box with <code>on_press</code> is one stop that reads the texts inside it in order.</li><li>Icons, pictures and shapes say nothing.</li></ul><h2 id="what-only-you-know"><a class="anchor" href="#what-only-you-know">What only you know</a></h2><p>The defaults cannot know what an icon means. Every widget has modifiers to say it.</p><div class="table"><table><thead><tr><th>Modifier</th><th>Use it for</th></tr></thead><tbody><tr><td><code>.label(text)</code></td><td>What a control is called. <strong>Required for a control with no text inside it</strong>, such as an icon button</td></tr><tr><td><code>.hint(text)</code></td><td>What the control is for, spoken after its label</td></tr><tr><td><code>.value(text)</code></td><td>What it shows now: a progress, a count</td></tr><tr><td><code>.role(Role::..)</code></td><td>What it is, when the default is wrong</td></tr><tr><td><code>.heading()</code></td><td>A heading, which a screen reader's user can jump between</td></tr><tr><td><code>.selected(bool)</code>, <code>.checked(bool)</code>, <code>.expanded(bool)</code>, <code>.disabled(bool)</code></td><td>Its state</td></tr><tr><td><code>.live(Live::..)</code></td><td>Announce the text whenever it changes: a status line, an error</td></tr><tr><td><code>.exclude_semantics()</code></td><td>Hide a decoration and everything inside it</td></tr><tr><td><code>.merge_semantics()</code></td><td>Make a group of texts one stop</td></tr><tr><td><code>.semantics_group()</code></td><td>Keep the children separate inside a named container</td></tr></tbody></table></div><p>On <code>Text</code> and <code>TextInput</code>, where <code>label</code> and <code>role</code> already mean the text style, the two are <code>semantic_label</code> and <code>semantic_role</code>.</p><p><code>out.announce(text)</code> in <code>effects</code> has the reader say something that is not on the screen, such as "Message sent".</p><h2 id="checking-a-screen"><a class="anchor" href="#checking-a-screen">Checking a screen</a></h2><p>A test turns the description on and asks what is wrong with it.</p><div class="code"><pre><code><span class="k">let</span> <span class="k">mut</span> ui = <span class="t">Ui</span>::<span class="f">testing</span>(<span class="t">MyApp</span>::<span class="f">default</span>());
+ui.<span class="f">set_accessibility</span>(<span class="k">true</span>);
+<span class="c">// ... draw a frame ...</span>
+<span class="k">assert!</span>(ui.<span class="f">accessibility_issues</span>().<span class="f">is_empty</span>());</code></pre></div><div class="table"><table class="api"><thead><tr><th>Variant</th><th>Meaning</th></tr></thead><tbody><tr><td><code>MissingLabel</code></td><td>A control with nothing to call it: an icon-only button without a <code>.label(..)</code>, a text field with neither label nor placeholder.</td></tr><tr><td><code>SmallTarget</code></td><td>A control smaller than 48 x 48 dp: hard to hit, and hard to find by touch.</td></tr><tr><td><code>DuplicateLabel</code></td><td>Two controls beside each other with the same label: they cannot be told apart by ear.</td></tr><tr><td><code>LowContrast</code></td><td>Text whose contrast with the solid colour behind it is under 4.5:1 (3:1 for text of 24 dp, or 18.66 dp bold, and larger).</td></tr></tbody></table></div><p>A generated app has this test for every screen from the start (<code>tests/accessibility.rs</code>), and the example apps hold all their screens to it. <code>Ui::semantics()</code> is the tree itself, and <code>Ui::perform(id, action)</code> does what a screen reader's user can do, so a journey can be tested by ear as well as by finger.</p><h2 id="what-has-been-verified"><a class="anchor" href="#what-has-been-verified">What has been verified</a></h2><p>The tree, its defaults and the checks pass their tests on the development machine. The Android host mirrors the tree to TalkBack as a virtual view hierarchy; <strong>it has not yet been tried with TalkBack on a phone</strong>. The iOS side is written and has never been compiled.</p><p>The design is <a href="../architecture/0032-accessibility.html">ADR 0032</a>; <a href="../building-screens.html#accessibility">Building screens</a> has examples of each modifier.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="live-rooms.html"><span>Previous</span>Live rooms</a><a class="next" href="../building-screens.html"><span>Next</span>Building screens</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/accessibility.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#what-you-get-without-doing-anything">What you get without doing anything</a><a class="ti" href="#what-only-you-know">What only you know</a><a class="ti" href="#checking-a-screen">Checking a screen</a><a class="ti" href="#what-has-been-verified">What has been verified</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

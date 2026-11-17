@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0004 — Threading and frame pacing · Morningstar</title>
+<meta name="description" content="Status: Accepted for Android. Open for iOS.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni" href="../reference/application.html">Application</a><a class="ni" href="../reference/effects.html">Effects</a><a class="ni" href="../reference/ui.html">Ui and testing</a><a class="ni" href="../reference/navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="../reference/theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="../reference/tools.html">Tools and scripts</a><a class="ni" href="../reference/services.html">Opt-in services</a><p class="nh">Project</p><a class="ni" href="../reference/architecture.html">Architecture</a><a class="ni on" href="index.html">Decision records</a><a class="ni" href="../reference/platform-status.html">Platform status</a><a class="ni" href="../reference/performance.html">Performance</a><a class="ni" href="../reference/troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><a href="index.html">Decision records</a><span aria-hidden="true">/</span><span class="here">0004 — Threading and frame pacing</span></div>
+<article>
+<h1>0004 — Threading and frame pacing</h1><p class="lead">Status: Accepted for Android. Open for iOS.</p><h2 id="context"><a class="anchor" href="#context">Context</a></h2><p>The roadmap asks for three execution domains (main/UI, workers, render) and warns that the actual arrangement must be validated per platform. It also requires idle rendering for battery life.</p><h2 id="decision"><a class="anchor" href="#decision">Decision</a></h2><p><strong><code>Engine</code> is single-threaded by contract.</strong> It is created on, and only called from, one thread. It contains no locks. Which thread that is belongs to the platform crate.</p><p><strong>Android: a dedicated render thread.</strong> JNI callbacks arrive on the main thread and each posts a message to a channel; the render thread owns the <code>Engine</code> and the <code>ANativeWindow</code>. The main thread never touches the GPU and never blocks, with one required exception (<code>surfaceDestroyed</code>, bounded by the frame in flight). The thread lives for the whole process, because Android can destroy and recreate the activity many times in one process.</p><p><strong>iOS: the main thread, for now.</strong> Frames are produced from the <code>CADisplayLink</code> callback. This is the simplest correct arrangement and avoids <code>CAMetalLayer</code> threading rules we have not tested. It means a slow frame blocks UIKit event delivery.</p><p><strong>Pacing comes from vsync, not from timers.</strong> The surface uses <code>Fifo</code>; acquiring the next drawable blocks until the display is ready. On iOS the display link provides the tick.</p><p><strong>No rendering while invisible.</strong> <code>Lifecycle::should_render</code> is true only when the app is visible and has a non-empty surface. Otherwise the Android render thread blocks on its channel using no CPU, and the iOS display link is paused. A frame that cannot be produced (occluded, swapchain being rebuilt, error) backs off for 16 ms rather than spinning.</p><p><strong>The application clock counts foreground time only</strong>, so animation resumes where it stopped.</p><h2 id="open-questions"><a class="anchor" href="#open-questions">Open questions</a></h2><ul><li><strong>Rendering every vsync is not idle rendering.</strong> Today a visible app redraws continuously even if nothing changed. Demand-driven frames need dirty tracking from the UI engine (ADR 0006) and, on Android, <code>Choreographer</code> for timing instead of blocking in acquire.</li><li><strong>iOS render thread.</strong> Decide with measurements once there is real per-frame work: main-thread hitches versus the complexity of presenting from another thread.</li><li><strong>High refresh rate.</strong> Neither host requests 90/120 Hz yet (<code>Surface.setFrameRate</code>; <code>CADisplayLink.preferredFrameRateRange</code> plus the Info.plist opt-in).</li><li><strong>Worker threads and async</strong> are not designed. Per the roadmap, no custom async runtime until profiling shows a need.</li></ul>
+</article>
+
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/architecture/0004-threading-and-frame-pacing.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#context">Context</a><a class="ti" href="#decision">Decision</a><a class="ti" href="#open-questions">Open questions</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

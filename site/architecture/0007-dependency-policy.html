@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0007 — Dependency policy · Morningstar</title>
+<meta name="description" content="Status: Accepted (2026-11-11)">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni" href="../reference/application.html">Application</a><a class="ni" href="../reference/effects.html">Effects</a><a class="ni" href="../reference/ui.html">Ui and testing</a><a class="ni" href="../reference/navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="../reference/theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="../reference/tools.html">Tools and scripts</a><a class="ni" href="../reference/services.html">Opt-in services</a><p class="nh">Project</p><a class="ni" href="../reference/architecture.html">Architecture</a><a class="ni on" href="index.html">Decision records</a><a class="ni" href="../reference/platform-status.html">Platform status</a><a class="ni" href="../reference/performance.html">Performance</a><a class="ni" href="../reference/troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><a href="index.html">Decision records</a><span aria-hidden="true">/</span><span class="here">0007 — Dependency policy</span></div>
+<article>
+<h1>0007 — Dependency policy</h1><p class="lead">Status: Accepted (2026-11-11)</p><h2 id="policy"><a class="anchor" href="#policy">Policy</a></h2><ol><li>A dependency is added only when writing the equivalent ourselves would be a significant, ongoing cost (a GPU abstraction, text shaping) and not for convenience (logging macros, error derive, a handful of FFI declarations).</li><li>A dependency that defines a subsystem's behaviour is confined to one crate and kept out of every public API.</li><li>Default features are off unless needed.</li><li>Each addition is recorded here with its reason.</li></ol><h2 id="inventory"><a class="anchor" href="#inventory">Inventory</a></h2><div class="table"><table><thead><tr><th>Crate</th><th>Version</th><th>Used by</th><th>Why</th></tr></thead><tbody><tr><td><code>wgpu</code></td><td>30</td><td><code>morningstar-gpu</code></td><td>Vulkan, Metal and GLES behind one API (ADR 0002)</td></tr><tr><td><code>pollster</code></td><td>1</td><td><code>morningstar-gpu</code></td><td>Blocks on wgpu's two async setup calls; avoids an async runtime</td></tr><tr><td><code>cosmic-text</code></td><td>0.17</td><td><code>morningstar-text</code></td><td>Shaping, bidi, line breaking, font fallback, glyph rasterisation (ADR 0009). <code>fontconfig</code> feature off. 0.17 is what resolves on Rust 1.92; newer releases need a newer compiler.</td></tr></tbody></table></div><p>| <code>zeno</code> | 0.3 | <code>morningstar-text</code> | Rasterises vector icons. Already in the tree through the text stack; now a direct dependency. |</p><p>| <code>png</code> | 0.18 | <code>morningstar-runtime</code> (image decoding, linked into apps; binary-size cost not yet measured) and <code>morningstar-devtools</code> | Decoding real-world design exports (palette, 16-bit, interlaced) and compressed screenshots. Adds 8 packages to the lock file. Replaced a hand-written uncompressed encoder once decoding was needed. |</p><p>Build tooling, not linked into apps: <code>cargo-ndk</code>, Android Gradle Plugin 9.5.1 with Gradle 9.6.0 (wrapper), XcodeGen.</p><p>In the Android host, and only of an app that opts in (<code>services = ["live"]</code>, <a href="0038-live-rooms.html">ADR 0038</a>): <code>io.livekit:livekit-android</code> 2.30.0 with what it brings (WebRTC, OkHttp, the Kotlin library, coroutines), for live rooms. No Rust crate depends on it or names a type of it; it costs such an app 19.6 MB of a debug APK for one ABI, and every other app nothing.</p><h2 id="deliberately-absent"><a class="anchor" href="#deliberately-absent">Deliberately absent</a></h2><ul><li><strong><code>winit</code>, <code>android-activity</code></strong>: would own the application (ADR 0003).</li><li><strong><code>jni</code>, <code>ndk</code>, <code>objc2</code></strong>: the hosts need four C functions on Android and none on iOS.</li><li><strong>An HTTP or TLS stack (<code>reqwest</code>, <code>ureq</code>, <code>rustls</code>), an audio stack (<code>cpal</code>), a random-number crate</strong>: the platform has all three, with the system's certificates, codecs and audio policy. Applications reach them through the hosts (ADR 0019).</li><li><strong><code>log</code></strong>: wgpu logs through it, so its warnings are currently invisible on devices. Adding a <code>log</code> backend that writes to logcat / the Xcode console is the most likely next dependency, and is worth it the first time a device shows a driver problem.</li><li><strong><code>tokio</code> or another async runtime</strong>: no demonstrated need.</li></ul><h2 id="toolchain-note"><a class="anchor" href="#toolchain-note">Toolchain note</a></h2><p><code>rust-toolchain.toml</code> pins the channel but does not list targets. Listing targets makes rustup synchronise the whole channel on any cargo invocation, which silently upgrades a developer's compiler. Targets are added explicitly (<code>rustup target add …</code>; <code>tools/build-ios.sh</code> does this).</p>
+</article>
+
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/architecture/0007-dependency-policy.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#policy">Policy</a><a class="ti" href="#inventory">Inventory</a><a class="ti" href="#deliberately-absent">Deliberately absent</a><a class="ti" href="#toolchain-note">Toolchain note</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

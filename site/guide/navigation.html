@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Navigation and time · Morningstar</title>
+<meta name="description" content="">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni" href="installation.html">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni" href="project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni" href="text-and-pictures.html">Text, fonts and pictures</a><a class="ni" href="theming-and-motion.html">Themes and motion</a><a class="ni" href="text-input.html">Text input</a><a class="ni on" href="navigation.html" aria-current="page">Navigation and time</a><a class="ni" href="effects.html">Effects and services</a><a class="ni" href="live-rooms.html">Live rooms</a><a class="ni" href="accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="testing.html">Testing</a><a class="ni" href="android.html">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Core concepts</span><span aria-hidden="true">/</span><span class="here">Navigation and time</span></div>
+<article>
+<h1>Navigation and time</h1><h2 id="screens"><a class="anchor" href="#screens">Screens</a></h2><p>A <code>Navigator</code> is the stack of screens as plain application state. Nothing about it is special to the framework: a screen is a value of your own type, and <code>view</code> draws whichever is on top.</p><div class="code"><pre><code><span class="c">/// The screens there are. Plain data: a screen can carry what it shows.</span>
+<span class="k">#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]</span>
+<span class="k">pub</span> <span class="k">enum</span> <span class="t">Screen</span> {
+    <span class="t">Orders</span>,
+    <span class="t">Order</span>(u32),
+}
+
+<span class="k">#[derive(Clone)]</span>
+<span class="k">pub</span> <span class="k">enum</span> <span class="t">Message</span> {
+    <span class="t">Open</span>(u32),
+    <span class="t">Back</span>,
+    <span class="t">Second</span>,
+}
+
+<span class="k">pub</span> <span class="k">struct</span> <span class="t">Shop</span> {
+    <span class="k">pub</span> screens: <span class="t">Navigator</span>&lt;<span class="t">Screen</span>&gt;,
+    <span class="k">pub</span> seconds: u32,
+}
+
+<span class="k">impl</span> <span class="t">Application</span> <span class="k">for</span> <span class="t">Shop</span> {
+    <span class="k">type</span> <span class="t">Message</span> = <span class="t">Message</span>;
+
+    <span class="k">fn</span> <span class="f">view</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
+        <span class="k">let</span> screen = *<span class="k">self</span>.screens.<span class="f">current</span>();
+        <span class="k">let</span> content: <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; = <span class="k">match</span> screen {
+            <span class="t">Screen</span>::<span class="t">Orders</span> =&gt; <span class="t">Button</span>::<span class="f">new</span>(<span class="s">"Order 1042"</span>)
+                .<span class="f">on_press</span>(<span class="t">Message</span>::<span class="t">Open</span>(<span class="s">1042</span>))
+                .<span class="f">into</span>(),
+            <span class="t">Screen</span>::<span class="t">Order</span>(number) =&gt; <span class="k">col!</span>[
+                <span class="t">Button</span>::<span class="f">new</span>(<span class="s">"Back"</span>).<span class="f">plain</span>().<span class="f">on_press</span>(<span class="t">Message</span>::<span class="t">Back</span>),
+                <span class="f">text</span>(<span class="k">format!</span>(<span class="s">"Order {number}"</span>)).<span class="f">title</span>(),
+                <span class="f">text</span>(<span class="k">format!</span>(<span class="s">"Open for {} s"</span>, <span class="k">self</span>.seconds)).<span class="f">muted</span>(),
+            ]
+            .<span class="f">gap</span>(<span class="s">12.0</span>)
+            .<span class="f">into</span>(),
+        };
+        <span class="c">// The id gives each screen its own state; the transition slides</span>
+        <span class="c">// screens in the direction of the last change.</span>
+        <span class="t">SafeArea</span>::<span class="f">new</span>(content)
+            .<span class="f">id</span>(screen)
+            .<span class="f">transition</span>(<span class="k">self</span>.screens.<span class="f">transition</span>())
+            .<span class="f">into</span>()
+    }
+
+    <span class="k">fn</span> <span class="f">update</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, message: <span class="t">Message</span>) {
+        <span class="k">match</span> message {
+            <span class="t">Message</span>::<span class="t">Open</span>(number) =&gt; {
+                <span class="k">self</span>.seconds = <span class="s">0</span>;
+                <span class="k">self</span>.screens.<span class="f">push</span>(<span class="t">Screen</span>::<span class="t">Order</span>(number));
+            }
+            <span class="t">Message</span>::<span class="t">Back</span> =&gt; {
+                <span class="k">self</span>.screens.<span class="f">back</span>();
+            }
+            <span class="t">Message</span>::<span class="t">Second</span> =&gt; <span class="k">self</span>.seconds += <span class="s">1</span>,
+        }
+    }
+
+    <span class="c">// The system's Back button or gesture. `true`: the app dealt with it.</span>
+    <span class="c">// `false` on the first screen leaves it to the system, which leaves</span>
+    <span class="c">// the app.</span>
+    <span class="k">fn</span> <span class="f">back</span>(&amp;<span class="k">mut</span> <span class="k">self</span>) -&gt; bool {
+        <span class="k">self</span>.screens.<span class="f">back</span>()
+    }
+
+    <span class="c">// A message every second, only while an order is open. With `None`</span>
+    <span class="c">// the app draws nothing and wakes for nothing.</span>
+    <span class="k">fn</span> <span class="f">tick</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Option</span>&lt;(<span class="t">Duration</span>, <span class="t">Message</span>)&gt; {
+        <span class="k">matches!</span>(<span class="k">self</span>.screens.<span class="f">current</span>(), <span class="t">Screen</span>::<span class="t">Order</span>(_))
+            .<span class="f">then_some</span>((<span class="t">Duration</span>::<span class="f">from_secs</span>(<span class="s">1</span>), <span class="t">Message</span>::<span class="t">Second</span>))
+    }
+}</code></pre></div><p>Three things in that sample are worth copying:</p><ul><li><strong><code>.id(screen)</code> on each screen's root</strong> gives every screen its own scroll positions and focus.</li><li><strong><code>.transition(self.screens.transition())</code></strong> slides screens in and out in the direction of the last change: forward for a push, backward for a pop.</li><li><strong>A screen can carry data.</strong> <code>Screen::Order(1042)</code> is a different identity from <code>Screen::Order(1043)</code>.</li></ul><h2 id="the-systems-back"><a class="anchor" href="#the-systems-back">The system's Back</a></h2><p><code>back()</code> is called for the Back button and the back gesture. Return <code>true</code> when the app dealt with it, and <code>false</code> to leave it to the system, which then leaves the app. <code>Navigator::back()</code> returns exactly that: it pops if there is something to pop.</p><p>A screen with something of its own to close first (a sheet, a search field, a selection) checks that before the navigator. <a href="../architecture/0018-back-and-timers.html">ADR 0018</a>.</p><h2 id="time"><a class="anchor" href="#time">Time</a></h2><p><code>tick()</code> asks for a message after a delay. It is asked again after each one, so it repeats while it returns <code>Some</code> and stops when it returns <code>None</code>. With no timer, an idle app draws nothing and wakes for nothing.</p><p>Use it for a clock that is on screen, for polling a server while a screen is open, and for timeouts. Do not use it to animate: <a href="theming-and-motion.html#motion"><code>.animate</code> and <code>.transition</code></a> do that without messages.</p><h2 id="reference"><a class="anchor" href="#reference">Reference</a></h2><p>Every method of <code>Navigator</code> is in the <a href="../reference/navigator.html">reference</a>.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="text-input.html"><span>Previous</span>Text input</a><a class="next" href="effects.html"><span>Next</span>Effects and services</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/navigation.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#screens">Screens</a><a class="ti" href="#the-systems-back">The system's Back</a><a class="ti" href="#time">Time</a><a class="ti" href="#reference">Reference</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

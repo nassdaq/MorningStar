@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Build for Android · Morningstar</title>
+<meta name="description" content="One script builds the app&#x27;s library, generates its launcher icons, packages an APK and, if asked, installs and starts it.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni" href="installation.html">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni" href="project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni" href="text-and-pictures.html">Text, fonts and pictures</a><a class="ni" href="theming-and-motion.html">Themes and motion</a><a class="ni" href="text-input.html">Text input</a><a class="ni" href="navigation.html">Navigation and time</a><a class="ni" href="effects.html">Effects and services</a><a class="ni" href="live-rooms.html">Live rooms</a><a class="ni" href="accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="testing.html">Testing</a><a class="ni on" href="android.html" aria-current="page">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Ship</span><span aria-hidden="true">/</span><span class="here">Build for Android</span></div>
+<article>
+<h1>Build for Android</h1><p class="lead">One script builds the app's library, generates its launcher icons, packages an APK and, if asked, installs and starts it.</p><div class="code"><pre><code>MORNINGSTAR_APP=my-app MORNINGSTAR_ABIS=arm64-v8a <span class="f">tools/build-android.sh</span> --install</code></pre></div><div class="table"><table><thead><tr><th>Setting</th><th>Meaning</th><th>Default</th></tr></thead><tbody><tr><td><code>MORNINGSTAR_APP</code></td><td>The package to build</td><td><code>hello-gpu</code></td></tr><tr><td><code>MORNINGSTAR_ABIS</code></td><td>The architectures. <code>arm64-v8a</code> alone is right for a phone and halves the time and disk</td><td><code>arm64-v8a</code> and <code>x86_64</code></td></tr><tr><td><code>ANDROID_HOME</code></td><td>The Android SDK</td><td>Required</td></tr><tr><td><code>ANDROID_NDK_HOME</code></td><td>The NDK to use</td><td>The newest complete one under <code>$ANDROID_HOME/ndk</code></td></tr><tr><td><code>--install</code></td><td>Also install on the connected phone and start the app</td><td>Build only; the APK's path is printed</td></tr></tbody></table></div><p>The app's name, application id, icon and services come from its <code>Cargo.toml</code> and nowhere else. The APK is a debug build of the host with a release build of the app's library.</p><h2 id="what-the-build-needs"><a class="anchor" href="#what-the-build-needs">What the build needs</a></h2><p>The Android SDK and NDK, <code>cargo-ndk</code> and a JDK 17 or newer; see <a href="installation.html">Installation</a>. The host targets API 36 and runs on API 24 (Android 7.0) and later.</p><h2 id="what-is-in-the-apk"><a class="anchor" href="#what-is-in-the-apk">What is in the APK</a></h2><p>The base host carries the app's library and asks for the <code>INTERNET</code> and <code>RECORD_AUDIO</code> permissions. Everything else is opt-in through <code>services</code> in the app's <code>Cargo.toml</code>, and an app that does not name a service carries none of it. <a href="../reference/services.html">Opt-in services</a> lists what each one adds.</p><h2 id="a-server-on-your-machine"><a class="anchor" href="#a-server-on-your-machine">A server on your machine</a></h2><p>A phone connected by USB reaches a server on the development machine through <code>adb reverse</code>:</p><div class="code"><pre><code><span class="f">adb</span> reverse tcp:8790 tcp:8790</code></pre></div><p>The link is dropped when the cable is unplugged or the phone reconnects; run it again. For a deployed server, give its address when building, so that it is never in the repository:</p><div class="code"><pre><code>MY_APP_SERVER_URL=https://api.example.com MORNINGSTAR_APP=my-app <span class="f">tools/build-android.sh</span></code></pre></div><h2 id="reading-what-the-app-does"><a class="anchor" href="#reading-what-the-app-does">Reading what the app does</a></h2><p>The host logs under the tag <code>Morningstar</code>:</p><div class="code"><pre><code><span class="f">adb</span> logcat -s Morningstar</code></pre></div><p>Prefer proving behaviour from the log. A phone connected over adb belongs to a person who may be using it: the repository's rule is never to send it input or capture its screen directly. The only permitted route is <code>tools/adb-guarded.sh</code>, which checks that the expected app is in front immediately before each action, and even that only when the owner has agreed.</p><h2 id="what-has-been-verified-on-a-phone"><a class="anchor" href="#what-has-been-verified-on-a-phone">What has been verified on a phone</a></h2><p>One phone so far, a Galaxy A27 on Android 16 with Vulkan: a frame is presented, text and the full shader match the desktop render by eye, touch reaches the app, the surface survives going to the background and back, an idle screen draws nothing, and typing works with the system keyboard. <a href="../reference/platform-status.html">Platform status</a> has the full list, and what has not been seen.</p><h2 id="type-checking-the-android-code-without-building-an-apk"><a class="anchor" href="#type-checking-the-android-code-without-building-an-apk">Type-checking the Android code without building an APK</a></h2><div class="code"><pre><code><span class="f">cargo</span> ndk -t arm64-v8a clippy -p my-app</code></pre></div>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="testing.html"><span>Previous</span>Testing</a><a class="next" href="ios.html"><span>Next</span>iOS</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/android.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#what-the-build-needs">What the build needs</a><a class="ti" href="#what-is-in-the-apk">What is in the APK</a><a class="ti" href="#a-server-on-your-machine">A server on your machine</a><a class="ti" href="#reading-what-the-app-does">Reading what the app does</a><a class="ti" href="#what-has-been-verified-on-a-phone">What has been verified on a phone</a><a class="ti" href="#type-checking-the-android-code-without-building-an-apk">Type-checking the Android code without building an APK</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

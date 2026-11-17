@@ -1,0 +1,33 @@
+Creates a new Morningstar application in this workspace: a crate that builds,
+passes its own tests and can be installed on a phone as it is.
+
+Usage: morningstar-new <package> [options]
+
+  <package>              the Cargo package and the app's directory: lower-case
+                         letters, digits and hyphens, like my-app
+
+Options:
+  --name <text>          the name under the launcher icon
+                         (default: the package in words, "My App")
+  --id <id>              the application id, like com.example.myapp
+                         (default: dev.morningstar.<package>; choose your own
+                         before the app is given to anyone)
+  --services <list>      opt-in platform services, separated by commas:
+                         live (voice rooms) and its parts: live-video,
+                         live-screen, live-background
+                         (default: none; each adds to what the app carries)
+  --server               also write a Node server skeleton in server/, and make
+                         the app talk to it
+  --port <number>        the port that server listens on (default: 8790)
+  --dir <directory>      where the app's directory is made, relative to the
+                         workspace root (default: apps)
+  --workspace <dir>      the workspace root, if not this directory or one above
+  -h, --help             print this help
+
+What is written: Cargo.toml (name, id, icon and services, declared once),
+src/lib.rs (two screens, navigation, a stored value), tests (journeys,
+accessibility, pictures of the screens), examples/screenshot.rs, a launcher
+icon, fonts, README.md, SCREENS.md and design/README.md; and the app is added
+to the workspace's members. Nothing is overwritten.
+
+Exit status: 0 created, 2 usage error or nothing written.

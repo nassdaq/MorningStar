@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScrollView · Morningstar</title>
+<meta name="description" content="A viewport around content that is taller, or wider, than the space it has.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl on" href="index.html" aria-current="true">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Widgets">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl on" href="index.html" aria-current="true">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Overview</p><a class="ni" href="index.html">Widget gallery</a><a class="ni" href="modifiers.html">Common modifiers</a><p class="nh">Layout</p><a class="ni" href="container.html">Container</a><a class="ni" href="column-row.html">Column, Row and Wrap</a><a class="ni" href="stack.html">Stack</a><a class="ni on" href="scroll-view.html" aria-current="page">ScrollView</a><a class="ni" href="safe-area-spacer.html">SafeArea and Spacer</a><p class="nh">Content</p><a class="ni" href="text.html">Text</a><a class="ni" href="text-input.html">TextInput</a><a class="ni" href="button.html">Button and Pressable</a><a class="ni" href="divider.html">Divider</a><a class="ni" href="picture.html">Picture and Avatar</a><a class="ni" href="icon.html">Icon</a><a class="ni" href="live-video.html">LiveVideo</a><p class="nh">Paint</p><a class="ni" href="paint.html">Colours, gradients and shadows</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Widgets</span><span aria-hidden="true">/</span><span>Layout</span><span aria-hidden="true">/</span><span class="here">ScrollView</span></div>
+<article>
+<h1>ScrollView</h1><p class="lead">A viewport around content that is taller, or wider, than the space it has.</p><div class="code"><pre><code><span class="k">let</span> <span class="k">mut</span> list = <span class="t">Column</span>::<span class="f">new</span>().<span class="f">gap</span>(<span class="s">12.0</span>).<span class="f">padding</span>(<span class="s">20.0</span>).<span class="f">fill_width</span>();
+<span class="k">for</span> (index, row) <span class="k">in</span> rows.<span class="f">into_iter</span>().<span class="f">enumerate</span>() {
+    <span class="c">// An id per row keeps a finger's press with its row when rows</span>
+    <span class="c">// are added or removed above it.</span>
+    list = list.<span class="f">push</span>(<span class="f">text</span>(row).<span class="f">fill_width</span>().<span class="f">id</span>((<span class="s">"row"</span>, index)));
+}
+<span class="c">// The id keeps this screen's scroll position its own.</span>
+<span class="t">SafeArea</span>::<span class="f">new</span>(<span class="t">ScrollView</span>::<span class="f">new</span>(list).<span class="f">id</span>(<span class="s">"orders-scroll"</span>))
+    .<span class="f">id</span>(<span class="s">"orders"</span>)</code></pre></div><div class="table"><table class="api"><thead><tr><th>Method</th><th>What it does</th></tr></thead><tbody><tr><td><code>new&lt;M&gt;(content: impl Into&lt;Element&lt;M&gt;&gt;) -&gt; Container&lt;M&gt;</code></td><td>A viewport around <code>content</code>, filling its parent.</td></tr><tr><td><code>horizontal&lt;M&gt;(content: impl Into&lt;Element&lt;M&gt;&gt;) -&gt; Container&lt;M&gt;</code></td><td>A viewport that scrolls <strong>sideways</strong>: a row of chips or cards wider than the screen.</td></tr></tbody></table></div><h2 id="rules"><a class="anchor" href="#rules">Rules</a></h2><ul><li><strong>It fills its parent</strong>, so it needs a height from above: put it in a column that fills, or directly in a <code>SafeArea</code>.</li><li><strong>Its position belongs to its identity.</strong> Give a scroll view whose content changes an <code>.id(..)</code> and keep it; while a scroll view with the same id is in consecutive frames, its position is kept. One that is absent from a frame starts again at the top.</li><li><strong>Content that grows leaves the position where it is.</strong> Content that shrinks under it brings it back to the new end.</li><li><strong>Inside it, moving a finger more than 8 dp turns a press into a scroll.</strong></li><li><strong>The focused text input is kept in view</strong> while the keyboard is up.</li></ul><h2 id="moving-it-from-code"><a class="anchor" href="#moving-it-from-code">Moving it from code</a></h2><p>Ask from <code>effects</code>, with a <a href="../reference/navigator.html#scrollto"><code>ScrollTo</code></a>:</p><div class="code"><pre><code><span class="k">fn</span> <span class="f">effects</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, out: &amp;<span class="k">mut</span> <span class="t">Effects</span>&lt;<span class="t">Message</span>&gt;) {
+    <span class="k">if</span> std::mem::<span class="f">take</span>(&amp;<span class="k">mut</span> <span class="k">self</span>.to_end) {
+        <span class="c">// Carried out in the next frame, after its layout, so "the</span>
+        <span class="c">// end" is the end of the content that frame has.</span>
+        out.<span class="f">scroll</span>(<span class="t">ScrollTo</span>::<span class="f">end</span>(<span class="s">"chat"</span>).<span class="f">animated</span>());
+    }
+}</code></pre></div><h2 id="sideways"><a class="anchor" href="#sideways">Sideways</a></h2><p><code>ScrollView::horizontal(row)</code> scrolls a row of chips or cards that is wider than the screen. A drag is given to whichever scroll view it moves along, so a sideways row works inside a vertical screen. <a href="../architecture/0037-scroll-views-that-scroll-sideways.html">ADR 0037</a>.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="stack.html"><span>Previous</span>Stack</a><a class="next" href="safe-area-spacer.html"><span>Next</span>SafeArea and Spacer</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/widgets/scroll-view.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#rules">Rules</a><a class="ti" href="#moving-it-from-code">Moving it from code</a><a class="ti" href="#sideways">Sideways</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

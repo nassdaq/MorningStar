@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Installation · Morningstar</title>
+<meta name="description" content="Morningstar is not installed as a package. You work in a clone of its repository, and an app is a crate in that workspace. This page lists what the machine needs.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni on" href="installation.html" aria-current="page">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni" href="project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni" href="text-and-pictures.html">Text, fonts and pictures</a><a class="ni" href="theming-and-motion.html">Themes and motion</a><a class="ni" href="text-input.html">Text input</a><a class="ni" href="navigation.html">Navigation and time</a><a class="ni" href="effects.html">Effects and services</a><a class="ni" href="live-rooms.html">Live rooms</a><a class="ni" href="accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="testing.html">Testing</a><a class="ni" href="android.html">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Get started</span><span aria-hidden="true">/</span><span class="here">Installation</span></div>
+<article>
+<h1>Installation</h1><p class="lead">Morningstar is not installed as a package. You work in a clone of its repository, and an app is a crate in that workspace. This page lists what the machine needs.</p><h2 id="before-you-begin"><a class="anchor" href="#before-you-begin">Before you begin</a></h2><p>You only need the tools for what you plan to do.</p><div class="table"><table><thead><tr><th>Tool</th><th>Version</th><th>Needed for</th></tr></thead><tbody><tr><td>Rust</td><td>Stable, 1.87 or newer. CI uses 1.92.0</td><td>Every app</td></tr><tr><td>A Mac</td><td>Any with a GPU that Metal runs on</td><td>Running the tests that draw, screenshots and the live preview</td></tr><tr><td>Android SDK and NDK</td><td>NDK 27.1 is the one in use</td><td>Android builds</td></tr><tr><td><code>cargo-ndk</code></td><td>CI uses 4.1.2</td><td>Android builds</td></tr><tr><td>JDK</td><td>17 or newer</td><td>Android builds</td></tr><tr><td>Node</td><td>20 or newer for a generated server; 22 or newer for the example apps' servers</td><td>An app's optional server</td></tr><tr><td>Xcode and XcodeGen</td><td>Full Xcode</td><td>iOS builds, which have never been tried: see <a href="ios.html">iOS</a></td></tr></tbody></table></div><p>The tests that compare pixels have only been run on macOS with Metal. CI's Linux job runs the checks that need no GPU.</p><h2 id="set-up"><a class="anchor" href="#set-up">Set up</a></h2><div class="steps"><ol><li><p><strong>Get the repository and check Rust.</strong></p><p>Clone the repository, then confirm the toolchain from its root:</p><div class="code"><pre><code><span class="f">rustc</span> --version         <span class="c"> # 1.87 or newer</span>
+<span class="f">cargo</span> test -p morningstar-layout  <span class="c"> # a quick crate with no GPU in it</span></code></pre></div></li></ol><ol><li><p><strong>Add the Android tools.</strong></p><p>Install the Android SDK and an NDK (for example with Android Studio's SDK manager), then:</p><div class="code"><pre><code><span class="f">export</span> ANDROID_HOME=<span class="s">&quot;$HOME/Library/Android/sdk&quot;</span>
+<span class="f">rustup</span> target add aarch64-linux-android x86_64-linux-android
+<span class="f">cargo</span> install cargo-ndk</code></pre></div><p><code>tools/build-android.sh</code> finds the newest complete NDK under <code>$ANDROID_HOME/ndk</code> by itself. Set <code>ANDROID_NDK_HOME</code> to choose one.</p></li></ol><ol><li><p><strong>Create and run an app.</strong></p><div class="code"><pre><code><span class="f">cargo</span> run -q -p morningstar-devtools --bin morningstar-new -- my-app
+<span class="f">cargo</span> test -p my-app
+<span class="f">tools/preview.sh</span> my-app</code></pre></div><p><a href="../getting-started.html">Your first app</a> continues from here, up to installing it on a phone.</p></li></ol></div><div class="note"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg><div><p><strong>Building on Linux or Windows?</strong> Nothing in the shared crates is specific to macOS, and CI lints the whole workspace on Linux. But the pixel tests, the screenshot programs and the preview have only been run on a Mac, and the scripts under <code>tools/</code> are written for a Unix shell.</p></div></div><h2 id="disk-space"><a class="anchor" href="#disk-space">Disk space</a></h2><p>A full debug build of the workspace with every example takes several gigabytes under <code>target/</code>. Build one package at a time (<code>-p my-app</code>) and build Android for one architecture (<code>MORNINGSTAR_ABIS=arm64-v8a</code>) to keep it small. <a href="../reference/troubleshooting.html#the-disk-fills-up">Troubleshooting</a> says what is safe to delete.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="rendering.html"><span>Previous</span>How rendering works</a><a class="next" href="../getting-started.html"><span>Next</span>Your first app</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/installation.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#before-you-begin">Before you begin</a><a class="ti" href="#set-up">Set up</a><a class="ti" href="#disk-space">Disk space</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

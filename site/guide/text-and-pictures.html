@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Text, fonts and pictures · Morningstar</title>
+<meta name="description" content="">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni" href="installation.html">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni" href="project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni on" href="text-and-pictures.html" aria-current="page">Text, fonts and pictures</a><a class="ni" href="theming-and-motion.html">Themes and motion</a><a class="ni" href="text-input.html">Text input</a><a class="ni" href="navigation.html">Navigation and time</a><a class="ni" href="effects.html">Effects and services</a><a class="ni" href="live-rooms.html">Live rooms</a><a class="ni" href="accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="testing.html">Testing</a><a class="ni" href="android.html">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Core concepts</span><span aria-hidden="true">/</span><span class="here">Text, fonts and pictures</span></div>
+<article>
+<h1>Text, fonts and pictures</h1><h2 id="text"><a class="anchor" href="#text">Text</a></h2><p>A text takes a step of the theme's type scale, and any property can be overridden.</p><div class="code"><pre><code><span class="k">col!</span>[
+    <span class="f">text</span>(<span class="s">"TSh 1,250,000"</span>).<span class="f">display</span>(),
+    <span class="f">text</span>(<span class="s">"Repairs"</span>).<span class="f">title</span>(),
+    <span class="f">text</span>(<span class="s">"Waiting for parts"</span>).<span class="f">headline</span>(),
+    <span class="f">text</span>(<span class="s">"The screen was replaced and tested with the customer."</span>),
+    <span class="f">text</span>(<span class="s">"SAVE"</span>).<span class="f">label</span>(),
+    <span class="f">text</span>(<span class="s">"Updated 08:02"</span>).<span class="f">caption</span>().<span class="f">muted</span>(),
+]
+.<span class="f">gap</span>(<span class="s">8.0</span>)</code></pre></div><div class="table"><table><thead><tr><th>Role</th><th>Default size</th><th>Weight</th><th>Used for</th></tr></thead><tbody><tr><td><code>display</code></td><td>34 dp</td><td>Bold</td><td>The one big number or word on a screen</td></tr><tr><td><code>title</code></td><td>24 dp</td><td>Bold</td><td>A screen title</td></tr><tr><td><code>headline</code></td><td>17 dp</td><td>Semibold</td><td>A section or card heading</td></tr><tr><td><code>body</code></td><td>15 dp</td><td>Regular</td><td>Running text. The default</td></tr><tr><td><code>label</code></td><td>14 dp</td><td>Semibold</td><td>Buttons, tabs, field labels</td></tr><tr><td><code>caption</code></td><td>12 dp</td><td>Regular</td><td>Metadata, timestamps, hints</td></tr></tbody></table></div><div class="code"><pre><code><span class="k">col!</span>[
+    <span class="f">text</span>(<span class="s">"Order 1042"</span>)
+        .<span class="f">size</span>(<span class="s">22.0</span>)
+        .<span class="f">semibold</span>()
+        .<span class="f">letter_spacing</span>(-<span class="s">0.3</span>)
+        .<span class="f">line_height_dp</span>(<span class="s">28.0</span>),
+    <span class="c">// One text, three styles: spans share the line breaking.</span>
+    <span class="t">Text</span>::<span class="f">rich</span>([
+        <span class="f">span</span>(<span class="s">"By continuing you accept the "</span>),
+        <span class="f">span</span>(<span class="s">"terms of service"</span>).<span class="f">bold</span>().<span class="f">color</span>(<span class="t">ThemeColor</span>::<span class="t">Primary</span>),
+        <span class="f">span</span>(<span class="s">"."</span>),
+    ])
+    .<span class="f">muted</span>()
+    .<span class="f">fill_width</span>(),
+    <span class="c">// Digits on a common width, so a column of amounts lines up.</span>
+    <span class="f">text</span>(<span class="s">"12,400.00"</span>).<span class="f">tabular_nums</span>(),
+    <span class="c">// At most two lines; the rest is cut off.</span>
+    <span class="f">text</span>(<span class="s">"A long note that the customer wrote when the phone was handed in."</span>)
+        .<span class="f">max_lines</span>(<span class="s">2</span>)
+        .<span class="f">fill_width</span>(),
+]
+.<span class="f">gap</span>(<span class="s">8.0</span>)
+.<span class="f">fill_width</span>()</code></pre></div><p>Text wraps at the width of its box, so a text that should wrap needs a width: usually <code>.fill_width()</code>. Scripts that run right to left, such as Arabic, are shaped and ordered correctly within the text's own box.</p><p>Every method is listed under <a href="../widgets/text.html">Text</a>.</p><h2 id="fonts"><a class="anchor" href="#fonts">Fonts</a></h2><p>An app bundles its fonts and adds them at setup. Nothing is drawn from a system font unless the app asks for the system's fonts.</p><div class="code"><pre><code><span class="k">fn</span> <span class="f">setup</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, setup: &amp;<span class="k">mut</span> <span class="t">Setup</span>&lt;'_&gt;) {
+    setup.<span class="f">add_font</span>(<span class="k">include_bytes!</span>(<span class="s">"../assets/fonts/Inter-Regular.ttf"</span>));
+    setup.<span class="f">add_font</span>(<span class="k">include_bytes!</span>(<span class="s">"../assets/fonts/SpaceGrotesk-Bold.ttf"</span>));
+}</code></pre></div><p>A family is chosen per text with <code>.family("Space Grotesk")</code>, or for the whole app in the theme: <code>Fonts::new(body, heading)</code> sets the family for body roles and for heading roles. If the family has no italic file, italic is synthesised by slanting.</p><h2 id="icons"><a class="anchor" href="#icons">Icons</a></h2><p>An icon is one-colour vector artwork that takes its colour where it is drawn.</p><div class="code"><pre><code><span class="c">/// One-colour markup in the source: the path of a 24 by 24 icon.</span>
+<span class="k">const</span> <span class="t">CHECK</span>: <span class="t">VectorIcon</span> = <span class="t">VectorIcon</span>::<span class="f">stroked</span>(<span class="s">"M5 12l5 5L20 7"</span>);
+
+<span class="c">/// An icon alone, an icon on a round tile, and a glyph as a stand-in.</span>
+<span class="k">pub</span> <span class="k">fn</span> icons&lt;<span class="t">M</span>: '<span class="k">static</span>&gt;() -&gt; <span class="t">Element</span>&lt;<span class="t">M</span>&gt; {
+    <span class="k">row!</span>[
+        <span class="f">icon</span>(<span class="t">CHECK</span>).<span class="f">color</span>(<span class="t">ThemeColor</span>::<span class="t">Success</span>),
+        <span class="t">Icon</span>::<span class="f">vector</span>(<span class="t">CHECK</span>)
+            .<span class="f">size</span>(<span class="s">40.0</span>)
+            .<span class="f">round</span>()
+            .<span class="f">background</span>(<span class="t">ThemeColor</span>::<span class="t">PrimaryContainer</span>)
+            .<span class="f">color</span>(<span class="t">ThemeColor</span>::<span class="t">Primary</span>),
+        <span class="t">Icon</span>::<span class="f">new</span>(<span class="s">"?"</span>).<span class="f">size</span>(<span class="s">40.0</span>),
+    ]
+    .<span class="f">gap</span>(<span class="s">12.0</span>)
+    .<span class="f">cross_align</span>(<span class="t">CrossAlign</span>::<span class="t">Center</span>)
+    .<span class="f">into</span>()
+}</code></pre></div><p>For icons kept as files, load them as SVG (below) and draw them with <code>Icon::svg(asset.get())</code>. A file that uses a single ink is tinted like any other icon.</p><h2 id="svg-files"><a class="anchor" href="#svg-files">SVG files</a></h2><p>SVG is loaded at run time by a strict reader written for the purpose. It supports a static subset: shapes, groups, transforms, clips, gradients, dashes and <code>currentColor</code>. Anything else is an error that names the line, so a file either draws as designed or is refused.</p><div class="code"><pre><code><span class="c">/// An SVG file of the app, parsed once, the first time it is drawn.</span>
+<span class="k">static</span> <span class="t">LOGO</span>: <span class="t">SvgAsset</span> = <span class="t">SvgAsset</span>::<span class="f">new</span>(
+    <span class="s">r##"&lt;svg xmlns="</span>http:<span class="c">//www.w3.org/2000/svg" viewBox="0 0 24 24"&gt;</span>
+        &lt;circle cx=<span class="s">"12"</span> cy=<span class="s">"12"</span> r=<span class="s">"10"</span> fill=<span class="s">"#E3AE3A"</span>/&gt;
+        &lt;path d=<span class="s">"M7 12l3.5 3.5L17 9"</span> fill=<span class="s">"none"</span> stroke=<span class="s">"#141005"</span> stroke-width=<span class="s">"2"</span>/&gt;
+    &lt;/svg&gt;"##,
+);
+
+<span class="c">/// The file as a picture, in its own colours.</span>
+<span class="k">pub</span> <span class="k">fn</span> logo&lt;<span class="t">M</span>: '<span class="k">static</span>&gt;() -&gt; <span class="t">Element</span>&lt;<span class="t">M</span>&gt; {
+    <span class="t">Picture</span>::<span class="f">svg</span>(<span class="t">LOGO</span>.<span class="f">get</span>()).<span class="f">width</span>(<span class="s">96.0</span>).<span class="f">height</span>(<span class="s">96.0</span>).<span class="f">into</span>()
+}</code></pre></div><p>Check a file before using it: <code>morningstar-svg art.svg out.png --scale 3</code> renders it exactly as an app would. See <a href="../reference/tools.html#morningstar-svg">Tools</a> and <a href="../architecture/0027-svg-loading.html">ADR 0027</a>.</p><h2 id="images"><a class="anchor" href="#images">Images</a></h2><p>Images come from PNG data or raw pixels, added once at setup. A <code>Picture</code> draws one with a fit, a corner radius and an optional tint; an <code>Avatar</code> crops one to a circle and falls back to initials.</p><div class="code"><pre><code><span class="c">/// An app with one photograph, decoded once at setup.</span>
+<span class="k">#[derive(Default)]</span>
+<span class="k">pub</span> <span class="k">struct</span> <span class="t">Gallery</span> {
+    photo: <span class="t">Option</span>&lt;<span class="t">Image</span>&gt;,
+}
+
+<span class="k">impl</span> <span class="t">Application</span> <span class="k">for</span> <span class="t">Gallery</span> {
+    <span class="k">type</span> <span class="t">Message</span> = ();
+
+    <span class="k">fn</span> <span class="f">setup</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, setup: &amp;<span class="k">mut</span> <span class="t">Setup</span>&lt;'_&gt;) {
+        <span class="c">// Four pixels stand in for `include_bytes!("../assets/photo.png")`</span>
+        <span class="c">// with `setup.add_image_png(..)`.</span>
+        <span class="k">let</span> pixels = [<span class="s">255</span>, <span class="s">255</span>, <span class="s">255</span>, <span class="s">255</span>].<span class="f">repeat</span>(<span class="s">4</span>);
+        <span class="k">self</span>.photo = setup.<span class="f">add_image_rgba8</span>(<span class="s">2</span>, <span class="s">2</span>, &amp;pixels).<span class="f">ok</span>();
+    }
+
+    <span class="k">fn</span> <span class="f">view</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;()&gt; {
+        <span class="k">match</span> <span class="k">self</span>.photo {
+            <span class="c">// Cropped to fill a rounded 16:9 box.</span>
+            <span class="t">Some</span>(photo) =&gt; <span class="t">Picture</span>::<span class="f">new</span>(photo)
+                .<span class="f">fit</span>(<span class="t">ImageFit</span>::<span class="t">Cover</span>)
+                .<span class="f">radius</span>(<span class="s">16.0</span>)
+                .<span class="f">fill_width</span>()
+                .<span class="f">aspect_ratio</span>(<span class="s">16.0</span> / <span class="s">9.0</span>)
+                .<span class="f">into</span>(),
+            <span class="c">// An avatar falls back to initials when there is no image.</span>
+            <span class="t">None</span> =&gt; <span class="t">Avatar</span>::<span class="f">new</span>(<span class="s">"Amina Juma"</span>).<span class="f">image_maybe</span>(<span class="k">self</span>.photo).<span class="f">into</span>(),
+        }
+    }
+
+    <span class="k">fn</span> <span class="f">update</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, _message: ()) {}
+}</code></pre></div><p>Only PNG is decoded. The Barua Talk example keeps its photographs as JPEG for the design and converts them to PNG with a small script, <code>examples/barua-talk/design/prepare-images.py</code>.</p><p>Each image is its own texture and splits the frame's draw call (<a href="../architecture/0014-images.html">ADR 0014</a>), which is worth knowing for a long list of photographs.</p><h2 id="turned-text-outlines-and-shadows"><a class="anchor" href="#turned-text-outlines-and-shadows">Turned text, outlines and shadows</a></h2><p>A widget can be drawn through a transform (<code>.rotate(degrees)</code>, <code>.transform(..)</code>), and text under a transform is rasterised for it, so turned text stays sharp. <code>Text::shadow</code> draws a hard shadow and <code>Text::outline</code> a stroke around the letters. <a href="../building-screens.html#turned-things-illustrations-and-text-effects">Building screens</a> has worked examples of each.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="layout.html"><span>Previous</span>Layout</a><a class="next" href="theming-and-motion.html"><span>Next</span>Themes and motion</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/text-and-pictures.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#text">Text</a><a class="ti" href="#fonts">Fonts</a><a class="ti" href="#icons">Icons</a><a class="ti" href="#svg-files">SVG files</a><a class="ti" href="#images">Images</a><a class="ti" href="#turned-text-outlines-and-shadows">Turned text, outlines and shadows</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+Runs a Morningstar app in a window on this Mac and reloads it when its source changes.
+
+  morningstar-preview <app> [options]        (tools/preview.sh <app> [options])
+
+<app> is the Cargo package of the app, such as barua-talk.
+
+Options:
+  --size <W>x<H>            the screen in dp (default 390x844)
+  --scale <S>               physical pixels per dp (default: this display's,
+                            less if the window would not fit on it)
+  --insets <T>[,<B>]        the safe area's top and bottom insets in dp, or
+                            <L>,<T>,<R>,<B> (default 51,21: a status bar and a
+                            gesture bar; 0 for none)
+  --keyboard <H>            imitate a soft keyboard this many dp high while a
+                            text field has the focus (default 0: none)
+  --position <X>,<Y>        the window's top-left corner in screen points, for
+                            the first start (default: where it last was)
+  --reduce-motion           start with the system's "reduce motion" on
+  --fresh                   forget the stored values first: a first launch
+  --no-watch                build and run once; do not reload
+  --screenshot-after <MS> <PATH>
+                            save the screen as a PNG after MS milliseconds and
+                            quit (implies --no-watch)
+  --tap <X>,<Y>             tap at this point in dp by itself; with --type <TEXT>
+  --type <TEXT>             (into the focused field), --back and --wait <MS>,
+  --back, --wait <MS>       a script: steps run in the order given, half a
+                            second apart, starting when the app has drawn
+  --manifest-path <PATH>    the app's Cargo.toml, if it is not in or under the
+                            current directory's workspace
+  --help                    this text
+
+Keys, in the window:
+  the mouse is a finger; the wheel or two fingers on the trackpad scroll
+  typing goes to the focused text field; Cmd+A/C/X/V/Z and the arrows work
+  Esc            the system's back (with a field focused: put the keyboard away)
+  Cmd+S or F2    save the screen as a PNG under target/preview/<app>/
+  Cmd+R or F5    start the app again; with Shift, as on its first launch
+  F3             turn "reduce motion" on and off
+  F4             turn the safe-area insets on and off
+  F1             print this list

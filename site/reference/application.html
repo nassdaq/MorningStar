@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Application · Morningstar</title>
+<meta name="description" content="The trait an app implements. Only update and the Message type are required.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni on" href="application.html" aria-current="page">Application</a><a class="ni" href="effects.html">Effects</a><a class="ni" href="ui.html">Ui and testing</a><a class="ni" href="navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="tools.html">Tools and scripts</a><a class="ni" href="services.html">Opt-in services</a><p class="nh">Project</p><a class="ni" href="architecture.html">Architecture</a><a class="ni" href="../architecture/index.html">Decision records</a><a class="ni" href="platform-status.html">Platform status</a><a class="ni" href="performance.html">Performance</a><a class="ni" href="troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><span>API</span><span aria-hidden="true">/</span><span class="here">Application</span></div>
+<article>
+<h1>Application</h1><p class="lead">The trait an app implements. Only <code>update</code> and the <code>Message</code> type are required.</p><div class="code"><pre><code><span class="k">pub</span> <span class="k">trait</span> <span class="t">Application</span>: <span class="t">Send</span> + '<span class="k">static</span> {
+    <span class="k">type</span> <span class="t">Message</span>: <span class="t">Clone</span> + <span class="t">Send</span> + '<span class="k">static</span>;
+
+    <span class="k">fn</span> <span class="f">setup</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, setup: &amp;<span class="k">mut</span> <span class="t">Setup</span>&lt;'_&gt;) {}
+    <span class="k">fn</span> <span class="f">theme</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Theme</span> { <span class="t">Theme</span>::<span class="t">LIGHT</span> }
+    <span class="k">fn</span> <span class="f">view</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="k">Self</span>::<span class="t">Message</span>&gt; { <span class="t">Container</span>::<span class="f">empty</span>().<span class="f">into</span>() }
+    <span class="k">fn</span> <span class="f">view_in</span>(&amp;<span class="k">self</span>, viewport: &amp;<span class="t">Viewport</span>&lt;'_&gt;) -&gt; <span class="t">Element</span>&lt;<span class="k">Self</span>::<span class="t">Message</span>&gt; { <span class="k">self</span>.<span class="f">view</span>() }
+    <span class="k">fn</span> <span class="f">update</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, message: <span class="k">Self</span>::<span class="t">Message</span>);
+    <span class="k">fn</span> <span class="f">back</span>(&amp;<span class="k">mut</span> <span class="k">self</span>) -&gt; bool { <span class="k">false</span> }
+    <span class="k">fn</span> <span class="f">tick</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Option</span>&lt;(<span class="t">Duration</span>, <span class="k">Self</span>::<span class="t">Message</span>)&gt; { <span class="t">None</span> }
+    <span class="k">fn</span> <span class="f">effects</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, out: &amp;<span class="k">mut</span> <span class="t">Effects</span>&lt;<span class="k">Self</span>::<span class="t">Message</span>&gt;) {}
+    <span class="k">fn</span> <span class="f">system_bars</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Option</span>&lt;<span class="t">SystemBars</span>&gt; { <span class="t">None</span> }
+}</code></pre></div><div class="table"><table><thead><tr><th>Method</th><th>Called</th><th>Guide</th></tr></thead><tbody><tr><td><code>setup</code></td><td>Once, before the first frame</td><td><a href="../guide/effects.html#values-kept-on-the-phone">Effects and services</a></td></tr><tr><td><code>theme</code></td><td>Every frame</td><td><a href="../guide/theming-and-motion.html">Themes and motion</a></td></tr><tr><td><code>view</code></td><td>Every frame that is drawn</td><td><a href="../guide/application-model.html">The application model</a></td></tr><tr><td><code>view_in</code></td><td>Instead of <code>view</code>, with the screen's size, insets and keyboard</td><td><a href="../guide/layout.html#a-layout-that-depends-on-the-screen">Layout</a></td></tr><tr><td><code>update</code></td><td>For each message</td><td><a href="../guide/application-model.html">The application model</a></td></tr><tr><td><code>back</code></td><td>The system's Back button or gesture</td><td><a href="../guide/navigation.html#the-systems-back">Navigation and time</a></td></tr><tr><td><code>tick</code></td><td>To ask for a message after a delay</td><td><a href="../guide/navigation.html#time">Navigation and time</a></td></tr><tr><td><code>effects</code></td><td>After every <code>update</code></td><td><a href="../guide/effects.html">Effects and services</a></td></tr><tr><td><code>system_bars</code></td><td>Every frame</td><td><a href="../guide/theming-and-motion.html#the-systems-bars">Themes and motion</a></td></tr></tbody></table></div><h2 id="registering"><a class="anchor" href="#registering">Registering</a></h2><div class="code"><pre><code>morningstar::<span class="k">app!</span>(<span class="t">Ui</span>::<span class="f">new</span>(<span class="t">MyApp</span>::<span class="f">default</span>()));</code></pre></div><p><code>Ui</code> runs the application on the runtime; <code>app!</code> makes the crate the native library the host loads. One per crate.</p><h2 id="setup"><a class="anchor" href="#setup">Setup</a></h2><p>What <code>setup</code> is given: the place to add fonts and images, and what the phone already knows.</p><div class="table"><table class="api"><thead><tr><th>Method</th><th>What it does</th></tr></thead><tbody><tr><td><code>install_id() -&gt; &amp;str</code></td><td>An identifier for this installation of the app: 32 lower-case hexadecimal digits (128 bits).</td></tr><tr><td><code>stored(key: &amp;str) -&gt; Option&lt;&amp;str&gt;</code></td><td>The value stored under <code>key</code> on an earlier run (see <code>ServiceRequest::Store</code>), as it was when the app started.</td></tr><tr><td><code>add_font(data: &amp;[u8])</code></td><td>Registers a TrueType/OpenType font from its file contents, typically <code>include_bytes!</code>.</td></tr><tr><td><code>has_font_family(name: &amp;str) -&gt; bool</code></td><td>True if a font of the family called <code>name</code> has been added (names are compared without regard to case).</td></tr><tr><td><code>load_system_fonts()</code></td><td>Makes the device's installed fonts available as a last-resort fallback.</td></tr><tr><td><code>add_image_rgba8(width: u32, height: u32, pixels: &amp;[u8]) -&gt; Result&lt;Image, ImageError&gt;</code></td><td>Registers an image from decoded pixels; see <code>Frame::add_image_rgba8</code>.</td></tr><tr><td><code>add_image_png(data: &amp;[u8]) -&gt; Result&lt;Image, ImageError&gt;</code></td><td>Registers an image from the contents of a PNG file, typically <code>include_bytes!</code>; see <code>Frame::add_image_png</code>.</td></tr></tbody></table></div><h2 id="element"><a class="anchor" href="#element">Element</a></h2><p>What <code>view</code> returns. Every widget converts into one with <code>.into()</code>.</p><div class="table"><table class="api"><thead><tr><th>Method</th><th>What it does</th></tr></thead><tbody><tr><td><code>map&lt;N&gt;(convert: impl Fn(M) -&gt; N + Copy + Send + Sync + 'static) -&gt; Element&lt;N&gt;</code></td><td>Converts the messages this subtree produces, so a view written for one message type can be embedded in a parent with another</td></tr></tbody></table></div>
+</article>
+<nav class="pager" aria-label="Previous and next page"><span></span><a class="next" href="effects.html"><span>Next</span>Effects</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/reference/application.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#registering">Registering</a><a class="ti" href="#setup">Setup</a><a class="ti" href="#element">Element</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

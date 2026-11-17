@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How rendering works · Morningstar</title>
+<meta name="description" content="A frame starts as your state and ends as pixels. This page follows it through the crates in between. You do not need any of it to write an app; it explains why the rules elsewhere in these pages are what they are.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni on" href="rendering.html" aria-current="page">How rendering works</a><p class="nh">Get started</p><a class="ni" href="installation.html">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni" href="project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni" href="text-and-pictures.html">Text, fonts and pictures</a><a class="ni" href="theming-and-motion.html">Themes and motion</a><a class="ni" href="text-input.html">Text input</a><a class="ni" href="navigation.html">Navigation and time</a><a class="ni" href="effects.html">Effects and services</a><a class="ni" href="live-rooms.html">Live rooms</a><a class="ni" href="accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="testing.html">Testing</a><a class="ni" href="android.html">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Introduction</span><span aria-hidden="true">/</span><span class="here">How rendering works</span></div>
+<article>
+<h1>How rendering works</h1><p class="lead">A frame starts as your state and ends as pixels. This page follows it through the crates in between. You do not need any of it to write an app; it explains why the rules elsewhere in these pages are what they are.</p><h2 id="from-state-to-pixels"><a class="anchor" href="#from-state-to-pixels">From state to pixels</a></h2><div class="steps"><ol><li><strong><code>view</code> builds a tree.</strong> The framework calls your <code>view</code> and gets an <code>Element</code> tree: boxes, texts, pictures. The tree is thrown away after the frame. The few pieces of widget state that outlive it (a scroll position, the focused field, a press in progress, an animation on its way) are kept by identity; see <a href="application-model.html#identity">the application model</a>.</li></ol><ol><li><strong>Layout turns the tree into rectangles.</strong> The layout engine (<code>morningstar-layout</code>) knows three kinds of size: fixed, hug and fill. It resolves a tree in four linear sweeps, with no constraint solver. Lengths are in dp; the result is snapped to whole physical pixels using the display's scale. <a href="../architecture/0010-layout.html">ADR 0010</a>, <a href="../architecture/0012-scale-insets-and-demand-rendering.html">ADR 0012</a>.</li></ol><ol><li><strong>Text is shaped once and cached.</strong> <code>morningstar-text</code> shapes and wraps text with the fonts the app bundles, and rasterises glyphs into an atlas. A text that is shown again costs a cache lookup. Text is measured and placed the way a browser does it, so a screen can match a design drawn in one. <a href="../architecture/0009-text.html">ADR 0009</a>, <a href="../architecture/0022-text-metrics-and-pixel-snapping.html">ADR 0022</a>.</li></ol><ol><li><strong>Painting writes a display list.</strong> Each widget appends drawing operations: rectangles with a radius, a border, a gradient or a shadow; glyphs; images; clips; layers for group opacity. The list is plain data in <code>morningstar-core</code>, which is what lets a test or the screenshot tool inspect a frame without a GPU. <a href="../architecture/0011-renderer-vocabulary.html">ADR 0011</a>.</li></ol><ol><li><strong>The renderer draws the list.</strong> <code>morningstar-gpu</code> is the only crate that touches the GPU, through <code>wgpu</code>: Vulkan or GLES on Android, Metal on Apple hardware. A screen without pictures is one draw call in one render pass; each image splits the draw call. <a href="../architecture/0002-gpu-backend-wgpu.html">ADR 0002</a>, <a href="../architecture/0014-images.html">ADR 0014</a>.</li></ol></div><h2 id="when-a-frame-is-drawn"><a class="anchor" href="#when-a-frame-is-drawn">When a frame is drawn</a></h2><p>Rendering is demand-driven. A frame is produced after input, when an answer to an effect arrives, while something animates, and when a timer the app asked for fires. Otherwise nothing is drawn: on the phone the render thread is blocked and the app uses no CPU or GPU. The first device session recorded exactly one frame in six idle seconds.</p><p>On Android a dedicated render thread paces frames to the display's vsync and stops when the app is not visible. <a href="../architecture/0004-threading-and-frame-pacing.html">ADR 0004</a>.</p><h2 id="colour"><a class="anchor" href="#colour">Colour</a></h2><p>Colours are composited as sRGB-encoded values, the way the web platform does it, so a translucent layer over a background gives the colour a browser or a design tool shows. Give colours as the design's hex values through <code>hex(0xRRGGBB)</code>. <a href="../architecture/0023-compositing-space.html">ADR 0023</a>.</p><h2 id="the-hosts"><a class="anchor" href="#the-hosts">The hosts</a></h2><p>The Android project (Java, with Kotlin for live rooms) and the iOS project (Swift) contain no application logic. They create the surface, forward touches and the keyboard, and carry out platform services such as HTTP requests and recording. The app crate is the native library the host loads; <code>morningstar::app!</code> registers it. <a href="../architecture/0003-platform-hosts.html">ADR 0003</a>, <a href="../architecture/0005-application-entry-point.html">ADR 0005</a>.</p><h2 id="what-a-frame-costs"><a class="anchor" href="#what-a-frame-costs">What a frame costs</a></h2><p>Only what has been measured is stated in <a href="../reference/performance.html">Performance</a>: a baseline on the development machine, and one early session on a phone.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="what-it-is.html"><span>Previous</span>What Morningstar is, and is not</a><a class="next" href="installation.html"><span>Next</span>Installation</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/rendering.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#from-state-to-pixels">From state to pixels</a><a class="ti" href="#when-a-frame-is-drawn">When a frame is drawn</a><a class="ti" href="#colour">Colour</a><a class="ti" href="#the-hosts">The hosts</a><a class="ti" href="#what-a-frame-costs">What a frame costs</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

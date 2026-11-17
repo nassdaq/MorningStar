@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0008 — Design-to-code loop · Morningstar</title>
+<meta name="description" content="Status: Accepted (2026-11-11). The loop exists; what it can express is limited by what the renderer can draw.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Reference">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl on" href="../reference/application.html" aria-current="true">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">API</p><a class="ni" href="../reference/application.html">Application</a><a class="ni" href="../reference/effects.html">Effects</a><a class="ni" href="../reference/ui.html">Ui and testing</a><a class="ni" href="../reference/navigator.html">Navigator, Viewport and ScrollTo</a><a class="ni" href="../reference/theme.html">Theme</a><p class="nh">Tools</p><a class="ni" href="../reference/tools.html">Tools and scripts</a><a class="ni" href="../reference/services.html">Opt-in services</a><p class="nh">Project</p><a class="ni" href="../reference/architecture.html">Architecture</a><a class="ni on" href="index.html">Decision records</a><a class="ni" href="../reference/platform-status.html">Platform status</a><a class="ni" href="../reference/performance.html">Performance</a><a class="ni" href="../reference/troubleshooting.html">Troubleshooting</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Reference</span><span aria-hidden="true">/</span><a href="index.html">Decision records</a><span aria-hidden="true">/</span><span class="here">0008 — Design-to-code loop</span></div>
+<article>
+<h1>0008 — Design-to-code loop</h1><p class="lead">Status: Accepted (2026-11-11). The loop exists; what it can express is limited by what the renderer can draw.</p><h2 id="context"><a class="anchor" href="#context">Context</a></h2><p>A goal for Morningstar is that a developer, or an AI agent, can be handed a picture of a screen and produce that screen in Rust. Generating plausible UI code from a picture is the easy half. The hard half is knowing whether the result matches, and correcting it. On mobile that normally means build, install, launch, navigate and photograph: minutes per attempt, and not something an agent can do unattended.</p><h2 id="decision"><a class="anchor" href="#decision">Decision</a></h2><p>Make rendering an app to an image a first-class, device-free operation.</p><p><code>morningstar_devtools::screenshot(app, size, elapsed)</code> runs one frame of any <code>App</code> through the real renderer on the development machine's GPU and returns a PNG. It uses the same display list and the same shader as a phone does. The app can be driven into any state first by calling <code>App::pointer</code>.</p><p>The intended loop:</p><ol><li>Read the design image.</li><li>Write or edit the UI code.</li><li><code>cargo run --example screenshot</code> (seconds).</li><li>Compare the PNG with the design; go to 2.</li></ol><p>This depends on properties the architecture already has, and which must be kept:</p><ul><li><strong>The renderer does not need a window</strong> (<code>render_offscreen</code>).</li><li><strong>An app is a pure function of its state, the clock and the surface size.</strong> <code>App::frame</code> receives the clock rather than reading one, so a frame is reproducible.</li><li><strong>Input is data</strong> (<code>PointerEvent</code>), so any state is reachable from a script.</li></ul><h2 id="what-is-still-missing-for-this-to-be-useful-on-real-designs"><a class="anchor" href="#what-is-still-missing-for-this-to-be-useful-on-real-designs">What is still missing for this to be useful on real designs</a></h2><p>In rough order of how much each unlocks:</p><ol><li>~~Text.~~ Done (ADR 0009), without emoji or mixed styles.</li><li>~~Layout~~ Done as an engine (ADR 0010); the widget layer that uses it is ADR 0013.</li><li>Borders, shadows, gradients and clipping: done (ADR 0011). <strong>Images</strong>: ADR 0014.</li><li>~~Density-independent units.~~ The scale factor reaches the app (ADR 0012).</li><li><strong>A widget vocabulary</strong> small and regular enough that an agent maps design elements onto it reliably.</li><li>~~An image-diff tool.~~ Done: <code>morningstar-diff</code>, see <code>docs/design-to-code.md</code>.</li></ol><h2 id="consequences"><a class="anchor" href="#consequences">Consequences</a></h2><ul><li>Visual regression tests come almost free: a screenshot compared with a stored reference.</li><li>The Metal output on a Mac is not guaranteed identical to Vulkan on a phone, particularly for anti-aliased edges and, later, text. Screenshots prove layout and colour, not device-exact pixels.</li><li>Screenshot PNGs are compressed (about 165 KB at 1080x2400).</li></ul>
+</article>
+
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/architecture/0008-design-to-code-loop.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#context">Context</a><a class="ti" href="#decision">Decision</a><a class="ti" href="#what-is-still-missing-for-this-to-be-useful-on-real-designs">What is still missing for this to be useful on real designs</a><a class="ti" href="#consequences">Consequences</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

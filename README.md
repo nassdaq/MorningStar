@@ -160,6 +160,10 @@ open templates/ios/MorningstarHost.xcodeproj     # select a device, set a signin
 4. **Measure on the phone again** with the full shader and images: frame times, memory, and scrolling by hand.
 5. **Accessibility tree, animation API, list virtualisation, right-to-left layout.**
 
+## Documentation
+
+Open [`site/index.html`](site/index.html) in a browser: a guide from an empty folder to an app on a phone, every widget with its methods, the tools, the example apps with pictures of their screens, and what has and has not been verified on a device. It is built from the Markdown in [`docs/`](docs/) by `python3 tools/build-docs.py`, which needs nothing but Python 3 ([ADR 0044](docs/architecture/0044-documentation-site.md)).
+
 ## Contributing
 
 Read [`AGENTS.md`](AGENTS.md) (the engineering constitution) and the [ADRs](docs/architecture/README.md) first.

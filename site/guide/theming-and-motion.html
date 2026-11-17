@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Themes and motion · Morningstar</title>
+<meta name="description" content="">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni" href="installation.html">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni" href="project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni" href="text-and-pictures.html">Text, fonts and pictures</a><a class="ni on" href="theming-and-motion.html" aria-current="page">Themes and motion</a><a class="ni" href="text-input.html">Text input</a><a class="ni" href="navigation.html">Navigation and time</a><a class="ni" href="effects.html">Effects and services</a><a class="ni" href="live-rooms.html">Live rooms</a><a class="ni" href="accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="testing.html">Testing</a><a class="ni" href="android.html">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Core concepts</span><span aria-hidden="true">/</span><span class="here">Themes and motion</span></div>
+<article>
+<h1>Themes and motion</h1><h2 id="the-theme"><a class="anchor" href="#the-theme">The theme</a></h2><p>A theme is plain data: colour roles, a type scale, spacing, radii and font families. Start from <code>Theme::LIGHT</code> or <code>Theme::DARK</code> and change what the design changes.</p><div class="code"><pre><code><span class="c">/// The dark theme with the brand's colours.</span>
+<span class="k">const</span> <span class="t">THEME</span>: <span class="t">Theme</span> = <span class="t">Theme</span> {
+    colors: <span class="t">Colors</span> {
+        background: <span class="f">hex</span>(<span class="s">0x0B0B0C</span>),
+        surface: <span class="f">hex</span>(<span class="s">0x121214</span>),
+        primary: <span class="f">hex</span>(<span class="s">0xE3AE3A</span>),
+        on_primary: <span class="f">hex</span>(<span class="s">0x141005</span>),
+        ..<span class="t">Theme</span>::<span class="t">DARK</span>.colors
+    },
+    ..<span class="t">Theme</span>::<span class="t">DARK</span>
+};
+
+<span class="k">pub</span> <span class="k">struct</span> <span class="t">Branded</span> {
+    <span class="k">pub</span> onboarding: bool,
+}
+
+<span class="k">impl</span> <span class="t">Application</span> <span class="k">for</span> <span class="t">Branded</span> {
+    <span class="k">type</span> <span class="t">Message</span> = ();
+
+    <span class="k">fn</span> <span class="f">theme</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Theme</span> {
+        <span class="t">THEME</span>
+    }
+
+    <span class="k">fn</span> <span class="f">view</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;()&gt; {
+        <span class="c">// Colours are named, not copied: the same view follows whatever</span>
+        <span class="c">// theme the application returns.</span>
+        <span class="t">Container</span>::<span class="f">new</span>(<span class="f">text</span>(<span class="s">"Morningstar"</span>).<span class="f">title</span>().<span class="f">color</span>(<span class="t">ThemeColor</span>::<span class="t">Primary</span>))
+            .<span class="f">background</span>(<span class="t">ThemeColor</span>::<span class="t">Background</span>)
+            .<span class="f">center</span>()
+            .<span class="f">fill</span>()
+            .<span class="f">into</span>()
+    }
+
+    <span class="k">fn</span> <span class="f">update</span>(&amp;<span class="k">mut</span> <span class="k">self</span>, _message: ()) {}
+
+    <span class="c">// The status and navigation bars' icons follow the theme by</span>
+    <span class="c">// themselves. A screen whose edges are not the theme's background</span>
+    <span class="c">// says what is behind them: here, a light picture under onboarding.</span>
+    <span class="k">fn</span> <span class="f">system_bars</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Option</span>&lt;<span class="t">SystemBars</span>&gt; {
+        <span class="k">self</span>.onboarding.<span class="f">then_some</span>(<span class="t">SystemBars</span>::<span class="t">DARK_CONTENT</span>)
+    }
+}</code></pre></div><p>Widgets take a colour either as a value (<code>hex(0x2F6BFF)</code>) or as a role (<code>ThemeColor::Primary</code>). Roles follow whatever theme <code>theme()</code> returns, so one view can serve a light and a dark theme.</p><div class="table"><table class="api"><thead><tr><th>Variant</th><th>Meaning</th></tr></thead><tbody><tr><td><code>Background</code></td><td>The screen background.</td></tr><tr><td><code>Surface</code></td><td>Cards, sheets, bars: surfaces that sit on the background.</td></tr><tr><td><code>SurfaceVariant</code></td><td>A quieter surface: input fields, chips, secondary buttons.</td></tr><tr><td><code>Primary</code></td><td>The brand or accent colour.</td></tr><tr><td><code>OnPrimary</code></td><td>Text and icons drawn on <code>Primary</code>.</td></tr><tr><td><code>PrimaryContainer</code></td><td>A tint of the primary colour for soft highlights.</td></tr><tr><td><code>Text</code></td><td>Main text.</td></tr><tr><td><code>TextMuted</code></td><td>Secondary text: captions, hints, metadata.</td></tr><tr><td><code>Divider</code></td><td>Hairlines and outlines.</td></tr><tr><td><code>Danger</code></td><td>Destructive actions and errors.</td></tr><tr><td><code>OnDanger</code></td><td>Text and icons drawn on <code>Danger</code>.</td></tr><tr><td><code>Success</code></td><td>Positive amounts and confirmations.</td></tr></tbody></table></div><p>The fields of each part are in the <a href="../reference/theme.html">Theme reference</a>.</p><h2 id="the-systems-bars"><a class="anchor" href="#the-systems-bars">The system's bars</a></h2><p>The screen is drawn edge to edge, under the status bar and the navigation bar. Their icons are dark over a light theme and light over a dark one without the app saying anything. <code>system_bars()</code> overrides that for a screen whose edges are not the theme's background, as in the sample above. <a href="../architecture/0026-system-bars-and-reduce-motion.html">ADR 0026</a>.</p><p>This has been tested on the development machine only; the bars' colours have not yet been checked on a phone.</p><h2 id="motion"><a class="anchor" href="#motion">Motion</a></h2><p><code>view</code> always describes the screen as it should be. A widget shows a change gradually only if it asks to.</p><div class="code"><pre><code><span class="k">fn</span> <span class="f">view</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
+    <span class="k">let</span> <span class="k">mut</span> lines = <span class="t">Column</span>::<span class="f">new</span>().<span class="f">gap</span>(<span class="s">8.0</span>).<span class="f">fill_width</span>();
+    <span class="k">for</span> line <span class="k">in</span> &amp;<span class="k">self</span>.lines {
+        lines = lines.<span class="f">push</span>(<span class="f">text</span>(line.<span class="f">clone</span>()).<span class="f">fill_width</span>());
+    }
+    <span class="k">col!</span>[
+        <span class="c">// The view only says how tall the panel is now; `animate`</span>
+        <span class="c">// shows the change happening.</span>
+        <span class="t">Container</span>::<span class="f">empty</span>()
+            .<span class="f">height</span>(<span class="k">if</span> <span class="k">self</span>.open { <span class="s">160.0</span> } <span class="k">else</span> { <span class="s">56.0</span> })
+            .<span class="f">fill_width</span>()
+            .<span class="f">radius</span>(<span class="s">16.0</span>)
+            .<span class="f">background</span>(<span class="t">ThemeColor</span>::<span class="t">Surface</span>)
+            .<span class="f">animate</span>(<span class="t">Duration</span>::<span class="f">from_millis</span>(<span class="s">200</span>), <span class="t">Easing</span>::<span class="t">EaseOut</span>)
+            .<span class="f">on_press</span>(<span class="t">Message</span>::<span class="t">Toggle</span>),
+    ]
+    <span class="c">// Present only while open: fades in when it enters the tree and</span>
+    <span class="c">// out when it leaves.</span>
+    .<span class="f">push_maybe</span>(<span class="k">self</span>.open.<span class="f">then</span>(|| {
+        <span class="t">Container</span>::<span class="f">new</span>(<span class="f">text</span>(<span class="s">"Details"</span>))
+            .<span class="f">id</span>(<span class="s">"details"</span>)
+            .<span class="f">transition</span>(<span class="t">Transition</span>::<span class="f">fade</span>())
+    }))
+    .<span class="f">push</span>(<span class="t">ScrollView</span>::<span class="f">new</span>(lines).<span class="f">id</span>(<span class="s">"chat"</span>))
+    .<span class="f">gap</span>(<span class="s">12.0</span>)
+    .<span class="f">fill</span>()
+    .<span class="f">into</span>()
+}</code></pre></div><div class="table"><table><thead><tr><th>You want</th><th>Use</th></tr></thead><tbody><tr><td>A change of opacity, transform, offset, solid background or fixed size to be seen happening</td><td><code>.animate(duration, easing)</code> on the widget</td></tr><tr><td>A widget to fade, slide or scale in when it appears and out when it goes</td><td><code>.transition(Transition::fade())</code>, <code>::slide(x, y)</code>, <code>::scale(from)</code></td></tr><tr><td>Screens to slide in the direction of the navigation</td><td><code>.transition(navigator.transition())</code> on each screen's root</td></tr><tr><td>A scroll that glides</td><td><code>ScrollTo::..().animated()</code></td></tr></tbody></table></div><p>Easing is <code>Linear</code>, <code>EaseIn</code>, <code>EaseOut</code> (the default) or <code>EaseInOut</code>.</p><p>Frames are produced only while something is on its way. When the last animation ends, the app is as idle as it was.</p><h2 id="reduce-motion"><a class="anchor" href="#reduce-motion">Reduce motion</a></h2><p>When the user has asked the system for less motion, every animation, transition and gliding scroll takes no time. The app does nothing for this. In a test, <code>Ui::set_reduce_motion(true)</code> does the same.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="text-and-pictures.html"><span>Previous</span>Text, fonts and pictures</a><a class="next" href="text-input.html"><span>Next</span>Text input</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/theming-and-motion.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#the-theme">The theme</a><a class="ti" href="#the-systems-bars">The system's bars</a><a class="ti" href="#motion">Motion</a><a class="ti" href="#reduce-motion">Reduce motion</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

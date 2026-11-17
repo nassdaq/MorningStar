@@ -1,0 +1,39 @@
+Generates an app's launcher icons, and prints its name and ids, from the
+[package.metadata.morningstar] table of its Cargo.toml:
+
+    [package.metadata.morningstar]
+    name = "CallReady"                # under the icon (default: the package name)
+    id = "dev.morningstar.callready"  # application id (default: dev.morningstar.<lib>)
+    icon = "assets/icon.png"          # square PNG, 512 or more, best 1024, full-bleed
+                                      # (default: this path if the file exists,
+                                      # otherwise the built-in Morningstar icon)
+    icon_foreground = "assets/icon-foreground.png"
+                                      # optional Android adaptive foreground: square,
+                                      # transparent, content in the middle 61%
+    icon_background = "#0E0E0E"       # optional colour behind the foreground
+                                      # (default: the icon's top-left pixel)
+
+Usage: morningstar-icon <package> [options]
+
+Options:
+  --android <dir>        write an Android resource directory: mipmap-*/ic_launcher
+                         (.png, _round.png, _foreground.png), the adaptive icon in
+                         mipmap-anydpi-v26 and its colour in values
+  --ios <dir>            write Assets.xcassets (AppIcon: one 1024x1024 opaque PNG)
+                         and Morningstar.xcconfig (bundle id and names) for the iOS
+                         host. Not verified with Xcode.
+  --preview <file.png>   write one picture of the icon in every form: square,
+                         round, and adaptive under a circle and a squircle, at
+                         192, 96 and 48 pixels
+  --print <what>         print one value and a newline: name, id (Android
+                         application id), bundle-id (iOS), lib (the Rust
+                         library's name), icon (the source picture, or
+                         `built-in`) or services (the opt-in platform
+                         services the app declares, separated by commas;
+                         an empty line for none)
+  --manifest-path <file> a Cargo.toml of the workspace, if not the current
+                         directory's
+  -h, --help             print this help
+
+Files whose content would not change are left untouched.
+Exit status: 0 done, 2 usage error or a problem with the manifest or icon.

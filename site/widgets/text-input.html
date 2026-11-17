@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TextInput · Morningstar</title>
+<meta name="description" content="An editable text. It shows the value it is given and delivers each new value as a message; it has no frame of its own.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl on" href="index.html" aria-current="true">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Widgets">
+<div class="nav-tabs" aria-label="Sections"><a class="tl" href="../index.html">Guide</a><a class="tl on" href="index.html" aria-current="true">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Overview</p><a class="ni" href="index.html">Widget gallery</a><a class="ni" href="modifiers.html">Common modifiers</a><p class="nh">Layout</p><a class="ni" href="container.html">Container</a><a class="ni" href="column-row.html">Column, Row and Wrap</a><a class="ni" href="stack.html">Stack</a><a class="ni" href="scroll-view.html">ScrollView</a><a class="ni" href="safe-area-spacer.html">SafeArea and Spacer</a><p class="nh">Content</p><a class="ni" href="text.html">Text</a><a class="ni on" href="text-input.html" aria-current="page">TextInput</a><a class="ni" href="button.html">Button and Pressable</a><a class="ni" href="divider.html">Divider</a><a class="ni" href="picture.html">Picture and Avatar</a><a class="ni" href="icon.html">Icon</a><a class="ni" href="live-video.html">LiveVideo</a><p class="nh">Paint</p><a class="ni" href="paint.html">Colours, gradients and shadows</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Widgets</span><span aria-hidden="true">/</span><span>Content</span><span aria-hidden="true">/</span><span class="here">TextInput</span></div>
+<article>
+<h1>TextInput</h1><p class="lead">An editable text. It shows the value it is given and delivers each new value as a message; it has no frame of its own.</p><div class="code"><pre><code><span class="k">fn</span> <span class="f">phone_field</span>(&amp;<span class="k">self</span>) -&gt; <span class="t">Element</span>&lt;<span class="t">Message</span>&gt; {
+    <span class="c">// The input is only its text. The box around it is the field:</span>
+    <span class="c">// its height, padding, border, and its look while focused.</span>
+    <span class="k">row!</span>[
+        <span class="t">TextInput</span>::<span class="f">new</span>(<span class="k">self</span>.phone.<span class="f">clone</span>())
+            .<span class="f">placeholder</span>(<span class="s">"0712 345 678"</span>)
+            .<span class="f">keyboard</span>(<span class="t">KeyboardType</span>::<span class="t">Phone</span>)
+            .<span class="f">action</span>(<span class="t">ImeAction</span>::<span class="t">Next</span>)
+            .<span class="f">max_length</span>(<span class="s">13</span>)
+            <span class="c">// The application owns the string: every change arrives</span>
+            <span class="c">// as a message, and `update` stores it.</span>
+            .<span class="f">on_input</span>(<span class="t">Message</span>::<span class="t">Phone</span>)
+            .<span class="f">semantic_label</span>(<span class="s">"Phone number"</span>)
+            <span class="c">// Focus stays with the field when the screen changes.</span>
+            .<span class="f">id</span>(<span class="s">"phone"</span>)
+            .<span class="f">fill_width</span>(),
+    ]
+    .<span class="f">height</span>(<span class="s">52.0</span>)
+    .<span class="f">cross_align</span>(<span class="t">CrossAlign</span>::<span class="t">Center</span>)
+    .<span class="f">padding_xy</span>(<span class="s">16.0</span>, <span class="s">0.0</span>)
+    .<span class="f">radius</span>(<span class="s">12.0</span>)
+    .<span class="f">border</span>(<span class="s">1.0</span>, <span class="t">ThemeColor</span>::<span class="t">Divider</span>)
+    .<span class="f">focused_border</span>(<span class="s">2.0</span>, <span class="t">ThemeColor</span>::<span class="t">Primary</span>)
+    <span class="c">// A tap anywhere in the box focuses the input inside it.</span>
+    .<span class="f">input_frame</span>()
+    .<span class="f">fill_width</span>()
+    .<span class="f">into</span>()
+}</code></pre></div><h2 id="value-and-messages"><a class="anchor" href="#value-and-messages">Value and messages</a></h2><div class="table"><table class="api"><thead><tr><th>Method</th><th>What it does</th></tr></thead><tbody><tr><td><code>new(value: impl Into&lt;String&gt;)</code></td><td>A single-line field showing <code>value</code>, in the theme's body text.</td></tr><tr><td><code>placeholder(text: impl Into&lt;Cow&lt;str&gt;&gt;)</code></td><td>Shown, in the <code>placeholder_color</code>, while the value is empty.</td></tr><tr><td><code>placeholder_color(color: impl Into&lt;ColorRef&gt;)</code></td><td>Colour of the placeholder (the theme's muted text by default).</td></tr><tr><td><code>on_input(message: impl Fn(String) -&gt; M + Send + Sync + 'static)</code></td><td>The message for a new value.</td></tr><tr><td><code>on_submit(message: M)</code></td><td>The message delivered when the keyboard's action key (Done, Go, Search, Send) is pressed.</td></tr></tbody></table></div><h2 id="the-keyboard"><a class="anchor" href="#the-keyboard">The keyboard</a></h2><div class="table"><table class="api"><thead><tr><th>Method</th><th>What it does</th></tr></thead><tbody><tr><td><code>secure(secure: bool)</code></td><td>A password: each character is shown as a bullet, and the keyboard neither learns nor suggests.</td></tr><tr><td><code>keyboard(keyboard: KeyboardType)</code></td><td>Which keyboard to show.</td></tr><tr><td><code>capitalization(capitalization: Capitalization)</code></td><td>What the keyboard capitalises by itself (nothing by default).</td></tr><tr><td><code>action(action: ImeAction)</code></td><td>The keyboard's action key</td></tr><tr><td><code>no_autocorrect()</code></td><td>Turns the keyboard's correction and suggestions off (they are on by default, and always off for a secure field): for names, codes and references.</td></tr></tbody></table></div><h2 id="what-the-value-may-hold"><a class="anchor" href="#what-the-value-may-hold">What the value may hold</a></h2><div class="table"><table class="api"><thead><tr><th>Method</th><th>What it does</th></tr></thead><tbody><tr><td><code>multiline()</code></td><td>Several lines: the text wraps at the field's width, the field grows downwards with it, and the Return key inserts a line break.</td></tr><tr><td><code>max_lines(lines: u32)</code></td><td>For a <code>multiline</code> field: it grows to at most this many lines and then scrolls inside itself.</td></tr><tr><td><code>max_length(characters: usize)</code></td><td>Most characters the value may hold.</td></tr><tr><td><code>digits_only()</code></td><td>Keeps only the digits 0 to 9 of whatever is typed or pasted by the keyboard.</td></tr><tr><td><code>auto_advance()</code></td><td>For one field of a row of code boxes, with <code>max_length</code>: when the field becomes full, focus moves to the next <code>TextInput</code>; backspace in an empty field moves to the previous one and deletes there; and a character typed into a full field replaces the one it holds.</td></tr></tbody></table></div><h2 id="style"><a class="anchor" href="#style">Style</a></h2><div class="table"><table class="api"><thead><tr><th>Method</th><th>What it does</th></tr></thead><tbody><tr><td><code>style(text: Text)</code></td><td>Takes size, weight, line height, colour, alignment, family and letter spacing from a <code>Text</code> (its content is ignored), so a field can share a design's text style helper</td></tr><tr><td><code>role(role: TextRole)</code></td><td>Uses a step of the theme's type scale; see <code>Text::role</code>.</td></tr><tr><td><code>size(dp: f32)</code></td><td>Font size in dp.</td></tr><tr><td><code>weight(weight: TextWeight)</code></td><td>Font weight.</td></tr><tr><td><code>color(color: impl Into&lt;ColorRef&gt;)</code></td><td>Colour of the value (the theme's text colour by default).</td></tr><tr><td><code>caret_color(color: impl Into&lt;ColorRef&gt;)</code></td><td>Colour of the caret (the theme's primary colour by default).</td></tr><tr><td><code>family(family: impl Into&lt;FontFamily&gt;)</code></td><td>The font family; see <code>Text::family</code>.</td></tr><tr><td><code>line_height(multiple: f32)</code></td><td>Line height as a multiple of the font size.</td></tr><tr><td><code>line_height_dp(dp: f32)</code></td><td>Line height in dp.</td></tr><tr><td><code>letter_spacing(dp: f32)</code></td><td>Extra space after every character, in dp.</td></tr><tr><td><code>align(align: TextAlign)</code></td><td>Where the text sits in the field.</td></tr></tbody></table></div><h2 id="the-box-around-it"><a class="anchor" href="#the-box-around-it">The box around it</a></h2><p>These are methods of the <a href="container.html"><code>Container</code></a> that holds the input:</p><div class="table"><table class="api"><thead><tr><th>Method</th><th>What it does</th></tr></thead><tbody><tr><td><code>input_frame()</code></td><td>Makes this box the frame of the <code>TextInput</code> inside it (the first one, if there are several): a tap anywhere on the box, its padding and icons included, focuses the input.</td></tr><tr><td><code>focused_border(width: f32, color: impl Into&lt;ColorRef&gt;)</code></td><td>The border while the <code>TextInput</code> inside has focus, replacing <code>border</code>.</td></tr><tr><td><code>focused_background(color: impl Into&lt;ColorRef&gt;)</code></td><td>The background while the <code>TextInput</code> inside has focus, replacing <code>background</code>.</td></tr></tbody></table></div><p>The guide page <a href="../guide/text-input.html">Text input</a> covers selection, the clipboard and what has been verified on a phone.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="text.html"><span>Previous</span>Text</a><a class="next" href="button.html"><span>Next</span>Button and Pressable</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/widgets/text-input.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#value-and-messages">Value and messages</a><a class="ti" href="#the-keyboard">The keyboard</a><a class="ti" href="#what-the-value-may-hold">What the value may hold</a><a class="ti" href="#style">Style</a><a class="ti" href="#the-box-around-it">The box around it</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

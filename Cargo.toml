@@ -17,6 +17,7 @@ members = [
     "examples/atlas",
     "examples/barua-talk",
     "examples/services-check",
+    "examples/docs-snippets",
     "tools/morningstar-devtools",
     "tools/morningstar-preview",
     "benchmarks/host",

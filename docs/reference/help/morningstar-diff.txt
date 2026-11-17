@@ -1,0 +1,28 @@
+Compares a candidate image (a screenshot) with a reference (a design).
+
+Usage: morningstar-diff <reference.png> <candidate.png> [options]
+
+The reference is resampled to the candidate's size; all coordinates in the
+report and in the options are candidate pixels, from the top-left corner.
+
+Options:
+  --out <file>             write a heat map PNG (candidate in grey, differences
+                           yellow to red, listed regions outlined and numbered)
+  --side-by-side <file>    write reference | candidate | heat map as one PNG
+  --threshold <error>      smallest colour error that counts as a difference;
+                           0 identical, 2 just visible, 100 black vs white
+                           [default: 2]
+  --aa-radius <pixels>     accept edges that moved by up to this many pixels or
+                           are anti-aliased differently; 0 is strict [default: 1]
+  --max-diff <percent>     pass when at most this percentage of the compared
+                           pixels differ [default: 0.1]
+  --ignore <x,y,w,h>       leave a rectangle out of the comparison; repeatable
+  --fit <width|stretch>    on an aspect-ratio mismatch: scale the reference to
+                           the candidate's width and align the tops, or distort
+                           it to cover the candidate [default: width]
+  --allow-aspect-mismatch  do not fail just because the aspect ratios differ
+  --max-regions <count>    how many regions to list [default: 10]
+  --json                   print the report as JSON instead of text
+  -h, --help               print this help
+
+Exit status: 0 the images match, 1 they differ, 2 usage or file error.

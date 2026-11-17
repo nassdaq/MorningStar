@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project layout · Morningstar</title>
+<meta name="description" content="Two layouts matter: an app&#x27;s own directory, and the repository around it.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.0.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni" href="installation.html">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni on" href="project-layout.html" aria-current="page">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni" href="text-and-pictures.html">Text, fonts and pictures</a><a class="ni" href="theming-and-motion.html">Themes and motion</a><a class="ni" href="text-input.html">Text input</a><a class="ni" href="navigation.html">Navigation and time</a><a class="ni" href="effects.html">Effects and services</a><a class="ni" href="live-rooms.html">Live rooms</a><a class="ni" href="accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="testing.html">Testing</a><a class="ni" href="android.html">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>Get started</span><span aria-hidden="true">/</span><span class="here">Project layout</span></div>
+<article>
+<h1>Project layout</h1><p class="lead">Two layouts matter: an app's own directory, and the repository around it.</p><h2 id="an-app"><a class="anchor" href="#an-app">An app</a></h2><p>This is what <code>morningstar-new</code> writes. The example apps have the same shape.</p><div class="table"><table><thead><tr><th>Path</th><th>What it is</th></tr></thead><tbody><tr><td><code>Cargo.toml</code></td><td>The crate, and under <code>[package.metadata.morningstar]</code> the app's name, id, icon and opt-in services. They are declared here and nowhere else</td></tr><tr><td><code>src/lib.rs</code></td><td>The application: state, messages, <code>view</code>, <code>update</code>, <code>effects</code>, and the <code>morningstar::app!</code> line</td></tr><tr><td><code>tests/e2e.rs</code></td><td>Journeys through the app: taps, typing and answers, with no device</td></tr><tr><td><code>tests/accessibility.rs</code></td><td>Every screen checked for missing labels, small touch targets and low contrast</td></tr><tr><td><code>tests/screens.rs</code></td><td>A picture of each screen compared with its reference in <code>tests/references/</code></td></tr><tr><td><code>tests/support/mod.rs</code></td><td>The small "device" the tests share: a frame, a finger, a keyboard</td></tr><tr><td><code>examples/screenshot.rs</code></td><td>Renders every screen to a PNG on the development machine</td></tr><tr><td><code>assets/</code></td><td>Fonts, the launcher icon (<code>icon.png</code>), images and SVG files</td></tr><tr><td><code>design/</code></td><td>The design's reference pictures, if the app follows one</td></tr><tr><td><code>SCREENS.md</code></td><td>What every screen and control does, and what is not done</td></tr><tr><td><code>server/</code></td><td>Only with <code>--server</code>: a Node server with its contract in <code>API.md</code></td></tr></tbody></table></div><p>The identity table looks like this:</p><div class="code"><pre><code><span class="t">[package.metadata.morningstar]</span>
+<span class="f">name</span> = <span class="s">&quot;Barua Talk&quot;</span>                 <span class="c"> # under the launcher icon</span>
+<span class="f">id</span> = <span class="s">&quot;dev.morningstar.barua_talk&quot;</span>   <span class="c"> # the application id</span>
+<span class="f">icon</span> = <span class="s">&quot;assets/icon.png&quot;</span>            <span class="c"> # square PNG, 1024 is best</span>
+<span class="f">services</span> = [<span class="s">&quot;live&quot;</span>, <span class="s">&quot;live-video&quot;</span>]   <span class="c"> # opt-in platform services</span></code></pre></div><p><code>services</code> is described in <a href="../reference/services.html">Opt-in services</a>, the icon in <a href="../reference/tools.html#morningstar-icon">Tools</a>.</p><h2 id="the-repository"><a class="anchor" href="#the-repository">The repository</a></h2><div class="table"><table><thead><tr><th>Path</th><th>Owns</th></tr></thead><tbody><tr><td><code>crates/morningstar</code></td><td>The public API. The only crate an app depends on</td></tr><tr><td><code>crates/morningstar-ui</code></td><td>Widgets, state and messages, themes, effects. Apps use it as <code>morningstar::ui</code></td></tr><tr><td><code>crates/morningstar-layout</code></td><td>The layout engine</td></tr><tr><td><code>crates/morningstar-text</code></td><td>Fonts, shaping, the glyph atlas, vector icons, SVG</td></tr><tr><td><code>crates/morningstar-gpu</code></td><td>The renderer; the only crate that uses <code>wgpu</code></td></tr><tr><td><code>crates/morningstar-runtime</code></td><td>The engine a host drives: lifecycle in, frames out</td></tr><tr><td><code>crates/morningstar-core</code></td><td>Shared types with no dependencies</td></tr><tr><td><code>crates/morningstar-android</code>, <code>crates/morningstar-ios</code></td><td>The Rust half of each host</td></tr><tr><td><code>templates/android</code>, <code>templates/ios</code></td><td>The native host projects. No application logic</td></tr><tr><td><code>tools/</code></td><td>The generator, the preview, the icon and diff tools, the build scripts</td></tr><tr><td><code>examples/</code></td><td>The framework's own demonstration apps</td></tr><tr><td><code>apps/</code></td><td>Where <code>morningstar-new</code> puts a new app</td></tr><tr><td><code>docs/</code></td><td>These pages as Markdown, and the decision records</td></tr><tr><td><code>site/</code></td><td>These pages as a website, built from <code>docs/</code></td></tr><tr><td><code>benchmarks/</code></td><td>The benchmark method and its reports</td></tr></tbody></table></div><p><a href="../reference/architecture.html">Architecture</a> explains how the crates depend on each other.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="../getting-started.html"><span>Previous</span>Your first app</a><a class="next" href="application-model.html"><span>Next</span>The application model</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/project-layout.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#an-app">An app</a><a class="ti" href="#the-repository">The repository</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>
