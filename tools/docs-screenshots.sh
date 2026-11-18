@@ -95,6 +95,43 @@ MANIFEST
     rm -rf "$ws"
 }
 
+# Every designed screen compared with its design (docs/guide/fidelity.md):
+# the share of pixels that differ visibly, per screen, into
+# docs/reference/fidelity.txt, and for four screens the design, the render
+# and the heat map side by side, as each app's `--diff` writes them.
+app_fidelity() {
+    local work=$WORK/fidelity table=docs/reference/fidelity.txt
+    rm -rf "$work"; mkdir -p "$work"
+    for app in fundidesk callready atlas barua-talk; do
+        cargo run -q -p "$app" --example screenshot -- "$work/$app" --diff > "$work/$app.log"
+    done
+    python3 - "$work" > "$table" <<'PY'
+import re, sys
+work = sys.argv[1]
+print("%-11s %-22s %9s %11s" % ("App", "Screen", "Differ", "Mean error"))
+rows = []
+for app in ["fundidesk", "callready", "atlas", "barua-talk"]:
+    lines = open("%s/%s.log" % (work, app)).read().splitlines()
+    name = None
+    for i, line in enumerate(lines):
+        if line == "morningstar-diff report v1":
+            name = lines[i - 1].split()[0].split("/")[-1].removesuffix(".png")
+        m = re.match(r"diff_percent: ([\d.]+)$", line)
+        if m and name:
+            mean = next(l for l in lines[i:i + 3] if l.startswith("mean_error")).split()[1]
+            rows.append(float(m.group(1)))
+            print("%-11s %-22s %8.3f%% %11s" % (app, name, float(m.group(1)), mean))
+            name = None
+rows.sort()
+print()
+print("%d screens. Median %.3f%% of pixels differ, worst %.3f%%." % (len(rows), rows[len(rows) // 2], rows[-1]))
+PY
+    for pair in fundidesk/07-dashboard callready/03-live-call atlas/06-live-voice barua-talk/02-room; do
+        sips -s format jpeg -s formatOptions 74 --resampleWidth 1200 "$work/$pair.sbs.png" \
+            --out "$OUT/fidelity-${pair/\//-}.jpg" >/dev/null
+    done
+}
+
 # The help of every tool, as the tool prints it, for docs/reference/tools.md.
 app_tools() {
     local dir=docs/reference/help
@@ -108,7 +145,7 @@ app_tools() {
     cargo run -q -p morningstar-cli -- build android --help > "$dir/morningstar-cli-build-android.txt"
 }
 
-ALL="showcase fundidesk callready atlas barua-talk services-check hello-gpu starter tools"
+ALL="showcase fundidesk callready atlas barua-talk services-check hello-gpu starter fidelity tools"
 for what in ${*:-$ALL}; do
     declare -F "app_$what" >/dev/null || { echo "docs-screenshots: unknown: $what (one of: $ALL)" >&2; exit 2; }
     echo "docs-screenshots: $what"

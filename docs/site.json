@@ -26,6 +26,7 @@
           "docs/guide/accessibility.md"
         ]},
         {"title": "From a design", "pages": [
+          "docs/guide/fidelity.md",
           {"src": "docs/building-screens.md", "title": "Building screens"},
           {"src": "docs/design-to-code.md", "title": "Design to code"}
         ]},

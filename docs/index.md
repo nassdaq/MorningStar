@@ -21,7 +21,7 @@ New to the framework? These four pages take you from an empty folder to an app r
 
 ## What apps built with it look like
 
-Every picture in these pages is one frame through the real renderer, produced with no phone by the app's own screenshot program. Four of the example apps follow a design, and each is held to its design's pictures by tests.
+Every picture in these pages is one frame through the real renderer, produced with no phone by the app's own screenshot program. Four of the example apps follow a design made by others, and each is held to its design's pictures by tests: on the median screen 0.087% of pixels differ visibly from the design, and on the worst 0.690%. [Designs, checked](guide/fidelity.md) shows every design, render and difference side by side.
 
 {{shots}}
 ![FundiDesk: the dashboard](../site/shots/fundidesk-07-dashboard.jpg)

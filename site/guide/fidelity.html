@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Designs, checked · Morningstar</title>
+<meta name="description" content="Morningstar draws every pixel itself, and every designed screen is tested against its design&#x27;s picture. When a design needs something the framework can&#x27;t draw yet, you add it to the framework: the renderer is small, every decision in it is recorded in an architecture decision, and its pixel tests te">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../assets/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the content</a>
+<header class="top">
+<button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../index.html"><img src="../assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
+<span class="version">v0.1.1</span>
+<div class="srch" role="search">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
+<kbd>Ctrl K</kbd>
+<div class="results" id="results" role="listbox" aria-label="Search results" hidden></div>
+</div>
+<nav class="tls" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></nav>
+<a class="cta" href="../getting-started.html">Get started</a>
+</header>
+<div class="shell">
+<nav class="nav" id="nav" aria-label="Guide">
+<div class="nav-tabs" aria-label="Sections"><a class="tl on" href="../index.html" aria-current="true">Guide</a><a class="tl" href="../widgets/index.html">Widgets</a><a class="tl" href="../reference/application.html">Reference</a><a class="tl" href="../examples/index.html">Examples</a></div>
+<p class="nh">Introduction</p><a class="ni" href="../index.html">Overview</a><a class="ni" href="what-it-is.html">What Morningstar is, and is not</a><a class="ni" href="rendering.html">How rendering works</a><p class="nh">Get started</p><a class="ni" href="installation.html">Installation</a><a class="ni" href="../getting-started.html">Your first app</a><a class="ni" href="project-layout.html">Project layout</a><p class="nh">Core concepts</p><a class="ni" href="application-model.html">The application model</a><a class="ni" href="layout.html">Layout</a><a class="ni" href="text-and-pictures.html">Text, fonts and pictures</a><a class="ni" href="theming-and-motion.html">Themes and motion</a><a class="ni" href="text-input.html">Text input</a><a class="ni" href="navigation.html">Navigation and time</a><a class="ni" href="effects.html">Effects and services</a><a class="ni" href="live-rooms.html">Live rooms</a><a class="ni" href="accessibility.html">Accessibility</a><p class="nh">From a design</p><a class="ni on" href="fidelity.html" aria-current="page">Designs, checked</a><a class="ni" href="../building-screens.html">Building screens</a><a class="ni" href="../design-to-code.html">Design to code</a><p class="nh">Ship</p><a class="ni" href="testing.html">Testing</a><a class="ni" href="android.html">Build for Android</a><a class="ni" href="ios.html">iOS</a>
+</nav>
+<main id="content">
+<div class="crumbs"><span>Guide</span><span aria-hidden="true">/</span><span>From a design</span><span aria-hidden="true">/</span><span class="here">Designs, checked</span></div>
+<article>
+<h1>Designs, checked</h1><p class="lead">Morningstar draws every pixel itself, and every designed screen is tested against its design's picture. When a design needs something the framework can't draw yet, you add it to the framework: the renderer is small, every decision in it is recorded in an <a href="../architecture/index.html">architecture decision</a>, and its pixel tests tell you, or your AI agent, when it's right.</p><p>This page shows the evidence: four designs made by others, 32 screens, each compared with the design.</p><h2 id="design-render-difference"><a class="anchor" href="#design-render-difference">Design, render, difference</a></h2><p>Each picture shows, left to right, the design as Chrome draws its HTML, the app's frame from Morningstar's renderer, then a heat map of where the two differ, with the worst regions boxed. Each app's screenshot program (<code>--diff</code>) writes these on a Mac, with no phone.</p><p><img src="../shots/fidelity-fundidesk-07-dashboard.jpg" alt="FundiDesk, the dashboard: design, render, difference" loading="lazy"></p><p><strong>FundiDesk</strong>, a phone-repair shop, twelve screens. The dashboard: summary cards, two lists and a tab bar. 0.361% of its pixels differ, almost all of it in text, which Morningstar rasterises a little differently from Chrome. The light-on-green figures show it most.</p><p><img src="../shots/fidelity-callready-03-live-call.jpg" alt="CallReady, the live call: design, render, difference" loading="lazy"></p><p><strong>CallReady</strong>, call-centre practice, five illustrated screens with turned elements, multi-colour vector pictures and text effects. The live call: 0.006%.</p><p><img src="../shots/fidelity-atlas-06-live-voice.jpg" alt="Atlas, the voice screen: design, render, difference" loading="lazy"></p><p><strong>Atlas</strong>, an AI assistant, ten screens with radial gradients, blur and inner shadows. The voice screen: 0.051%.</p><p><img src="../shots/fidelity-barua-talk-02-room.jpg" alt="Barua Talk, a room&#x27;s chat: design, render, difference" loading="lazy"></p><p><strong>Barua Talk</strong>, rooms, chat and calls, five screens with photographs beside the drawing. A room's chat is the worst of all 32 screens, at 0.690%. Most of that is the photograph of the shop, which Morningstar scales a little differently from Chrome.</p><h2 id="every-screen"><a class="anchor" href="#every-screen">Every screen</a></h2><div class="code" data-lang=""><pre><code>App         Screen                    Differ  Mean error
+fundidesk   01-splash                 0.225%       0.027
+fundidesk   02-onboarding             0.211%       0.041
+fundidesk   03-login                  0.158%       0.023
+fundidesk   04-create-account         0.088%       0.020
+fundidesk   05-verification           0.087%       0.015
+fundidesk   06-shop-setup             0.136%       0.024
+fundidesk   07-dashboard              0.361%       0.053
+fundidesk   08-repairs-list           0.178%       0.040
+fundidesk   09-new-repair             0.344%       0.046
+fundidesk   10-repair-details         0.272%       0.045
+fundidesk   11-record-payment         0.246%       0.036
+fundidesk   12-tracking               0.259%       0.052
+callready   01-welcome                0.009%       0.015
+callready   02-home                   0.013%       0.042
+callready   03-live-call              0.006%       0.015
+callready   04-call-report            0.037%       0.030
+callready   05-premium                0.008%       0.017
+atlas       01-onboarding             0.048%       0.120
+atlas       02-sign-in                0.131%       0.030
+atlas       03-home                   0.051%       0.097
+atlas       04-chat                   0.009%       0.039
+atlas       05-model-picker           0.017%       0.101
+atlas       06-live-voice             0.051%       0.125
+atlas       07-explore                0.073%       0.041
+atlas       08-plans                  0.160%       0.046
+atlas       09-home-simplified        0.051%       0.097
+atlas       10-chat-simplified        0.009%       0.039
+barua-talk  01-home                   0.085%       0.050
+barua-talk  02-room                   0.690%       0.099
+barua-talk  03-incoming               0.015%       0.164
+barua-talk  04-video-call             0.286%       0.303
+barua-talk  05-phone-call             0.050%       0.028
+
+32 screens. Median 0.087% of pixels differ, worst 0.690%.</code></pre></div><p><strong>Differ</strong> is the share of pixels whose colour differs visibly: by more than 2 on a scale where 0 is identical and 100 is black against white, after allowing one pixel of anti-aliasing at edges. <strong>Mean error</strong> is the average difference over all pixels on that scale.</p><p>The limits in each app's <code>tests/fidelity.rs</code> are these measured numbers, not targets someone chose. A change that makes any screen look less like its design fails the tests. Each app's <code>SCREENS.md</code> says what the remaining difference consists of.</p><h2 id="do-it-yourself"><a class="anchor" href="#do-it-yourself">Do it yourself</a></h2><p>The same loop works for your own design: render, compare, fix the worst region, render again. <a href="../design-to-code.html">Design to code</a> walks through it, and <a href="../building-screens.html">Building screens</a> covers writing the screen.</p><p>To produce this page again: <code>tools/docs-screenshots.sh fidelity</code>, then <code>python3 tools/build-docs.py</code>.</p><p>What this does not show: a frame on a Mac is not a phone. How the screens behave on a device is tracked in <a href="../reference/platform-status.html">Platform status</a>.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a href="accessibility.html"><span>Previous</span>Accessibility</a><a class="next" href="../building-screens.html"><span>Next</span>Building screens</a></nav>
+<footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/guide/fidelity.md</code>.</footer>
+</main>
+<aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><a class="ti" href="#design-render-difference">Design, render, difference</a><a class="ti" href="#every-screen">Every screen</a><a class="ti" href="#do-it-yourself">Do it yourself</a></aside>
+</div>
+<script>window.MS_ROOT = "..";</script>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>
