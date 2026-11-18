@@ -25,7 +25,7 @@ The generated app depends on one release of the framework:
 
 ```toml
 [dependencies]
-morningstar = { package = "morningstar-framework", version = "=0.1.0" }
+morningstar = { package = "morningstar-framework", version = "=0.1.1" }
 ```
 
 The framework's crates, the `morningstar` command and the Android host it
@@ -45,7 +45,8 @@ version and the command's version the same.
 
 ## Status
 
-0.1.0 is the first release. On Android it runs on real phones, and the live
+0.1.1 is the current release (0.1.0, the first, differs only in its
+crates.io metadata). On Android it runs on real phones, and the live
 room's video, screen sharing and background calls have not yet been
 verified on one. iOS has never been built.
 

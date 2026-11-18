@@ -23,5 +23,5 @@ Options:
   -h, --help             print this help
 
 The app depends on this release of the framework (morningstar-framework
-=0.1.0), so that its library and the Android host this command builds it
+=0.1.1), so that its library and the Android host this command builds it
 into are of one release. Nothing is overwritten.

@@ -138,6 +138,4 @@ morningstar preview                                              # step 3, on a 
 morningstar build android --abis arm64-v8a --install             # step 6
 ```
 
-`morningstar new` takes the same options as `morningstar-new`, except `--dir`, which here names the parent directory (default: the current one). The app depends on one release, `morningstar = { package = "morningstar-framework", version = "=0.1.0" }`. The crate is `morningstar-framework` on crates.io because `morningstar` belongs to another project there, but its library is still `morningstar`. The command carries the Android host of its own release and refuses to build an app on another release. Keep the two the same.
-
-The release has not been published yet. Until it is, this section describes what the command will do, not what `cargo install` can fetch today.
+`morningstar new` takes the same options as `morningstar-new`, except `--dir`, which here names the parent directory (default: the current one). The app depends on one release, `morningstar = { package = "morningstar-framework", version = "=0.1.1" }`. The crate is `morningstar-framework` on crates.io because `morningstar` belongs to another project there, but its library is still `morningstar`. The command carries the Android host of its own release and refuses to build an app on another release. Keep the two the same.

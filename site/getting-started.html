@@ -16,7 +16,7 @@
 <header class="top">
 <button class="menu" type="button" aria-label="Pages of this section" aria-expanded="false" aria-controls="nav"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
 <a class="brand" href="index.html"><img src="assets/logo-tile.svg" alt="" width="36" height="36"><span>Morningstar</span></a>
-<span class="version">v0.1.0</span>
+<span class="version">v0.1.1</span>
 <div class="srch" role="search">
 <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
 <input type="search" id="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off" spellcheck="false" aria-controls="results">
@@ -44,7 +44,7 @@
 <span class="f">cargo</span> test                                                      <span class="c"> # step 2</span>
 <span class="f">cargo</span> run --example screenshot -- out/                          <span class="c"> # step 3</span>
 <span class="f">morningstar</span> preview                                             <span class="c"> # step 3, on a Mac</span>
-<span class="f">morningstar</span> build android --abis arm64-v8a --install            <span class="c"> # step 6</span></code></pre></div><p><code>morningstar new</code> takes the same options as <code>morningstar-new</code>, except <code>--dir</code>, which here names the parent directory (default: the current one). The app depends on one release, <code>morningstar = { package = "morningstar-framework", version = "=0.1.0" }</code>. The crate is <code>morningstar-framework</code> on crates.io because <code>morningstar</code> belongs to another project there, but its library is still <code>morningstar</code>. The command carries the Android host of its own release and refuses to build an app on another release. Keep the two the same.</p><p>The release has not been published yet. Until it is, this section describes what the command will do, not what <code>cargo install</code> can fetch today.</p>
+<span class="f">morningstar</span> build android --abis arm64-v8a --install            <span class="c"> # step 6</span></code></pre></div><p><code>morningstar new</code> takes the same options as <code>morningstar-new</code>, except <code>--dir</code>, which here names the parent directory (default: the current one). The app depends on one release, <code>morningstar = { package = "morningstar-framework", version = "=0.1.1" }</code>. The crate is <code>morningstar-framework</code> on crates.io because <code>morningstar</code> belongs to another project there, but its library is still <code>morningstar</code>. The command carries the Android host of its own release and refuses to build an app on another release. Keep the two the same.</p>
 </article>
 <nav class="pager" aria-label="Previous and next page"><a href="guide/installation.html"><span>Previous</span>Installation</a><a class="next" href="guide/project-layout.html"><span>Next</span>Project layout</a></nav>
 <footer class="foot">Built from the repository's own Markdown by <code>tools/build-docs.py</code>. Source of this page: <code>docs/getting-started.md</code>.</footer>

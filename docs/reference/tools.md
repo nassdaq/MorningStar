@@ -19,7 +19,7 @@ Everything is run from the root of the repository, except the `morningstar` comm
 
 ## The morningstar command
 
-For an app outside this repository: `cargo install morningstar-cli` (not yet published), then run it in the app's directory. It runs the same code as the tools below, and carries the Android host of its own release. [ADR 0045](../architecture/0045-crates-io-release-and-the-morningstar-command.md).
+For an app outside this repository: `cargo install morningstar-cli`, then run it in the app's directory. It runs the same code as the tools below, and carries the Android host of its own release. [ADR 0045](../architecture/0045-crates-io-release-and-the-morningstar-command.md).
 
 {{include docs/reference/help/morningstar.txt}}
 
